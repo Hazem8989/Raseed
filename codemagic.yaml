@@ -13,6 +13,7 @@ workflows:
       - name: Build APK
         script: |
           cd source/RaseedManagerAndroid
+          sed -i 's/JavaVersion.VERSION_1_8/JavaVersion.VERSION_17/g' app/build.gradle.kts
           echo "sdk.dir=$ANDROID_SDK_ROOT" > local.properties
           curl -L https://services.gradle.org/distributions/gradle-8.9-bin.zip -o /tmp/gradle.zip
           unzip -q /tmp/gradle.zip -d /tmp
