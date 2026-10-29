@@ -13,6 +13,21 @@ workflows:
       - name: Configure Android and app icon
         script: |
           cd source/RaseedManagerAndroid
+          
+          cat >> app/build.gradle.kts <<'GRADLE'
+
+          tasks.withType<org.gradle.api.tasks.compile.JavaCompile>().configureEach {
+              sourceCompatibility = "17"
+              targetCompatibility = "17"
+          }
+
+          tasks.withType<org.jetbrains.kotlin.gradle.tasks.KotlinCompile>().configureEach {
+              kotlinOptions {
+                  jvmTarget = "17"
+              }
+          }
+          GRADLE
+
 
           python3 - <<'PY'
           from pathlib import Path
