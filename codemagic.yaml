@@ -11,12 +11,14 @@ workflows:
           unzip -q RaseedManagerAndroid.zip -d source
 
       - name: Build APK
+        
+      - name: Build APK
         script: |
           cd source/RaseedManagerAndroid
-          sed -i 's/JavaVersion.VERSION_1_8/JavaVersion.VERSION_17/g' app/build.gradle.kts
+          sed -i 's/VERSION_1_8/VERSION_17/g; s/"1.8"/"17"/g' app/build.gradle.kts
+          echo "----- Java and Kotlin settings -----"
+          grep -n -E 'compileOptions|sourceCompatibility|targetCompatibility|jvmTarget|VERSION_1_8|VERSION_17' app/build.gradle.kts
           echo "sdk.dir=$ANDROID_SDK_ROOT" > local.properties
-          curl -L https://services.gradle.org/distributions/gradle-8.9-bin.zip -o /tmp/gradle.zip
-          unzip -q /tmp/gradle.zip -d /tmp
           /tmp/gradle-8.9/bin/gradle assembleDebug
 
     artifacts:
