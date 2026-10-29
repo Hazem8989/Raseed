@@ -11,8 +11,6 @@ workflows:
           unzip -q RaseedManagerAndroid.zip -d source
 
       - name: Build APK
-        
-      - name: Build APK
         script: |
           cd source/RaseedManagerAndroid
           sed -i 's/VERSION_1_8/VERSION_17/g; s/"1.8"/"17"/g' app/build.gradle.kts
