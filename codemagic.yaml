@@ -13,10 +13,22 @@ workflows:
       - name: Build APK
         script: |
           cd source/RaseedManagerAndroid
-          sed -i 's/VERSION_1_8/VERSION_17/g; s/"1.8"/"17"/g' app/build.gradle.kts
-          echo "----- Java and Kotlin settings -----"
-          grep -n -E 'compileOptions|sourceCompatibility|targetCompatibility|jvmTarget|VERSION_1_8|VERSION_17' app/build.gradle.kts
+
+          echo "Fixing Java and Kotlin compatibility..."
+          perl -0pi -e 's/JavaVersion\.VERSION_1_8/JavaVersion.VERSION_17/g' app/build.gradle.kts
+
+          echo "Checking Java configuration..."
+          grep -n -E 'sourceCompatibility|targetCompatibility|jvmTarget' app/build.gradle.kts || true
+
           echo "sdk.dir=$ANDROID_SDK_ROOT" > local.properties
+
+          echo "Downloading Gradle..."
+          curl -fL https://services.gradle.org/distributions/gradle-8.9-bin.zip -o /tmp/gradle-8.9-bin.zip
+
+          echo "Extracting Gradle..."
+          unzip -q /tmp/gradle-8.9-bin.zip -d /tmp
+
+          echo "Building APK..."
           /tmp/gradle-8.9/bin/gradle assembleDebug
 
     artifacts:
