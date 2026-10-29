@@ -14,21 +14,25 @@ workflows:
         script: |
           cd source/RaseedManagerAndroid
 
-          echo "Fixing Java and Kotlin compatibility..."
-          perl -0pi -e 's/JavaVersion\.VERSION_1_8/JavaVersion.VERSION_17/g' app/build.gradle.kts
-
-          echo "Checking Java configuration..."
-          grep -n -E 'sourceCompatibility|targetCompatibility|jvmTarget' app/build.gradle.kts || true
-
           echo "sdk.dir=$ANDROID_SDK_ROOT" > local.properties
 
-          echo "Downloading Gradle..."
-          curl -fL https://services.gradle.org/distributions/gradle-8.9-bin.zip -o /tmp/gradle-8.9-bin.zip
+          echo "Setting Java compatibility to 17..."
 
-          echo "Extracting Gradle..."
-          unzip -q /tmp/gradle-8.9-bin.zip -d /tmp
+          cat >> app/build.gradle.kts <<'GRADLE'
 
-          echo "Building APK..."
+          android {
+              compileOptions {
+                  sourceCompatibility = JavaVersion.VERSION_17
+                  targetCompatibility = JavaVersion.VERSION_17
+              }
+          }
+          GRADLE
+
+          echo "Checking Gradle installation..."
+          curl -fL https://services.gradle.org/distributions/gradle-8.9-bin.zip -o /tmp/gradle.zip
+          unzip -q /tmp/gradle.zip -d /tmp
+
+          echo "Starting APK build..."
           /tmp/gradle-8.9/bin/gradle assembleDebug
 
     artifacts:
