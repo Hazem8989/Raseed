@@ -9,8 +9,9 @@ workflows:
       - name: Extract project
         script: |
           unzip -q RaseedManagerAndroid.zip -d source
-          - name: Copy updated Kotlin file
-            script: |
+
+      - name: Copy updated Kotlin file
+        script: |
           mkdir -p source/RaseedManagerAndroid/app/src/main/java/com/hazem/raseedmanager
           cp MainActivity.kt source/RaseedManagerAndroid/app/src/main/java/com/hazem/raseedmanager/MainActivity.kt
           test -s source/RaseedManagerAndroid/app/src/main/java/com/hazem/raseedmanager/MainActivity.kt
