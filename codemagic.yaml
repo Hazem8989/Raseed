@@ -100,9 +100,20 @@ workflows:
 
       - name: Build APK
         script: |
-          curl -fL https://services.gradle.org/distributions/gradle-8.9-bin.zip -o /tmp/gradle.zip
-          unzip -q /tmp/gradle.zip -d /tmp
           cd source/RaseedManagerAndroid
+          echo "sdk.dir=$ANDROID_SDK_ROOT" > local.properties
+
+          cat >> app/build.gradle.kts <<'GRADLE'
+
+          tasks.withType<org.jetbrains.kotlin.gradle.tasks.KotlinCompile>().configureEach {
+              kotlinOptions {
+                  jvmTarget = "1.8"
+              }
+          }
+          GRADLE
+
+          curl -fL https://services.gradle.org/distributions/gradle-8.9-bin.zip -o /tmp/gradle.zip
+          unzip -qo /tmp/gradle.zip -d /tmp
           /tmp/gradle-8.9/bin/gradle assembleDebug
 
     artifacts:
