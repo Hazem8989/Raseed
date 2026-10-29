@@ -10,29 +10,84 @@ workflows:
         script: |
           unzip -q RaseedManagerAndroid.zip -d source
 
-      - name: Build APK
+      - name: Configure Android and app icon
         script: |
           cd source/RaseedManagerAndroid
 
+          python3 - <<'PY'
+          from pathlib import Path
+          import re
+
+          p = Path("app/build.gradle.kts")
+          s = p.read_text()
+
+          s, n1 = re.subn(r'targetSdk\s*=\s*\d+', 'targetSdk = 35', s)
+          s, n2 = re.subn(r'minSdk\s*=\s*\d+', 'minSdk = 29', s)
+
+          if n1 != 1 or n2 != 1:
+              raise SystemExit("Could not update SDK settings")
+
+          if "sourceCompatibility = JavaVersion.VERSION_17" not in s:
+              s = re.sub(
+                  r'compileOptions\s*\{.*?\}',
+                  'compileOptions {\n'
+                  '        sourceCompatibility = JavaVersion.VERSION_17\n'
+                  '        targetCompatibility = JavaVersion.VERSION_17\n'
+                  '    }',
+                  s,
+                  count=1,
+                  flags=re.S
+              )
+
+          p.write_text(s)
+          print("Android SDK and Java settings updated")
+          PY
+
+          if [ ! -f app_icon.png ]; then
+            cp ../../app_icon.png app_icon.png
+          fi
+
+          mkdir -p app/src/main/res/mipmap-mdpi
+          mkdir -p app/src/main/res/mipmap-hdpi
+          mkdir -p app/src/main/res/mipmap-xhdpi
+          mkdir -p app/src/main/res/mipmap-xxhdpi
+          mkdir -p app/src/main/res/mipmap-xxxhdpi
+
+          sips -z 48 48 ../../app_icon.png --out app/src/main/res/mipmap-mdpi/ic_launcher.png
+          sips -z 72 72 ../../app_icon.png --out app/src/main/res/mipmap-hdpi/ic_launcher.png
+          sips -z 96 96 ../../app_icon.png --out app/src/main/res/mipmap-xhdpi/ic_launcher.png
+          sips -z 144 144 ../../app_icon.png --out app/src/main/res/mipmap-xxhdpi/ic_launcher.png
+          sips -z 192 192 ../../app_icon.png --out app/src/main/res/mipmap-xxxhdpi/ic_launcher.png
+
+          python3 - <<'PY'
+          from pathlib import Path
+          import re
+
+          p = Path("app/src/main/AndroidManifest.xml")
+          s = p.read_text()
+          s, n = re.subn(
+              r'android:icon="@[^"]+"',
+              'android:icon="@mipmap/ic_launcher"',
+              s,
+              count=1
+          )
+          if n == 0:
+              s = s.replace(
+                  '<application',
+                  '<application android:icon="@mipmap/ic_launcher"',
+                  1
+              )
+          p.write_text(s)
+          print("Launcher icon configured")
+          PY
+
           echo "sdk.dir=$ANDROID_SDK_ROOT" > local.properties
 
-          echo "Setting Java compatibility to 17..."
-
-          cat >> app/build.gradle.kts <<'GRADLE'
-
-          android {
-              compileOptions {
-                  sourceCompatibility = JavaVersion.VERSION_17
-                  targetCompatibility = JavaVersion.VERSION_17
-              }
-          }
-          GRADLE
-
-          echo "Checking Gradle installation..."
+      - name: Build APK
+        script: |
           curl -fL https://services.gradle.org/distributions/gradle-8.9-bin.zip -o /tmp/gradle.zip
           unzip -q /tmp/gradle.zip -d /tmp
-
-          echo "Starting APK build..."
+          cd source/RaseedManagerAndroid
           /tmp/gradle-8.9/bin/gradle assembleDebug
 
     artifacts:
