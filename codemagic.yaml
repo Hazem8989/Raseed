@@ -35,6 +35,7 @@ workflows:
           GRADLE
 
 
+
           python3 - <<'PY'
           from pathlib import Path
           import re
@@ -48,21 +49,47 @@ workflows:
           if n1 != 1 or n2 != 1:
               raise SystemExit("Could not update SDK settings")
 
-          if "sourceCompatibility = JavaVersion.VERSION_17" not in s:
+          compile_block = """compileOptions {
+                  sourceCompatibility = JavaVersion.VERSION_17
+                  targetCompatibility = JavaVersion.VERSION_17
+              }"""
+
+          if re.search(r'compileOptions\s*\{.*?\}', s, re.S):
               s = re.sub(
                   r'compileOptions\s*\{.*?\}',
-                  'compileOptions {\n'
-                  '        sourceCompatibility = JavaVersion.VERSION_17\n'
-                  '        targetCompatibility = JavaVersion.VERSION_17\n'
-                  '    }',
+                  compile_block,
                   s,
                   count=1,
                   flags=re.S
               )
+          else:
+              s = re.sub(
+                  r'android\s*\{',
+                  'android {\n    ' + compile_block,
+                  s,
+                  count=1
+              )
+
+          s = re.sub(
+              r'jvmTarget\s*=\s*["\'][^"\']+["\']',
+              'jvmTarget = "17"',
+              s
+          )
+
+          if 'jvmTarget = "17"' not in s:
+              s += '''
+          
+          tasks.withType<org.jetbrains.kotlin.gradle.tasks.KotlinCompile>().configureEach {
+              kotlinOptions {
+                  jvmTarget = "17"
+              }
+          }
+          '''
 
           p.write_text(s)
-          print("Android SDK and Java settings updated")
+          print("Android SDK and JVM targets configured")
           PY
+
 
           if [ ! -f app_icon.png ]; then
             cp ../../app_icon.png app_icon.png
