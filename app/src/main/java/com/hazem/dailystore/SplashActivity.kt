@@ -24,9 +24,10 @@ class SplashActivity : Activity() {
 
         val splashImage = ImageView(this).apply {
             setImageResource(R.drawable.the_daily_shop_splash)
-            // Fill the screen while preserving the image proportions.
-            // CENTER_CROP removes empty bars without stretching the artwork.
-            scaleType = ImageView.ScaleType.CENTER_CROP
+            // Show the complete artwork without cropping its title or feature labels.
+            // The dark-green background fills any remaining space without distortion.
+            setBackgroundColor(android.graphics.Color.rgb(24, 75, 55))
+            scaleType = ImageView.ScaleType.FIT_CENTER
             contentDescription = "The Daily Shop"
         }
 
