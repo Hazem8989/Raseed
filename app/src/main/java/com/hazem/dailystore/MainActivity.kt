@@ -519,6 +519,36 @@ class MainActivity : Activity() {
         content.addView(label("أدخل بيانات المنتجات مرة واحدة لتظهر مباشرة في نقطة البيع", 13f, mutedColor, false, Gravity.RIGHT).apply {
             setPadding(0, dp(4), 0, dp(14))
         })
+        val rateTitle = label("سعر الصرف الحالي (ليرة سورية لكل 1 دولار)", 14f, green, true, Gravity.RIGHT)
+        val currentRate = repository.getCurrentExchangeRateMilli()
+        val rateInput = EditText(this).apply {
+            hint = "مثال: 15000"
+            inputType = InputType.TYPE_CLASS_NUMBER or InputType.TYPE_NUMBER_FLAG_DECIMAL
+            setSingleLine(true)
+            textSize = 15f
+            setPadding(dp(12), 0, dp(12), 0)
+            background = inputBackground()
+            if (currentRate > 0L) setText(BigDecimal.valueOf(currentRate, 3).stripTrailingZeros().toPlainString())
+        }
+        val saveRate = Button(this).apply {
+            text = "حفظ سعر الصرف"
+            isAllCaps = false
+            setTextColor(Color.WHITE)
+            setBackgroundColor(green)
+            setOnClickListener {
+                try {
+                    val value = BigDecimal(rateInput.text.toString().trim().replace(',', '.'))
+                    repository.saveExchangeRate(value)
+                    Toast.makeText(this@MainActivity, "تم تحديث سعر الصرف؛ بقيت أسعار الدولار المرجعية ثابتة", Toast.LENGTH_LONG).show()
+                    showProductManagement()
+                } catch (e: Exception) {
+                    Toast.makeText(this@MainActivity, e.message ?: "أدخل سعر صرف صحيحاً", Toast.LENGTH_LONG).show()
+                }
+            }
+        }
+        content.addView(rateTitle, matchWidth())
+        content.addView(rateInput, fieldParams(dp(48), dp(6)))
+        content.addView(saveRate, fieldParams(dp(46), dp(8)))
         content.addView(add, fieldParams(dp(52), dp(8)))
         content.addView(category, fieldParams(dp(44), dp(14)))
         content.addView(search, fieldParams(dp(50), dp(12)))
@@ -555,10 +585,15 @@ class MainActivity : Activity() {
                     "التصنيف: ${product.categoryName ?: "غير محدد"}   •   الوحدة: ${product.unitName}",
                     12f, mutedColor, false, Gravity.RIGHT
                 ))
+                val currentRate = repository.getCurrentExchangeRateMilli()
                 card.addView(label(
-                    "شراء: $${moneyText(product.purchaseCostUsdCents)}   |   بيع: $${moneyText(product.salePriceUsdCents)}",
+                    "تكلفة الشراء: \${formatDualMoney(product.purchaseCostUsdCents, currentRate)}",
                     13f, textColor, true, Gravity.RIGHT
-                ).apply { setPadding(0, dp(5), 0, dp(3)) })
+                ).apply { setPadding(0, dp(5), 0, dp(2)) })
+                card.addView(label(
+                    "سعر المبيع: \${formatDualMoney(product.salePriceUsdCents, currentRate)}",
+                    13f, green, true, Gravity.RIGHT
+                ).apply { setPadding(0, 0, 0, dp(3)) })
                 card.addView(label(
                     if (product.tracksInventory) "المخزون المتاح: ${formatQuantity(product.stock)} ${product.unitSymbol}"
                     else "لا يتتبع المخزون",
@@ -622,9 +657,46 @@ class MainActivity : Activity() {
         val name = field("اسم المنتج *", existing?.name.orEmpty())
         val barcode = field("الباركود (اختياري)", existing?.barcode.orEmpty())
         val sku = field("رمز SKU (اختياري)", existing?.sku.orEmpty())
-        val purchase = field("تكلفة الشراء بالدولار", existing?.let { moneyText(it.purchaseCostUsdCents) } ?: "0", InputType.TYPE_CLASS_NUMBER or InputType.TYPE_NUMBER_FLAG_DECIMAL)
-        val sale = field("سعر البيع المرجعي بالدولار *", existing?.let { moneyText(it.salePriceUsdCents) } ?: "", InputType.TYPE_CLASS_NUMBER or InputType.TYPE_NUMBER_FLAG_DECIMAL)
-        val quantity = field("الكمية الافتتاحية", "0", InputType.TYPE_CLASS_NUMBER or InputType.TYPE_NUMBER_FLAG_DECIMAL)
+        val rateMilli = repository.getCurrentExchangeRateMilli()
+        val numericType = InputType.TYPE_CLASS_NUMBER or InputType.TYPE_NUMBER_FLAG_DECIMAL
+        val purchase = field("تكلفة الشراء بالدولار", existing?.let { moneyText(it.purchaseCostUsdCents) } ?: "0", numericType)
+        val purchaseSyp = field("تكلفة الشراء بالليرة السورية", existing?.let {
+            if (rateMilli > 0L) formatSypAmount(CurrencyConverter.usdCentsToSyp(it.purchaseCostUsdCents, rateMilli)) else ""
+        } ?: "", numericType)
+        val sale = field("سعر المبيع بالدولار *", existing?.let { moneyText(it.salePriceUsdCents) } ?: "", numericType)
+        val saleSyp = field("سعر المبيع بالليرة السورية", existing?.let {
+            if (rateMilli > 0L) formatSypAmount(CurrencyConverter.usdCentsToSyp(it.salePriceUsdCents, rateMilli)) else ""
+        } ?: "", numericType)
+        val quantity = field("الكمية الافتتاحية", "0", numericType)
+        var syncingCurrencyFields = false
+        fun bindCurrencyPair(usdField: EditText, sypField: EditText) {
+            usdField.addTextChangedListener(object : TextWatcher {
+                override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) {}
+                override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {
+                    if (syncingCurrencyFields || rateMilli <= 0L) return
+                    val cents = runCatching { parseUsdCents(s?.toString().orEmpty()) }.getOrNull() ?: return
+                    syncingCurrencyFields = true
+                    sypField.setText(formatSypAmount(CurrencyConverter.usdCentsToSyp(cents, rateMilli)))
+                    syncingCurrencyFields = false
+                }
+                override fun afterTextChanged(s: Editable?) {}
+            })
+            sypField.addTextChangedListener(object : TextWatcher {
+                override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) {}
+                override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {
+                    if (syncingCurrencyFields || rateMilli <= 0L) return
+                    val syp = runCatching { parseSypAmount(s?.toString().orEmpty()) }.getOrNull() ?: return
+                    syncingCurrencyFields = true
+                    usdField.setText(moneyText(CurrencyConverter.sypToUsdCents(syp, rateMilli)))
+                    syncingCurrencyFields = false
+                }
+                override fun afterTextChanged(s: Editable?) {}
+            })
+            sypField.isEnabled = rateMilli > 0L
+            if (rateMilli <= 0L) sypField.hint = "سجّل سعر الصرف أولاً"
+        }
+        bindCurrencyPair(purchase, purchaseSyp)
+        bindCurrencyPair(sale, saleSyp)
         val unitSpinner = Spinner(this)
         unitSpinner.adapter = ArrayAdapter(this, android.R.layout.simple_spinner_dropdown_item, units.map { "${it.name} (${it.symbol})" })
         val categorySpinner = Spinner(this)
@@ -650,10 +722,21 @@ class MainActivity : Activity() {
         form.addView(unitSpinner, fieldParams(dp(48), dp(8)))
         form.addView(label("التصنيف", 13f, mutedColor, false, Gravity.RIGHT))
         form.addView(categorySpinner, fieldParams(dp(48), dp(8)))
-        form.addView(label("الأسعار بالدولار (مرجع ثابت)", 15f, green, true, Gravity.RIGHT).apply {
-            setPadding(0, dp(6), 0, dp(6))
+        form.addView(label("تكلفة الشراء", 15f, green, true, Gravity.RIGHT).apply {
+            setPadding(0, dp(6), 0, dp(4))
         })
-        addField(purchase); addField(sale)
+        addField(purchase)
+        addField(purchaseSyp)
+        form.addView(label("سعر المبيع (الدولار هو المرجع الثابت)", 15f, green, true, Gravity.RIGHT).apply {
+            setPadding(0, dp(10), 0, dp(4))
+        })
+        addField(sale)
+        addField(saleSyp)
+        form.addView(label(
+            if (rateMilli > 0L) "سعر الصرف المستخدم: \${BigDecimal.valueOf(rateMilli, 3).stripTrailingZeros().toPlainString()} ل.س لكل دولار. تعديل أي حقل يحدّث العملة المقابلة تلقائياً."
+            else "لم يُسجّل سعر صرف بعد. أدخل سعر الصرف من شاشة إدارة المنتجات لتفعيل حقول الليرة.",
+            11f, mutedColor, false, Gravity.RIGHT
+        ).apply { setPadding(0, dp(4), 0, dp(8)) })
         form.addView(tracks, fieldParams(dp(44), dp(4)))
         if (existing == null) {
             form.addView(label("المخزون الافتتاحي", 14f, green, true, Gravity.RIGHT))
@@ -723,6 +806,23 @@ class MainActivity : Activity() {
     private fun moneyText(cents: Long): String =
         BigDecimal.valueOf(cents, 2).setScale(2, RoundingMode.HALF_UP).toPlainString()
 
+    private fun formatSypAmount(amount: Long): String =
+        DecimalFormat("#,##0").format(amount)
+
+    private fun parseSypAmount(value: String): Long {
+        val normalized = value.trim().replace(",", "").replace("٬", "")
+        val amount = BigDecimal(normalized)
+        require(amount.signum() >= 0) { "لا يمكن إدخال مبلغ سالب" }
+        return amount.setScale(0, RoundingMode.HALF_UP).longValueExact()
+    }
+
+    private fun formatDualMoney(usdCents: Long, rateMilli: Long): String {
+        val usd = "$" + moneyText(usdCents)
+        return if (rateMilli > 0L) {
+            "$usd  •  \${formatSypAmount(CurrencyConverter.usdCentsToSyp(usdCents, rateMilli))} ل.س"
+        } else "$usd  •  سعر الصرف غير مسجل"
+    }
+
     private fun parseUsdCents(value: String): Long {
         val normalized = value.trim().replace(',', '.')
         val amount = BigDecimal(normalized)
@@ -730,13 +830,8 @@ class MainActivity : Activity() {
         return amount.multiply(BigDecimal.valueOf(100)).setScale(0, RoundingMode.HALF_UP).longValueExact()
     }
 
-    private fun formatPrice(usdCents: Long): String {
-        if (exchangeRateMilli <= 0L) {
-            return "$" + BigDecimal.valueOf(usdCents, 2).setScale(2, RoundingMode.HALF_UP).toPlainString()
-        }
-        val syp = CurrencyConverter.usdCentsToSyp(usdCents, exchangeRateMilli)
-        return DecimalFormat("#,##0").format(syp) + " ل.س"
-    }
+    private fun formatPrice(usdCents: Long): String =
+        formatDualMoney(usdCents, exchangeRateMilli)
 
     private fun formatQuantity(value: Double): String =
         DecimalFormat("#,##0.###").format(value)
