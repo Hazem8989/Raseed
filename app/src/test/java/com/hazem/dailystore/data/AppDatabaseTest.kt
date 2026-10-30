@@ -159,10 +159,15 @@ class AppDatabaseTest {
     fun savesExchangeRateAndConvertsBothCurrencies() {
         val repository = StoreRepository(RuntimeEnvironment.getApplication())
         repository.ensureBaseSetup()
-        repository.saveExchangeRate(BigDecimal("15000"))
-        assertEquals(15_000_000L, repository.getCurrentExchangeRateMilli())
-        assertEquals(200L, CurrencyConverter.sypToUsdCents(30_000L, repository.getCurrentExchangeRateMilli()))
-        assertEquals(30_000L, CurrencyConverter.usdCentsToSyp(200L, repository.getCurrentExchangeRateMilli()))
+        val db = database.writableDatabase
+        try {
+            repository.saveExchangeRate(BigDecimal("15000"))
+            assertEquals(15_000_000L, repository.getCurrentExchangeRateMilli())
+            assertEquals(200L, CurrencyConverter.sypToUsdCents(30_000L, repository.getCurrentExchangeRateMilli()))
+            assertEquals(30_000L, CurrencyConverter.usdCentsToSyp(200L, repository.getCurrentExchangeRateMilli()))
+        } finally {
+            db.delete("exchange_rates", null, null)
+        }
     }
 
     @Test
