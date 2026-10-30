@@ -282,12 +282,23 @@ class InvoiceRepository(context: Context) {
         unitCost: Long, movementType: String, invoiceId: String, movementOperationId: String, now: String
     ) {
         db.execSQL(
-            """INSERT INTO inventory_balances(product_id,warehouse_id,quantity,updated_at)
-               VALUES(?,?,?,?)
-               ON CONFLICT(product_id,warehouse_id) DO UPDATE SET
-               quantity=inventory_balances.quantity+excluded.quantity,updated_at=excluded.updated_at""",
-            arrayOf(productId, warehouseId, delta, now)
+            "UPDATE inventory_balances SET quantity=quantity+?,updated_at=? WHERE product_id=? AND warehouse_id=?",
+            arrayOf(delta, now, productId, warehouseId)
         )
+        // SQLite UPSERT syntax is unavailable on some Android API 23 devices.
+        val exists = db.rawQuery(
+            "SELECT 1 FROM inventory_balances WHERE product_id=? AND warehouse_id=?",
+            arrayOf(productId, warehouseId)
+        ).use { it.moveToFirst() }
+        if (!exists) {
+            val balance = ContentValues().apply {
+                put("product_id", productId)
+                put("warehouse_id", warehouseId)
+                put("quantity", delta)
+                put("updated_at", now)
+            }
+            db.insertOrThrow("inventory_balances", null, balance)
+        }
         val movement = ContentValues().apply {
             put("id", UUID.randomUUID().toString())
             put("product_id", productId)
