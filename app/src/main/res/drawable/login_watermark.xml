@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<layer-list xmlns:android="http://schemas.android.com/apk/res/android">
+    <item android:drawable="@color/shop_background" />
+    <item android:alpha="0.08">
+        <bitmap
+            android:src="@drawable/the_daily_shop_splash"
+            android:gravity="center"
+            android:filter="true" />
+    </item>
+</layer-list>
