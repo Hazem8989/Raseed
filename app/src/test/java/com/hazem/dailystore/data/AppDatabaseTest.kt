@@ -68,14 +68,14 @@ class AppDatabaseTest {
         val db = database.writableDatabase
 
         val unit = ContentValues().apply {
-            put("name", "قطعة")
+            put("name", "قطعة اختبار FK")
             put("symbol", "pcs")
             put("decimal_places", 0)
         }
         val unitId = db.insertOrThrow("units", null, unit)
 
         val category = ContentValues().apply {
-            put("name", "مواد غذائية")
+            put("name", "تصنيف اختبار FK")
             put("created_at", "2026-10-30T00:00:00Z")
         }
         val categoryId = db.insertOrThrow("categories", null, category)
@@ -94,7 +94,7 @@ class AppDatabaseTest {
 
         val warehouse = ContentValues().apply {
             put("id", "warehouse-1")
-            put("name", "المستودع الرئيسي")
+            put("name", "مستودع اختبار FK")
             put("created_at", "2026-10-30T00:00:00Z")
         }
         db.insertOrThrow("warehouses", null, warehouse)
