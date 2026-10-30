@@ -46,10 +46,10 @@ jobs:
           assert all(alpha[y, x] == 0 for x, y in [(0,0),(alpha.shape[1]-1,0),(0,alpha.shape[0]-1),(alpha.shape[1]-1,alpha.shape[0]-1)])
           assert int((alpha == 0).sum()) > 500000
           res = "app/src/main/res"
-          os.makedirs(res + "/drawable-nodpi", exist_ok=True)
-          logo.save(res + "/drawable-nodpi/daily_shop_logo.png", optimize=True)
-          logo.save(res + "/drawable-nodpi/daily_shop_basket.png", optimize=True)
-          Image.open("branding_splash.png").convert("RGBA").save(res + "/drawable-nodpi/the_daily_shop_splash.png", optimize=True)
+          os.makedirs(res + "/drawable", exist_ok=True)
+          logo.save(res + "/drawable/daily_shop_logo.png", optimize=True)
+          logo.save(res + "/drawable/daily_shop_basket.png", optimize=True)
+          Image.open("branding_splash.png").convert("RGBA").save(res + "/drawable/the_daily_shop_splash.png", optimize=True)
           for density, size in [("mdpi",48),("hdpi",72),("xhdpi",96),("xxhdpi",144),("xxxhdpi",192)]:
               canvas = Image.new("RGBA", (size,size), (24,75,55,255))
               fg = logo.copy()
