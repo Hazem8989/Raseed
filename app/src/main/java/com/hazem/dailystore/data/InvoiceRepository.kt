@@ -182,14 +182,15 @@ class InvoiceRepository(context: Context) {
             val warehouseId = invoiceWarehouse(db, table, invoiceId)
             val now = timestamp()
             db.rawQuery(
-                "SELECT product_id,quantity,${if (type == "PURCHASE") "unit_cost_usd_cents" else "unit_cost_usd_cents"} FROM $itemTable WHERE $invoiceForeignKey=?",
+                "SELECT id,product_id,quantity,unit_cost_usd_cents FROM $itemTable WHERE $invoiceForeignKey=?",
                 arrayOf(invoiceId)
             ).use { cursor ->
                 require(cursor.count > 0) { "لا يمكن اعتماد فاتورة فارغة" }
                 while (cursor.moveToNext()) {
-                    val productId = cursor.getString(0)
-                    val quantity = cursor.getDouble(1)
-                    val unitCost = cursor.getLong(2)
+                    val itemId = cursor.getString(0)
+                    val productId = cursor.getString(1)
+                    val quantity = cursor.getDouble(2)
+                    val unitCost = cursor.getLong(3)
                     val tracks = productTracksInventory(db, productId)
                     if (type == "SALE" && tracks) {
                         val available = stockQuantity(db, productId, warehouseId)
@@ -202,7 +203,7 @@ class InvoiceRepository(context: Context) {
                         applyStockMovement(
                             db, productId, warehouseId, delta, unitCost,
                             if (type == "PURCHASE") "PURCHASE" else "SALE",
-                            invoiceId, "$operationId:$productId", now
+                            invoiceId, "$operationId:$itemId", now
                         )
                     }
                     if (type == "PURCHASE") {
