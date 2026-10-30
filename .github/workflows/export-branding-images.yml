@@ -74,11 +74,9 @@ jobs:
           test -s branding_logo.png
           mkdir -p export
           cp branding_splash.png branding_logo.png export/
-          cd export
-          zip -9 ../branding-images.zip branding_splash.png branding_logo.png
-      - name: Upload temporary archive
+      - name: Upload branding image files
         uses: actions/upload-artifact@v4
         with:
           name: branding-images
-          path: branding-images.zip
+          path: export/*.png
           retention-days: 1
