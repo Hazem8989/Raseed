@@ -587,11 +587,11 @@ class MainActivity : Activity() {
                 ))
                 val currentRate = repository.getCurrentExchangeRateMilli()
                 card.addView(label(
-                    "تكلفة الشراء: \${formatDualMoney(product.purchaseCostUsdCents, currentRate)}",
+                    "تكلفة الشراء: ${formatDualMoney(product.purchaseCostUsdCents, currentRate)}",
                     13f, textColor, true, Gravity.RIGHT
                 ).apply { setPadding(0, dp(5), 0, dp(2)) })
                 card.addView(label(
-                    "سعر المبيع: \${formatDualMoney(product.salePriceUsdCents, currentRate)}",
+                    "سعر المبيع: ${formatDualMoney(product.salePriceUsdCents, currentRate)}",
                     13f, green, true, Gravity.RIGHT
                 ).apply { setPadding(0, 0, 0, dp(3)) })
                 card.addView(label(
@@ -733,7 +733,7 @@ class MainActivity : Activity() {
         addField(sale)
         addField(saleSyp)
         form.addView(label(
-            if (rateMilli > 0L) "سعر الصرف المستخدم: \${BigDecimal.valueOf(rateMilli, 3).stripTrailingZeros().toPlainString()} ل.س لكل دولار. تعديل أي حقل يحدّث العملة المقابلة تلقائياً."
+            if (rateMilli > 0L) "سعر الصرف المستخدم: ${BigDecimal.valueOf(rateMilli, 3).stripTrailingZeros().toPlainString()} ل.س لكل دولار. تعديل أي حقل يحدّث العملة المقابلة تلقائياً."
             else "لم يُسجّل سعر صرف بعد. أدخل سعر الصرف من شاشة إدارة المنتجات لتفعيل حقول الليرة.",
             11f, mutedColor, false, Gravity.RIGHT
         ).apply { setPadding(0, dp(4), 0, dp(8)) })
@@ -819,7 +819,7 @@ class MainActivity : Activity() {
     private fun formatDualMoney(usdCents: Long, rateMilli: Long): String {
         val usd = "$" + moneyText(usdCents)
         return if (rateMilli > 0L) {
-            "$usd  •  \${formatSypAmount(CurrencyConverter.usdCentsToSyp(usdCents, rateMilli))} ل.س"
+            "$usd  •  ${formatSypAmount(CurrencyConverter.usdCentsToSyp(usdCents, rateMilli))} ل.س"
         } else "$usd  •  سعر الصرف غير مسجل"
     }
 
