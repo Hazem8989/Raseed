@@ -6,7 +6,7 @@ import android.graphics.Color
 import android.graphics.Typeface
 import android.graphics.drawable.GradientDrawable
 import android.view.Gravity
-import android.view.inputmethod.InputType
+import android.text.InputType
 import android.widget.Button
 import android.widget.EditText
 import android.widget.ImageView
@@ -19,7 +19,7 @@ class MainActivity : Activity() {
 
     private val green = Color.rgb(24, 75, 55)
     private val gold = Color.rgb(190, 155, 85)
-    private val background = Color.rgb(246, 248, 245)
+    private val backgroundColor = Color.rgb(246, 248, 245)
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -33,7 +33,7 @@ class MainActivity : Activity() {
             orientation = LinearLayout.VERTICAL
             gravity = Gravity.CENTER
             setPadding(28, 32, 28, 32)
-            setBackgroundColor(background)
+            setBackgroundColor(backgroundColor)
         }
 
         val scroll = ScrollView(this).apply {
@@ -75,7 +75,7 @@ class MainActivity : Activity() {
         val username = EditText(this).apply {
             hint = "اسم المستخدم"
             textSize = 16f
-            singleLine = true
+            setSingleLine(true)
             setPadding(16, 14, 16, 14)
             background = inputBackground()
         }
@@ -83,9 +83,11 @@ class MainActivity : Activity() {
         val password = EditText(this).apply {
             hint = "كلمة المرور"
             textSize = 16f
-            singleLine = true
-            inputType = InputType.TYPE_CLASS_TEXT or
+            setSingleLine(true)
+            setInputType(
+                InputType.TYPE_CLASS_TEXT or
                 InputType.TYPE_TEXT_VARIATION_PASSWORD
+            )
             setPadding(16, 14, 16, 14)
             background = inputBackground()
         }
@@ -120,14 +122,13 @@ class MainActivity : Activity() {
                 (150 * resources.displayMetrics.density).toInt()
             )
         )
+
         page.addView(subtitle, matchWidth())
         page.addView(line, matchWidth())
         page.addView(title, matchWidth())
-
         page.addView(username, fieldParams())
         page.addView(password, fieldParams())
         page.addView(login, fieldParams())
-
         page.addView(footer, matchWidth())
 
         setContentView(scroll)
