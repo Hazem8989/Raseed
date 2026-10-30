@@ -1,16 +1,60 @@
-name: Export branding images
+name: Process and export branding images
 on:
   push:
     branches:
       - the-daily-shop-development
 permissions:
-  contents: read
+  contents: write
 jobs:
-  export:
+  process:
+    if: github.event.head_commit.author.name != 'github-actions[bot]'
     runs-on: ubuntu-latest
     steps:
       - name: Checkout development branch
         uses: actions/checkout@v4
+        with:
+          ref: the-daily-shop-development
+          token: ${{ secrets.GITHUB_TOKEN }}
+      - name: Remove checkerboard background
+        run: |
+          python -m pip install --quiet pillow numpy opencv-python-headless
+          python - <<'PY'
+          from PIL import Image
+          import numpy as np, cv2
+          path = "branding_logo.png"
+          image = Image.open(path).convert("RGBA")
+          arr = np.array(image)
+          rgb = arr[:, :, :3]
+          maximum = rgb.max(axis=2).astype(np.int16)
+          minimum = rgb.min(axis=2).astype(np.int16)
+          saturation = maximum - minimum
+          value = rgb.mean(axis=2)
+          alpha = np.where((saturation <= 13) & (value >= 38) & (value <= 216), 0, 255).astype(np.uint8)
+          background = (alpha == 0).astype(np.uint8)
+          count, labels, stats, _ = cv2.connectedComponentsWithStats(background, 8)
+          for i in range(1, count):
+              x, y, w, h, area = stats[i]
+              touches_edge = x == 0 or y == 0 or x + w >= alpha.shape[1] or y + h >= alpha.shape[0]
+              if not touches_edge and area < 1000:
+                  alpha[labels == i] = 255
+          alpha = cv2.GaussianBlur(alpha, (3, 3), 0.55)
+          arr[:, :, 3] = alpha
+          Image.fromarray(arr, "RGBA").save(path, optimize=True)
+          print("Transparent pixels:", int((alpha == 0).sum()))
+          print("Semi-transparent pixels:", int(((alpha > 0) & (alpha < 255)).sum()))
+          print("Corner alpha values:", [int(alpha[y, x]) for x, y in [(0,0),(alpha.shape[1]-1,0),(0,alpha.shape[0]-1),(alpha.shape[1]-1,alpha.shape[0]-1)]])
+          assert all(alpha[y, x] == 0 for x, y in [(0,0),(alpha.shape[1]-1,0),(0,alpha.shape[0]-1),(alpha.shape[1]-1,alpha.shape[0]-1)])
+          assert int((alpha == 0).sum()) > 500000
+          PY
+      - name: Commit transparent logo to development branch
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add branding_logo.png
+          if ! git diff --cached --quiet; then
+            git commit -m "Remove checkerboard background from branding logo"
+            git push origin HEAD:the-daily-shop-development
+          fi
       - name: Package branding images
         run: |
           test -s branding_splash.png
