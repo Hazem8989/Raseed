@@ -113,6 +113,20 @@ class InvoiceRepositoryTest {
         assertEquals(1, invoices.listSalesInvoices().size)
     }
 
+    @Test
+    fun rejectsFractionalQuantityForWholePieceUnit() {
+        try {
+            invoices.savePurchaseDraft(
+                "purchase-fractional-op", null, null, "2026-10-31",
+                0, null, listOf(InvoiceLineInput(productId, BigDecimal("0.5"), 125))
+            )
+            throw AssertionError("Piece quantity must not accept fractions")
+        } catch (_: IllegalArgumentException) {
+            // The default first unit is a whole piece and allows no decimal places.
+        }
+        assertTrue(invoices.listPurchaseInvoices().isEmpty())
+    }
+
     private fun stock(): Double = database.readableDatabase.rawQuery(
         "SELECT quantity FROM inventory_balances WHERE product_id=?",
         arrayOf(productId)
