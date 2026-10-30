@@ -1,4 +1,3 @@
-
 package com.hazem.dailystore
 
 import android.app.Activity
@@ -10,6 +9,7 @@ import android.view.Gravity
 import android.view.inputmethod.InputType
 import android.widget.Button
 import android.widget.EditText
+import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.TextView
@@ -41,12 +41,11 @@ class MainActivity : Activity() {
             addView(page)
         }
 
-        val brand = TextView(this).apply {
-            text = "THE DAILY SHOP"
-            textSize = 27f
-            setTextColor(green)
-            typeface = Typeface.DEFAULT_BOLD
-            gravity = Gravity.CENTER
+        val logo = ImageView(this).apply {
+            setImageResource(R.drawable.daily_shop_logo)
+            scaleType = ImageView.ScaleType.FIT_CENTER
+            contentDescription = "The Daily Shop"
+            adjustViewBounds = true
         }
 
         val subtitle = TextView(this).apply {
@@ -114,7 +113,13 @@ class MainActivity : Activity() {
             setPadding(0, 36, 0, 0)
         }
 
-        page.addView(brand, matchWidth())
+        page.addView(
+            logo,
+            LinearLayout.LayoutParams(
+                (220 * resources.displayMetrics.density).toInt(),
+                (150 * resources.displayMetrics.density).toInt()
+            )
+        )
         page.addView(subtitle, matchWidth())
         page.addView(line, matchWidth())
         page.addView(title, matchWidth())
