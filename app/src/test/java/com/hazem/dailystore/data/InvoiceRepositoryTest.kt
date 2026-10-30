@@ -86,7 +86,7 @@ class InvoiceRepositoryTest {
             // Expected validation failure.
         }
         assertEquals(10.0, stock(), 0.000001)
-        assertEquals("DRAFT", invoices.listSalesInvoices().single().status)
+        assertEquals("DRAFT", invoices.listSalesInvoices().first { it.id == draft.invoiceId }.status)
     }
 
     @Test
