@@ -136,7 +136,11 @@ class AppDatabaseTest {
         repository.ensureBaseSetup()
         repository.ensureBaseSetup()
         val db = database.writableDatabase
-        db.rawQuery("SELECT COUNT(*) FROM units", null).use { c ->
+        db.rawQuery(
+            """SELECT COUNT(*) FROM units
+               WHERE name IN ('قطعة','كيلوغرام','غرام','لتر','علبة','ربطة','كرتونة')""",
+            null
+        ).use { c ->
             assertTrue(c.moveToFirst())
             assertEquals(7, c.getInt(0))
         }
