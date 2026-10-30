@@ -59,7 +59,7 @@ jobs:
         run: |
           set -e
           echo "sdk.dir=$ANDROID_SDK_ROOT" > local.properties
-          /tmp/gradle-8.9/bin/gradle --no-daemon clean assembleDebug
+          /tmp/gradle-8.9/bin/gradle --no-daemon clean testDebugUnitTest assembleDebug
           test -s app/build/outputs/apk/debug/app-debug.apk
           sha256sum app/build/outputs/apk/debug/app-debug.apk
 
