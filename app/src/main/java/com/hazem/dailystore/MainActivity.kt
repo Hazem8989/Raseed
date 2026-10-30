@@ -160,7 +160,7 @@ class MainActivity : Activity() {
         header.addView(brandBlock, LinearLayout.LayoutParams(0, -2, 1f))
         header.addView(status, LinearLayout.LayoutParams(-2, -2))
 
-        val body = ScrollView(this).apply { fillViewport = true }
+        val body = ScrollView(this).apply { isFillViewport = true }
         val content = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             setPadding(dp(16), dp(14), dp(16), dp(24))
