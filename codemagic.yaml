@@ -1,146 +1,25 @@
-
 workflows:
-  raseed-android:
-    name: Raseed Manager APK
+  the-daily-shop-android:
+    name: The Daily Shop Android
     max_build_duration: 60
     instance_type: mac_mini_m2
 
+    environment:
+      java: 17
+
     scripts:
-      - name: Extract project
+      - name: Prepare Gradle
         script: |
-          unzip -q RaseedManagerAndroid.zip -d source
-
-      - name: Copy updated Kotlin file
-        script: |
-          mkdir -p source/RaseedManagerAndroid/app/src/main/java/com/hazem/raseedmanager
-          cp MainActivity.kt source/RaseedManagerAndroid/app/src/main/java/com/hazem/raseedmanager/MainActivity.kt
-          test -s source/RaseedManagerAndroid/app/src/main/java/com/hazem/raseedmanager/MainActivity.kt
-
-      - name: Configure Android and app icon
-        script: |
-          cd source/RaseedManagerAndroid
-          
-          cat >> app/build.gradle.kts <<'GRADLE'
-
-          tasks.withType<org.gradle.api.tasks.compile.JavaCompile>().configureEach {
-              sourceCompatibility = "17"
-              targetCompatibility = "17"
-          }
-
-          tasks.withType<org.jetbrains.kotlin.gradle.tasks.KotlinCompile>().configureEach {
-              kotlinOptions {
-                  jvmTarget = "17"
-              }
-          }
-          GRADLE
-
-
-
-          python3 - <<'PY'
-          from pathlib import Path
-          import re
-
-          p = Path("app/build.gradle.kts")
-          s = p.read_text()
-
-          s, n1 = re.subn(r'targetSdk\s*=\s*\d+', 'targetSdk = 35', s)
-          s, n2 = re.subn(r'minSdk\s*=\s*\d+', 'minSdk = 29', s)
-
-          if n1 != 1 or n2 != 1:
-              raise SystemExit("Could not update SDK settings")
-
-          compile_block = """compileOptions {
-                  sourceCompatibility = JavaVersion.VERSION_17
-                  targetCompatibility = JavaVersion.VERSION_17
-              }"""
-
-          if re.search(r'compileOptions\s*\{.*?\}', s, re.S):
-              s = re.sub(
-                  r'compileOptions\s*\{.*?\}',
-                  compile_block,
-                  s,
-                  count=1,
-                  flags=re.S
-              )
-          else:
-              s = re.sub(
-                  r'android\s*\{',
-                  'android {\n    ' + compile_block,
-                  s,
-                  count=1
-              )
-
-          s = re.sub(
-              r'jvmTarget\s*=\s*["\'][^"\']+["\']',
-              'jvmTarget = "17"',
-              s
-          )
-
-          if 'jvmTarget = "17"' not in s:
-              s += '''
-          
-          tasks.withType<org.jetbrains.kotlin.gradle.tasks.KotlinCompile>().configureEach {
-              kotlinOptions {
-                  jvmTarget = "17"
-              }
-          }
-          '''
-
-          p.write_text(s)
-          print("Android SDK and JVM targets configured")
-          PY
-
-
-          if [ ! -f app_icon.png ]; then
-            cp ../../app_icon.png app_icon.png
-          fi
-
-          mkdir -p app/src/main/res/mipmap-mdpi
-          mkdir -p app/src/main/res/mipmap-hdpi
-          mkdir -p app/src/main/res/mipmap-xhdpi
-          mkdir -p app/src/main/res/mipmap-xxhdpi
-          mkdir -p app/src/main/res/mipmap-xxxhdpi
-
-          sips -z 48 48 ../../app_icon.png --out app/src/main/res/mipmap-mdpi/ic_launcher.png
-          sips -z 72 72 ../../app_icon.png --out app/src/main/res/mipmap-hdpi/ic_launcher.png
-          sips -z 96 96 ../../app_icon.png --out app/src/main/res/mipmap-xhdpi/ic_launcher.png
-          sips -z 144 144 ../../app_icon.png --out app/src/main/res/mipmap-xxhdpi/ic_launcher.png
-          sips -z 192 192 ../../app_icon.png --out app/src/main/res/mipmap-xxxhdpi/ic_launcher.png
-
-          python3 - <<'PY'
-          from pathlib import Path
-          import re
-
-          p = Path("app/src/main/AndroidManifest.xml")
-          s = p.read_text()
-          s, n = re.subn(
-              r'android:icon="@[^"]+"',
-              'android:icon="@mipmap/ic_launcher"',
-              s,
-              count=1
-          )
-          if n == 0:
-              s = s.replace(
-                  '<application',
-                  '<application android:icon="@mipmap/ic_launcher"',
-                  1
-              )
-          p.write_text(s)
-          print("Launcher icon configured")
-          PY
-
-          echo "sdk.dir=$ANDROID_SDK_ROOT" > local.properties
-
-      - name: Build APK
-        script: |
-          cd source/RaseedManagerAndroid
-          echo "sdk.dir=$ANDROID_SDK_ROOT" > local.properties
-
-          
-
+          set -e
           curl -fL https://services.gradle.org/distributions/gradle-8.9-bin.zip -o /tmp/gradle.zip
-          unzip -qo /tmp/gradle.zip -d /tmp
-          /tmp/gradle-8.9/bin/gradle assembleDebug
+          unzip -q /tmp/gradle.zip -d /tmp
+          /tmp/gradle-8.9/bin/gradle --version
+
+      - name: Build The Daily Shop APK
+        script: |
+          set -e
+          echo "sdk.dir=$ANDROID_SDK_ROOT" > local.properties
+          /tmp/gradle-8.9/bin/gradle --no-daemon clean assembleDebug
 
     artifacts:
-      - source/RaseedManagerAndroid/app/build/outputs/apk/**/*.apk
+      - app/build/outputs/apk/debug/*.apk
