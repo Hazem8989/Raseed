@@ -13,7 +13,7 @@ class CurrencyConverterTest {
     @Test
     fun convertsSypToUsdCentsWithHalfUpRounding() {
         assertEquals(100L, CurrencyConverter.sypToUsdCents(15_000L, 15_000_000L))
-        assertEquals(1L, CurrencyConverter.sypToUsdCents(225L, 15_000_000L))
+        assertEquals(2L, CurrencyConverter.sypToUsdCents(225L, 15_000_000L))
     }
 
     @Test(expected = IllegalArgumentException::class)
