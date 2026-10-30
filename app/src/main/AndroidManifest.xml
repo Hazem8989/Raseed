@@ -4,6 +4,8 @@
     <application
         android:allowBackup="false"
         android:label="@string/app_name"
+        android:icon="@drawable/daily_shop_basket"
+android:roundIcon="@drawable/daily_shop_basket"
         android:theme="@style/AppTheme"
         android:supportsRtl="true">
 
