@@ -47,7 +47,8 @@ class StoreRepository(context: Context) {
                 Triple("لتر", "ل", 3),
                 Triple("علبة", "علبة", 0),
                 Triple("ربطة", "ربطة", 0),
-                Triple("كرتونة", "كرتونة", 0)
+                Triple("كرتونة", "كرتونة", 0),
+                Triple("طرد", "طرد", 0)
             )
             units.forEach { (name, symbol, decimals) ->
                 db.execSQL(
