@@ -15,12 +15,12 @@ jobs:
         with:
           ref: the-daily-shop-development
           token: ${{ secrets.GITHUB_TOKEN }}
-      - name: Remove checkerboard background
+      - name: Remove checkerboard and install Android branding resources
         run: |
           python -m pip install --quiet pillow numpy opencv-python-headless
           python - <<'PY'
-          from PIL import Image
-          import numpy as np, cv2
+          from PIL import Image, ImageDraw
+          import numpy as np, cv2, os
           path = "branding_logo.png"
           image = Image.open(path).convert("RGBA")
           arr = np.array(image)
@@ -39,20 +39,33 @@ jobs:
                   alpha[labels == i] = 255
           alpha = cv2.GaussianBlur(alpha, (3, 3), 0.55)
           arr[:, :, 3] = alpha
-          Image.fromarray(arr, "RGBA").save(path, optimize=True)
+          logo = Image.fromarray(arr, "RGBA")
+          logo.save(path, optimize=True)
           print("Transparent pixels:", int((alpha == 0).sum()))
-          print("Semi-transparent pixels:", int(((alpha > 0) & (alpha < 255)).sum()))
           print("Corner alpha values:", [int(alpha[y, x]) for x, y in [(0,0),(alpha.shape[1]-1,0),(0,alpha.shape[0]-1),(alpha.shape[1]-1,alpha.shape[0]-1)]])
           assert all(alpha[y, x] == 0 for x, y in [(0,0),(alpha.shape[1]-1,0),(0,alpha.shape[0]-1),(alpha.shape[1]-1,alpha.shape[0]-1)])
           assert int((alpha == 0).sum()) > 500000
+          res = "app/src/main/res"
+          os.makedirs(res + "/drawable-nodpi", exist_ok=True)
+          logo.save(res + "/drawable-nodpi/daily_shop_logo.png", optimize=True)
+          logo.save(res + "/drawable-nodpi/daily_shop_basket.png", optimize=True)
+          Image.open("branding_splash.png").convert("RGBA").save(res + "/drawable-nodpi/the_daily_shop_splash.png", optimize=True)
+          for density, size in [("mdpi",48),("hdpi",72),("xhdpi",96),("xxhdpi",144),("xxxhdpi",192)]:
+              canvas = Image.new("RGBA", (size,size), (24,75,55,255))
+              fg = logo.copy()
+              fg.thumbnail((int(size*0.76), int(size*0.76)), Image.Resampling.LANCZOS)
+              canvas.alpha_composite(fg, ((size-fg.width)//2,(size-fg.height)//2))
+              folder = f"{res}/mipmap-{density}"
+              os.makedirs(folder, exist_ok=True)
+              canvas.save(f"{folder}/ic_launcher.png", optimize=True)
           PY
-      - name: Commit transparent logo to development branch
+      - name: Commit branding resources to development branch
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add branding_logo.png
+          git add branding_logo.png app/src/main/res
           if ! git diff --cached --quiet; then
-            git commit -m "Remove checkerboard background from branding logo"
+            git commit -m "Install transparent branding assets and launcher icons"
             git push origin HEAD:the-daily-shop-development
           fi
       - name: Package branding images
