@@ -112,14 +112,14 @@ class MainActivity : Activity() {
             textSize = 12f
             setTextColor(Color.GRAY)
             gravity = Gravity.CENTER
-            setPadding(0, 36, 0, 0)
+            setPadding(0, 30, 0, 0)
         }
 
         page.addView(
             logo,
             LinearLayout.LayoutParams(
-                (220 * resources.displayMetrics.density).toInt(),
-                (150 * resources.displayMetrics.density).toInt()
+                (270 * resources.displayMetrics.density).toInt(),
+                (185 * resources.displayMetrics.density).toInt()
             )
         )
 

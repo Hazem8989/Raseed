@@ -1,4 +1,3 @@
-
 package com.hazem.dailystore
 
 import android.app.Activity
@@ -25,7 +24,9 @@ class SplashActivity : Activity() {
 
         val splashImage = ImageView(this).apply {
             setImageResource(R.drawable.the_daily_shop_splash)
-            scaleType = ImageView.ScaleType.FIT_CENTER
+            // Fill the screen while preserving the image proportions.
+            // CENTER_CROP removes empty bars without stretching the artwork.
+            scaleType = ImageView.ScaleType.CENTER_CROP
             contentDescription = "The Daily Shop"
         }
 
