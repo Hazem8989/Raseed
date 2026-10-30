@@ -1,13 +1,15 @@
 name: Export branding images
 on:
-  workflow_dispatch:
+  push:
+    branches:
+      - the-daily-shop-development
 permissions:
   contents: read
 jobs:
   export:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout selected branch
+      - name: Checkout development branch
         uses: actions/checkout@v4
       - name: Package branding images
         run: |
