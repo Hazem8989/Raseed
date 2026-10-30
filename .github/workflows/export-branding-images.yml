@@ -1,0 +1,25 @@
+name: Export branding images
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  export:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout selected branch
+        uses: actions/checkout@v4
+      - name: Package branding images
+        run: |
+          test -s branding_splash.png
+          test -s branding_logo.png
+          mkdir -p export
+          cp branding_splash.png branding_logo.png export/
+          cd export
+          zip -9 ../branding-images.zip branding_splash.png branding_logo.png
+      - name: Upload temporary archive
+        uses: actions/upload-artifact@v4
+        with:
+          name: branding-images
+          path: branding-images.zip
+          retention-days: 1
