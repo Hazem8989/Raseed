@@ -139,11 +139,11 @@ class AppDatabaseTest {
         val db = database.writableDatabase
         db.rawQuery(
             """SELECT COUNT(*) FROM units
-               WHERE name IN ('قطعة','كيلوغرام','غرام','لتر','علبة','ربطة','كرتونة')""",
+               WHERE name IN ('قطعة','كيلوغرام','غرام','لتر','علبة','ربطة','كرتونة','طرد')""",
             null
         ).use { c ->
             assertTrue(c.moveToFirst())
-            assertEquals(7, c.getInt(0))
+            assertEquals(8, c.getInt(0))
         }
         db.rawQuery("SELECT COUNT(*) FROM warehouses WHERE is_default=1 AND is_active=1", null).use { c ->
             assertTrue(c.moveToFirst())
