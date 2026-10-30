@@ -86,8 +86,10 @@ class InvoiceRepository(context: Context) {
         db.beginTransaction()
         try {
             findOperation(db, operationId)?.let { existing ->
-                require(existing.first == payloadHash) { "معرّف العملية مستخدم لبيانات مختلفة" }
-                val existingId = existing.second ?: error("سجل العملية لا يحتوي مرجع الفاتورة")
+                require(existing.type == "SAVE_${type}_DRAFT" && existing.payloadHash == payloadHash) {
+                    "معرّف العملية مستخدم لنوع أو بيانات مختلفة"
+                }
+                val existingId = existing.reference ?: error("سجل العملية لا يحتوي مرجع الفاتورة")
                 val number = invoiceNumber(db, table, existingId)
                 db.setTransactionSuccessful()
                 return InvoiceSaveResult(existingId, number, true)
@@ -165,7 +167,7 @@ class InvoiceRepository(context: Context) {
         db.beginTransaction()
         try {
             findOperation(db, operationId)?.let { existing ->
-                require(existing.first == payloadHash && existing.second == invoiceId) {
+                require(existing.type == operationType && existing.payloadHash == payloadHash && existing.reference == invoiceId) {
                     "معرّف الاعتماد مستخدم لعملية مختلفة"
                 }
                 return false
@@ -345,9 +347,15 @@ class InvoiceRepository(context: Context) {
         return stem + next.toString().padStart(4, '0')
     }
 
-    private fun findOperation(db: SQLiteDatabase, id: String): Pair<String, String?>? =
-        db.rawQuery("SELECT payload_hash,result_reference FROM operation_registry WHERE operation_id=?", arrayOf(id))
-            .use { if (it.moveToFirst()) it.getString(0) to (if (it.isNull(1)) null else it.getString(1)) else null }
+    private data class ExistingOperation(val type: String, val payloadHash: String, val reference: String?)
+
+    private fun findOperation(db: SQLiteDatabase, id: String): ExistingOperation? =
+        db.rawQuery("SELECT operation_type,payload_hash,result_reference FROM operation_registry WHERE operation_id=?", arrayOf(id))
+            .use {
+                if (it.moveToFirst()) ExistingOperation(
+                    it.getString(0), it.getString(1), if (it.isNull(2)) null else it.getString(2)
+                ) else null
+            }
 
     private fun registerOperation(
         db: SQLiteDatabase, id: String, type: String, payloadHash: String, reference: String, now: String
