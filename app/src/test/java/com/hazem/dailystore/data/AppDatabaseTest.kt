@@ -2,6 +2,7 @@ package com.hazem.dailystore.data
 
 import android.content.ContentValues
 import android.database.sqlite.SQLiteConstraintException
+import java.math.BigDecimal
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
@@ -152,6 +153,16 @@ class AppDatabaseTest {
             assertTrue(c.moveToFirst())
             assertEquals(0, c.getInt(0))
         }
+    }
+
+    @Test
+    fun savesExchangeRateAndConvertsBothCurrencies() {
+        val repository = StoreRepository(RuntimeEnvironment.getApplication())
+        repository.ensureBaseSetup()
+        repository.saveExchangeRate(BigDecimal("15000"))
+        assertEquals(15_000_000L, repository.getCurrentExchangeRateMilli())
+        assertEquals(200L, CurrencyConverter.sypToUsdCents(30_000L, repository.getCurrentExchangeRateMilli()))
+        assertEquals(30_000L, CurrencyConverter.usdCentsToSyp(200L, repository.getCurrentExchangeRateMilli()))
     }
 
     @Test
