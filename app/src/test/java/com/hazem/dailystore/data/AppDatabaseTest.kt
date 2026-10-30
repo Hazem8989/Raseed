@@ -129,4 +129,49 @@ class AppDatabaseTest {
             // Expected: a product must reference an existing unit.
         }
     }
+
+    @Test
+    fun baseSetupIsIdempotentAndCreatesDefaultWarehouseWithoutInventedRate() {
+        val repository = StoreRepository(RuntimeEnvironment.getApplication())
+        repository.ensureBaseSetup()
+        repository.ensureBaseSetup()
+        val db = database.writableDatabase
+        db.rawQuery("SELECT COUNT(*) FROM units", null).use { c ->
+            assertTrue(c.moveToFirst())
+            assertEquals(7, c.getInt(0))
+        }
+        db.rawQuery("SELECT COUNT(*) FROM warehouses WHERE is_default=1 AND is_active=1", null).use { c ->
+            assertTrue(c.moveToFirst())
+            assertEquals(1, c.getInt(0))
+        }
+        db.rawQuery("SELECT COUNT(*) FROM exchange_rates", null).use { c ->
+            assertTrue(c.moveToFirst())
+            assertEquals(0, c.getInt(0))
+        }
+    }
+
+    @Test
+    fun savesProductAndOpeningStockAtomically() {
+        val repository = StoreRepository(RuntimeEnvironment.getApplication())
+        repository.ensureBaseSetup()
+        val unit = repository.getUnits().first()
+        val category = repository.getCategories().first()
+        val id = repository.saveProduct(
+            null, "منتج اختباري", "123456789", null, category.id, unit.id,
+            125, 175, true, 8.0
+        )
+        val product = repository.listProducts().single { it.id == id }
+        assertEquals("منتج اختباري", product.name)
+        assertEquals(125L, product.purchaseCostUsdCents)
+        assertEquals(175L, product.salePriceUsdCents)
+        assertEquals(8.0, product.stock, 0.000001)
+        database.readableDatabase.rawQuery(
+            "SELECT movement_type,quantity_delta FROM inventory_movements WHERE product_id=?",
+            arrayOf(id)
+        ).use { c ->
+            assertTrue(c.moveToFirst())
+            assertEquals("OPENING", c.getString(0))
+            assertEquals(8.0, c.getDouble(1), 0.000001)
+        }
+    }
 }
