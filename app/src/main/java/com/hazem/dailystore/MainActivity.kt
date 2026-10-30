@@ -548,19 +548,19 @@ class MainActivity : Activity() {
                 }
                 card.addView(label(product.name, 16f, green, true, Gravity.RIGHT))
                 card.addView(label(
-                    "باركود: @@{product.barcode ?: "—"}   |   SKU: @@{product.sku ?: "—"}",
+                    "باركود: ${product.barcode ?: "—"}   |   SKU: ${product.sku ?: "—"}",
                     11f, mutedColor, false, Gravity.RIGHT
                 ).apply { setPadding(0, dp(5), 0, dp(3)) })
                 card.addView(label(
-                    "التصنيف: @@{product.categoryName ?: "غير محدد"}   •   الوحدة: @@{product.unitName}",
+                    "التصنيف: ${product.categoryName ?: "غير محدد"}   •   الوحدة: ${product.unitName}",
                     12f, mutedColor, false, Gravity.RIGHT
                 ))
                 card.addView(label(
-                    "شراء: $@@{moneyText(product.purchaseCostUsdCents)}   |   بيع: $@@{moneyText(product.salePriceUsdCents)}",
+                    "شراء: $${moneyText(product.purchaseCostUsdCents)}   |   بيع: $${moneyText(product.salePriceUsdCents)}",
                     13f, textColor, true, Gravity.RIGHT
                 ).apply { setPadding(0, dp(5), 0, dp(3)) })
                 card.addView(label(
-                    if (product.tracksInventory) "المخزون المتاح: @@{formatQuantity(product.stock)} @@{product.unitSymbol}"
+                    if (product.tracksInventory) "المخزون المتاح: ${formatQuantity(product.stock)} ${product.unitSymbol}"
                     else "لا يتتبع المخزون",
                     12f, mutedColor, false, Gravity.RIGHT
                 ))
@@ -572,7 +572,7 @@ class MainActivity : Activity() {
                 val deactivate = smallButton("إيقاف") {
                     AlertDialog.Builder(this@MainActivity)
                         .setTitle("إيقاف المنتج")
-                        .setMessage("سيختفي @@{product.name} من نقطة البيع، مع الاحتفاظ بسجلاته.")
+                        .setMessage("سيختفي ${product.name} من نقطة البيع، مع الاحتفاظ بسجلاته.")
                         .setNegativeButton("إلغاء", null)
                         .setPositiveButton("إيقاف") { _, _ ->
                             try {
@@ -626,7 +626,7 @@ class MainActivity : Activity() {
         val sale = field("سعر البيع المرجعي بالدولار *", existing?.let { moneyText(it.salePriceUsdCents) } ?: "", InputType.TYPE_CLASS_NUMBER or InputType.TYPE_NUMBER_FLAG_DECIMAL)
         val quantity = field("الكمية الافتتاحية", "0", InputType.TYPE_CLASS_NUMBER or InputType.TYPE_NUMBER_FLAG_DECIMAL)
         val unitSpinner = Spinner(this)
-        unitSpinner.adapter = ArrayAdapter(this, android.R.layout.simple_spinner_dropdown_item, units.map { "@@{it.name} (@@{it.symbol})" })
+        unitSpinner.adapter = ArrayAdapter(this, android.R.layout.simple_spinner_dropdown_item, units.map { "${it.name} (${it.symbol})" })
         val categorySpinner = Spinner(this)
         val categoryOptions = listOf("بدون تصنيف") + categories.map { it.name }
         categorySpinner.adapter = ArrayAdapter(this, android.R.layout.simple_spinner_dropdown_item, categoryOptions)
@@ -659,7 +659,7 @@ class MainActivity : Activity() {
             form.addView(label("المخزون الافتتاحي", 14f, green, true, Gravity.RIGHT))
             addField(quantity)
         } else {
-            form.addView(label("المخزون الحالي: @@{formatQuantity(existing.stock)} @@{existing.unitSymbol}\nلا يتم تعديل المخزون من شاشة بيانات المنتج؛ استخدم حركة مخزون لاحقاً.", 12f, mutedColor, false, Gravity.RIGHT).apply {
+            form.addView(label("المخزون الحالي: ${formatQuantity(existing.stock)} ${existing.unitSymbol}\nلا يتم تعديل المخزون من شاشة بيانات المنتج؛ استخدم حركة مخزون لاحقاً.", 12f, mutedColor, false, Gravity.RIGHT).apply {
                 setPadding(0, dp(8), 0, dp(8))
             })
         }
