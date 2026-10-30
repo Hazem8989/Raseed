@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="shop_green">#174D38</color>
+    <color name="shop_green_dark">#103728</color>
+    <color name="shop_green_light">#E8F1EC</color>
+    <color name="shop_gold">#C6A45A</color>
+    <color name="shop_white">#FFFFFF</color>
+    <color name="shop_background">#F6F8F6</color>
+    <color name="shop_text">#202820</color>
+    <color name="shop_text_secondary">#68736B</color>
+    <color name="shop_border">#DCE4DE</color>
+    <color name="shop_red">#C62828</color>
+</resources>
