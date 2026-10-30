@@ -27,9 +27,17 @@ import android.content.ContentValues
 import com.hazem.dailystore.data.AppDatabase
 import com.hazem.dailystore.data.CurrencyConverter
 import com.hazem.dailystore.data.StoreRepository
+import com.hazem.dailystore.data.InvoiceRepository
+import com.hazem.dailystore.data.InvoiceLineInput
+import com.hazem.dailystore.data.SupplierRepository
+import com.hazem.dailystore.data.StoreProduct
 import java.math.BigDecimal
 import java.math.RoundingMode
 import java.text.DecimalFormat
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
+import java.util.UUID
 
 class MainActivity : Activity() {
 
@@ -440,6 +448,7 @@ class MainActivity : Activity() {
                     when (title) {
                         "نقطة البيع" -> showPointOfSale()
                         "المنتجات والمخزون" -> showProductManagement()
+                        "المشتريات" -> showPurchases()
                         else -> Toast.makeText(this@MainActivity, "قسم $title سيُفعّل في مرحلته", Toast.LENGTH_SHORT).show()
                     }
                 }
@@ -462,6 +471,386 @@ class MainActivity : Activity() {
             setBackgroundDrawable(cardBackground())
         }
         popup.showAtLocation(window.decorView, Gravity.END, 0, 0)
+    }
+
+
+    private data class PurchaseLineDraft(
+        val product: StoreProduct,
+        var quantity: BigDecimal,
+        var unitCostUsdCents: Long
+    )
+
+    private fun showPurchases() {
+        val repository = InvoiceRepository(this)
+        val page = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setBackgroundColor(backgroundColor)
+        }
+        val header = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(dp(14), dp(10), dp(14), dp(10))
+            setBackgroundColor(Color.WHITE)
+        }
+        val back = Button(this).apply {
+            text = "‹"; textSize = 25f; isAllCaps = false
+            setTextColor(green); setBackgroundColor(Color.TRANSPARENT)
+            setOnClickListener { showPointOfSale() }
+        }
+        header.addView(back, LinearLayout.LayoutParams(dp(48), dp(48)))
+        header.addView(label("المشتريات والفواتير", 19f, green, true, Gravity.CENTER),
+            LinearLayout.LayoutParams(0, -2, 1f))
+        val body = ScrollView(this).apply { isFillViewport = true }
+        val content = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(16), dp(16), dp(16), dp(24))
+        }
+        content.addView(label("إدارة المشتريات", 23f, green, true, Gravity.RIGHT))
+        content.addView(label("إنشاء فاتورة، اختيار الأصناف الموجودة أو إضافة صنف جديد، ثم اعتمادها لتحديث المخزون.",
+            13f, mutedColor, false, Gravity.RIGHT).apply { setPadding(0, dp(5), 0, dp(14)) })
+        val add = Button(this).apply {
+            text = "+ فاتورة مشتريات جديدة"; isAllCaps = false; textSize = 16f
+            setTextColor(Color.WHITE); setBackgroundColor(green)
+            setOnClickListener { showPurchaseInvoiceEditor() }
+        }
+        content.addView(add, fieldParams(dp(52), dp(16)))
+        content.addView(sectionHeading("سجل فواتير الشراء"))
+        val list = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+        content.addView(list, matchWidth())
+        body.addView(content)
+        page.addView(header, matchWidth())
+        page.addView(body, LinearLayout.LayoutParams(-1, 0, 1f))
+        setContentView(page)
+        val rate = StoreRepository(this).getCurrentExchangeRateMilli()
+        val invoices = repository.listPurchaseInvoices()
+        if (invoices.isEmpty()) {
+            list.addView(label("لا توجد فواتير مشتريات بعد.", 14f, mutedColor, false, Gravity.CENTER)
+                .apply { setPadding(0, dp(30), 0, dp(30)) })
+        } else invoices.forEach { invoice ->
+            val card = LinearLayout(this).apply {
+                orientation = LinearLayout.VERTICAL
+                setPadding(dp(14), dp(12), dp(14), dp(12))
+                background = cardBackground()
+            }
+            card.addView(label(invoice.invoiceNumber, 16f, green, true, Gravity.RIGHT))
+            card.addView(label("التاريخ: ${invoice.date}   •   الحالة: ${invoiceStatusArabic(invoice.status)}",
+                12f, mutedColor, false, Gravity.RIGHT).apply { setPadding(0, dp(4), 0, dp(4)) })
+            card.addView(label("المورد: ${invoice.partyName ?: "غير محدد"}", 12f, mutedColor, false, Gravity.RIGHT))
+            card.addView(label("الإجمالي: ${formatDualMoney(invoice.totalUsdCents, rate)}",
+                14f, green, true, Gravity.RIGHT).apply { setPadding(0, dp(5), 0, 0) })
+            list.addView(card, matchWidth().apply { bottomMargin = dp(10) })
+        }
+    }
+
+    private fun invoiceStatusArabic(status: String): String = when (status) {
+        "DRAFT" -> "مسودة"
+        "POSTED" -> "معتمدة"
+        "PARTIALLY_PAID" -> "مدفوعة جزئياً"
+        "PAID" -> "مدفوعة"
+        "CANCELLED" -> "ملغاة"
+        else -> status
+    }
+
+    private fun showPurchaseInvoiceEditor() {
+        val store = StoreRepository(this)
+        store.ensureBaseSetup()
+        val supplierRepository = SupplierRepository(this)
+        val invoiceRepository = InvoiceRepository(this)
+        val lines = mutableListOf<PurchaseLineDraft>()
+        var draftId: String? = null
+        var processing = false
+        val suppliers = supplierRepository.listActive().toMutableList()
+        val page = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setBackgroundColor(backgroundColor)
+        }
+        val header = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(dp(14), dp(10), dp(14), dp(10))
+            setBackgroundColor(Color.WHITE)
+        }
+        val back = Button(this).apply {
+            text = "‹"; textSize = 25f; isAllCaps = false
+            setTextColor(green); setBackgroundColor(Color.TRANSPARENT)
+            setOnClickListener { showPurchases() }
+        }
+        header.addView(back, LinearLayout.LayoutParams(dp(48), dp(48)))
+        header.addView(label("فاتورة مشتريات جديدة", 19f, green, true, Gravity.CENTER),
+            LinearLayout.LayoutParams(0, -2, 1f))
+        val body = ScrollView(this).apply { isFillViewport = true }
+        val form = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(16), dp(14), dp(16), dp(28))
+        }
+        fun field(hint: String, value: String = "", inputType: Int = InputType.TYPE_CLASS_TEXT) =
+            EditText(this).apply {
+                this.hint = hint; setText(value); this.inputType = inputType
+                textSize = 14f; setSingleLine(true); setPadding(dp(12), 0, dp(12), 0)
+                background = inputBackground()
+            }
+        val date = field("تاريخ الفاتورة", SimpleDateFormat("yyyy-MM-dd", Locale.US).format(Date()))
+        val supplierSpinner = Spinner(this)
+        fun refreshSuppliers(selectedId: String? = null) {
+            val options = listOf("بدون تحديد مورد") + suppliers.map { it.name }
+            supplierSpinner.adapter = ArrayAdapter(this, android.R.layout.simple_spinner_dropdown_item, options)
+            if (selectedId != null) {
+                val index = suppliers.indexOfFirst { it.id == selectedId }
+                if (index >= 0) supplierSpinner.setSelection(index + 1)
+            }
+        }
+        refreshSuppliers()
+        val addSupplier = smallButton("+ إضافة مورد") {
+            val box = LinearLayout(this).apply {
+                orientation = LinearLayout.VERTICAL
+                setPadding(dp(18), dp(8), dp(18), 0)
+            }
+            val supplierName = field("اسم المورد *")
+            val phone = field("رقم الهاتف (اختياري)", "", InputType.TYPE_CLASS_PHONE)
+            val address = field("العنوان (اختياري)")
+            box.addView(supplierName, fieldParams(dp(48), dp(8)))
+            box.addView(phone, fieldParams(dp(48), dp(8)))
+            box.addView(address, fieldParams(dp(48), dp(8)))
+            AlertDialog.Builder(this).setTitle("إضافة مورد").setView(box)
+                .setNegativeButton("إلغاء", null)
+                .setPositiveButton("حفظ") { _, _ ->
+                    try {
+                        val created = supplierRepository.create(supplierName.text.toString(),
+                            phone.text.toString(), address.text.toString())
+                        suppliers.add(created)
+                        refreshSuppliers(created.id)
+                    } catch (e: Exception) {
+                        Toast.makeText(this, e.message ?: "تعذر حفظ المورد", Toast.LENGTH_LONG).show()
+                    }
+                }.show()
+        }
+        val discount = field("خصم الفاتورة بالدولار (مثال 1.50)", "0",
+            InputType.TYPE_CLASS_NUMBER or InputType.TYPE_NUMBER_FLAG_DECIMAL)
+        val notes = field("ملاحظات (اختياري)")
+        val lineList = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            background = cardBackground()
+            setPadding(dp(10), dp(8), dp(10), dp(8))
+        }
+        val total = label("الإجمالي: 0.00 USD", 17f, green, true, Gravity.RIGHT)
+        val addProduct = Button(this).apply {
+            text = "+ اختيار صنف من المخزون أو الكتالوج"; isAllCaps = false
+            setTextColor(green); textSize = 15f
+            setOnClickListener { showPurchaseProductPicker { product -> showPurchaseLineDialog(product) { qty, cost ->
+                val existing = lines.firstOrNull { it.product.id == product.id }
+                if (existing == null) lines.add(PurchaseLineDraft(product, qty, cost))
+                else { existing.quantity = existing.quantity.add(qty); existing.unitCostUsdCents = cost }
+                renderLines()
+            } } }
+        }
+        fun renderLines() {
+            lineList.removeAllViews()
+            if (lines.isEmpty()) {
+                lineList.addView(label("لم تتم إضافة أصناف بعد.", 13f, mutedColor, false, Gravity.CENTER)
+                    .apply { setPadding(0, dp(22), 0, dp(22)) })
+            }
+            lines.forEachIndexed { index, line ->
+                val row = LinearLayout(this).apply {
+                    orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL
+                    setPadding(0, dp(8), 0, dp(8))
+                }
+                val info = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+                info.addView(label(line.product.name, 14f, green, true, Gravity.RIGHT))
+                info.addView(label("${line.quantity.stripTrailingZeros().toPlainString()} ${line.product.unitName} × ${moneyText(line.unitCostUsdCents)} USD",
+                    12f, mutedColor, false, Gravity.RIGHT))
+                row.addView(info, LinearLayout.LayoutParams(0, -2, 1f))
+                row.addView(smallButton("تعديل") {
+                    showPurchaseLineDialog(line.product, line.quantity, line.unitCostUsdCents) { qty, cost ->
+                        line.quantity = qty; line.unitCostUsdCents = cost; renderLines()
+                    }
+                }, LinearLayout.LayoutParams(dp(68), dp(42)))
+                row.addView(smallButton("حذف") { lines.removeAt(index); renderLines() },
+                    LinearLayout.LayoutParams(dp(58), dp(42)))
+                lineList.addView(row)
+                val divider = View(this).apply { setBackgroundColor(Color.rgb(232, 235, 231)) }
+                lineList.addView(divider, LinearLayout.LayoutParams(-1, dp(1)))
+            }
+            val subtotal = lines.fold(BigDecimal.ZERO) { sum, line ->
+                sum.add(line.quantity.multiply(BigDecimal.valueOf(line.unitCostUsdCents)))
+            }.setScale(0, RoundingMode.HALF_UP).longValueExact()
+            val discountCents = runCatching { parseUsdCents(discount.text.toString()) }.getOrDefault(0L)
+            val net = (subtotal - discountCents).coerceAtLeast(0L)
+            total.text = "الإجمالي قبل الخصم: ${moneyText(subtotal)} USD\nالصافي: ${formatDualMoney(net, store.getCurrentExchangeRateMilli())}"
+        }
+        discount.addTextChangedListener(object : TextWatcher {
+            override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) {}
+            override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) { renderLines() }
+            override fun afterTextChanged(s: Editable?) {}
+        })
+        form.addView(label("بيانات الفاتورة", 20f, green, true, Gravity.RIGHT))
+        form.addView(date, fieldParams(dp(48), dp(8)))
+        form.addView(label("المورد", 13f, mutedColor, false, Gravity.RIGHT))
+        form.addView(supplierSpinner, fieldParams(dp(48), dp(4)))
+        form.addView(addSupplier, fieldParams(dp(44), dp(12)))
+        form.addView(sectionHeading("أصناف الفاتورة"))
+        form.addView(addProduct, fieldParams(dp(50), dp(8)))
+        form.addView(lineList, fieldParams(-2, dp(12)))
+        form.addView(discount, fieldParams(dp(48), dp(8)))
+        form.addView(total, fieldParams(-2, dp(12)))
+        form.addView(notes, fieldParams(dp(48), dp(12)))
+        val saveDraft = Button(this).apply {
+            text = "حفظ كمسودة"; isAllCaps = false; setTextColor(green)
+            setOnClickListener {
+                if (processing) return@setOnClickListener
+                try {
+                    processing = true
+                    val supplierId = if (supplierSpinner.selectedItemPosition > 0)
+                        suppliers.getOrNull(supplierSpinner.selectedItemPosition - 1)?.id else null
+                    val saved = invoiceRepository.savePurchaseDraft(
+                        UUID.randomUUID().toString(), draftId, supplierId, date.text.toString().trim(),
+                        parseUsdCents(discount.text.toString()), notes.text.toString().trim().ifEmpty { null },
+                        lines.map { InvoiceLineInput(it.product.id, it.quantity, it.unitCostUsdCents) }
+                    )
+                    draftId = saved.invoiceId
+                    Toast.makeText(this, "تم حفظ المسودة ${saved.invoiceNumber}", Toast.LENGTH_SHORT).show()
+                } catch (e: Exception) {
+                    Toast.makeText(this, e.message ?: "تعذر حفظ المسودة", Toast.LENGTH_LONG).show()
+                } finally { processing = false }
+            }
+        }
+        val post = Button(this).apply {
+            text = "حفظ واعتماد الفاتورة وتحديث المخزون"; isAllCaps = false
+            setTextColor(Color.WHITE); setBackgroundColor(green)
+            setOnClickListener {
+                if (processing) return@setOnClickListener
+                try {
+                    processing = true
+                    val supplierId = if (supplierSpinner.selectedItemPosition > 0)
+                        suppliers.getOrNull(supplierSpinner.selectedItemPosition - 1)?.id else null
+                    val saved = invoiceRepository.savePurchaseDraft(
+                        UUID.randomUUID().toString(), draftId, supplierId, date.text.toString().trim(),
+                        parseUsdCents(discount.text.toString()), notes.text.toString().trim().ifEmpty { null },
+                        lines.map { InvoiceLineInput(it.product.id, it.quantity, it.unitCostUsdCents) }
+                    )
+                    draftId = saved.invoiceId
+                    invoiceRepository.postPurchase(saved.invoiceId, UUID.randomUUID().toString())
+                    Toast.makeText(this, "تم اعتماد الفاتورة وتحديث المخزون", Toast.LENGTH_LONG).show()
+                    showPurchases()
+                } catch (e: Exception) {
+                    Toast.makeText(this, e.message ?: "تعذر اعتماد الفاتورة", Toast.LENGTH_LONG).show()
+                } finally { processing = false }
+            }
+        }
+        form.addView(saveDraft, fieldParams(dp(50), dp(8)))
+        form.addView(post, fieldParams(dp(54), dp(8)))
+        body.addView(form)
+        page.addView(header, matchWidth())
+        page.addView(body, LinearLayout.LayoutParams(-1, 0, 1f))
+        setContentView(page)
+        renderLines()
+    }
+
+    private fun showPurchaseProductPicker(onSelected: (StoreProduct) -> Unit) {
+        val repository = StoreRepository(this)
+        val dialogContent = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(16), dp(8), dp(16), dp(8))
+        }
+        val search = fieldForDialog("ابحث باسم المنتج أو الباركود أو SKU")
+        val results = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+        val scroll = ScrollView(this).apply { addView(results) }
+        val addNew = Button(this).apply {
+            text = "+ إضافة منتج جديد"; isAllCaps = false
+            setTextColor(Color.WHITE); setBackgroundColor(green)
+            setOnClickListener { showProductEditor(null) {
+                showPurchaseProductPicker(onSelected)
+            } }
+        }
+        dialogContent.addView(search, fieldParams(dp(48), dp(8)))
+        dialogContent.addView(addNew, fieldParams(dp(46), dp(8)))
+        dialogContent.addView(scroll, LinearLayout.LayoutParams(-1, dp(300)))
+        val dialog = AlertDialog.Builder(this).setTitle("اختيار صنف").setView(dialogContent)
+            .setNegativeButton("إغلاق", null).create()
+        fun refresh(query: String) {
+            results.removeAllViews()
+            repository.listProducts().filter {
+                query.isBlank() || it.name.contains(query, true) ||
+                    (it.barcode?.contains(query, true) == true) || (it.sku?.contains(query, true) == true)
+            }.forEach { product ->
+                val item = smallButton("${product.name}  •  ${product.unitName}  •  ${moneyText(product.purchaseCostUsdCents)} USD") {
+                    dialog.dismiss(); onSelected(product)
+                }
+                item.gravity = Gravity.RIGHT
+                results.addView(item, fieldParams(dp(48), dp(4)))
+            }
+        }
+        search.addTextChangedListener(object : TextWatcher {
+            override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) {}
+            override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) { refresh(s?.toString().orEmpty()) }
+            override fun afterTextChanged(s: Editable?) {}
+        })
+        refresh("")
+        dialog.show()
+    }
+
+    private fun showPurchaseLineDialog(
+        product: StoreProduct,
+        initialQuantity: BigDecimal = BigDecimal.ONE,
+        initialCost: Long = product.purchaseCostUsdCents,
+        onSave: (BigDecimal, Long) -> Unit
+    ) {
+        val content = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(20), dp(8), dp(20), 0)
+        }
+        val numeric = InputType.TYPE_CLASS_NUMBER or InputType.TYPE_NUMBER_FLAG_DECIMAL
+        val quantity = fieldForDialog("الكمية ${product.unitName}", initialQuantity.stripTrailingZeros().toPlainString(), numeric)
+        val cost = fieldForDialog("تكلفة الوحدة بالدولار", moneyText(initialCost), numeric)
+        val rate = StoreRepository(this).getCurrentExchangeRateMilli()
+        val costSyp = fieldForDialog("تكلفة الوحدة بالليرة السورية",
+            if (rate > 0L) formatSypAmount(CurrencyConverter.usdCentsToSyp(initialCost, rate)) else "",
+            InputType.TYPE_CLASS_NUMBER or InputType.TYPE_NUMBER_FLAG_DECIMAL)
+        var syncing = false
+        cost.addTextChangedListener(object : TextWatcher {
+            override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) {}
+            override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {
+                if (syncing || rate <= 0L) return
+                val cents = runCatching { parseUsdCents(s?.toString().orEmpty()) }.getOrNull() ?: return
+                syncing = true; costSyp.setText(formatSypAmount(CurrencyConverter.usdCentsToSyp(cents, rate))); syncing = false
+            }
+            override fun afterTextChanged(s: Editable?) {}
+        })
+        costSyp.addTextChangedListener(object : TextWatcher {
+            override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) {}
+            override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {
+                if (syncing || rate <= 0L) return
+                val amount = runCatching { parseSypAmount(s?.toString().orEmpty()) }.getOrNull() ?: return
+                syncing = true; cost.setText(moneyText(CurrencyConverter.sypToUsdCents(amount, rate))); syncing = false
+            }
+            override fun afterTextChanged(s: Editable?) {}
+        })
+        costSyp.isEnabled = rate > 0L
+        if (rate <= 0L) costSyp.hint = "سجّل سعر الصرف أولاً"
+        content.addView(label(product.name, 17f, green, true, Gravity.CENTER).apply {
+            setPadding(0, 0, 0, dp(8))
+        })
+        content.addView(quantity, fieldParams(dp(48), dp(8)))
+        content.addView(cost, fieldParams(dp(48), dp(8)))
+        content.addView(costSyp, fieldParams(dp(48), dp(8)))
+        AlertDialog.Builder(this).setTitle("بيانات الصنف").setView(content)
+            .setNegativeButton("إلغاء", null)
+            .setPositiveButton("إضافة") { _, _ ->
+                try {
+                    val qty = BigDecimal(quantity.text.toString().trim().replace(',', '.'))
+                    require(qty.signum() > 0) { "أدخل كمية أكبر من صفر" }
+                    onSave(qty, parseUsdCents(cost.text.toString()))
+                } catch (e: Exception) {
+                    Toast.makeText(this, e.message ?: "تحقق من الكمية والتكلفة", Toast.LENGTH_LONG).show()
+                }
+            }.show()
+    }
+
+    private fun fieldForDialog(
+        hint: String, value: String = "", type: Int = InputType.TYPE_CLASS_TEXT
+    ) = EditText(this).apply {
+        this.hint = hint; setText(value); inputType = type
+        textSize = 14f; setSingleLine(true); setPadding(dp(12), 0, dp(12), 0)
+        background = inputBackground()
     }
 
     private fun showProductManagement() {
@@ -634,7 +1023,7 @@ class MainActivity : Activity() {
         refresh("")
     }
 
-    private fun showProductEditor(existing: com.hazem.dailystore.data.StoreProduct?) {
+    private fun showProductEditor(existing: com.hazem.dailystore.data.StoreProduct?, onSaved: (() -> Unit)? = null) {
         val repository = StoreRepository(this)
         val units = repository.getUnits()
         val categories = repository.getCategories()
@@ -772,7 +1161,7 @@ class MainActivity : Activity() {
                     )
                     dialog.dismiss()
                     Toast.makeText(this, "تم حفظ بيانات المنتج", Toast.LENGTH_SHORT).show()
-                    showProductManagement()
+                    if (onSaved != null) onSaved() else showProductManagement()
                 } catch (e: Exception) {
                     Toast.makeText(this, e.message ?: "تعذر حفظ المنتج؛ تحقق من عدم تكرار الباركود أو SKU", Toast.LENGTH_LONG).show()
                 }
