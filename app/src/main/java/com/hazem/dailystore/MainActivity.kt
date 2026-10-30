@@ -633,6 +633,7 @@ class MainActivity : Activity() {
             setPadding(dp(10), dp(8), dp(10), dp(8))
         }
         val total = label("الإجمالي: 0.00 USD", 17f, green, true, Gravity.RIGHT)
+        var renderLines: () -> Unit = {}
         val addProduct = Button(this).apply {
             text = "+ اختيار صنف من المخزون أو الكتالوج"; isAllCaps = false
             setTextColor(green); textSize = 15f
@@ -643,7 +644,7 @@ class MainActivity : Activity() {
                 renderLines()
             } } }
         }
-        fun renderLines() {
+        renderLines = {
             lineList.removeAllViews()
             if (lines.isEmpty()) {
                 lineList.addView(label("لم تتم إضافة أصناف بعد.", 13f, mutedColor, false, Gravity.CENTER)
