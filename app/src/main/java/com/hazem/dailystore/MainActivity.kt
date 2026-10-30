@@ -30,6 +30,10 @@ import com.hazem.dailystore.data.StoreRepository
 import com.hazem.dailystore.data.InvoiceRepository
 import com.hazem.dailystore.data.InvoiceLineInput
 import com.hazem.dailystore.data.SupplierRepository
+import com.hazem.dailystore.data.CashAccountRepository
+import com.hazem.dailystore.data.CashAccountSummary
+import com.hazem.dailystore.data.PurchasePaymentRepository
+import com.hazem.dailystore.data.PurchaseInvoicePaymentSummary
 import com.hazem.dailystore.data.StoreProduct
 import java.math.BigDecimal
 import java.math.RoundingMode
@@ -449,6 +453,7 @@ class MainActivity : Activity() {
                         "نقطة البيع" -> showPointOfSale()
                         "المنتجات والمخزون" -> showProductManagement()
                         "المشتريات" -> showPurchases()
+                        "الصناديق والمحافظ" -> showCashAccounts()
                         else -> Toast.makeText(this@MainActivity, "قسم $title سيُفعّل في مرحلته", Toast.LENGTH_SHORT).show()
                     }
                 }
@@ -481,7 +486,7 @@ class MainActivity : Activity() {
     )
 
     private fun showPurchases() {
-        val repository = InvoiceRepository(this)
+        val repository = PurchasePaymentRepository(this)
         val page = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             setBackgroundColor(backgroundColor)
@@ -506,14 +511,41 @@ class MainActivity : Activity() {
             setPadding(dp(16), dp(16), dp(16), dp(24))
         }
         content.addView(label("إدارة المشتريات", 23f, green, true, Gravity.RIGHT))
-        content.addView(label("إنشاء فاتورة، اختيار الأصناف الموجودة أو إضافة صنف جديد، ثم اعتمادها لتحديث المخزون.",
-            13f, mutedColor, false, Gravity.RIGHT).apply { setPadding(0, dp(5), 0, dp(14)) })
+        content.addView(label(
+            "تابع الفواتير والمدفوعات والمبالغ المتبقية للموردين من مكان واحد.",
+            13f, mutedColor, false, Gravity.RIGHT
+        ).apply { setPadding(0, dp(5), 0, dp(14)) })
+        val actions = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
         val add = Button(this).apply {
-            text = "+ فاتورة مشتريات جديدة"; isAllCaps = false; textSize = 16f
+            text = "+ فاتورة مشتريات"; isAllCaps = false; textSize = 14f
             setTextColor(Color.WHITE); setBackgroundColor(green)
             setOnClickListener { showPurchaseInvoiceEditor() }
         }
-        content.addView(add, fieldParams(dp(52), dp(16)))
+        val suppliers = Button(this).apply {
+            text = "الموردون"; isAllCaps = false; textSize = 14f
+            setTextColor(green)
+            setOnClickListener { showSuppliers() }
+        }
+        actions.addView(add, LinearLayout.LayoutParams(0, dp(50), 1f).apply { marginEnd = dp(6) })
+        actions.addView(suppliers, LinearLayout.LayoutParams(0, dp(50), 1f))
+        content.addView(actions, fieldParams(dp(50), dp(12)))
+        val invoices = repository.listPurchaseInvoices()
+        val outstandingTotal = invoices.filter {
+            it.invoiceStatus != "DRAFT" && it.invoiceStatus != "CANCELLED"
+        }.sumOf { it.outstandingUsdCents }
+        val paidTotal = invoices.sumOf { it.paidUsdCents }
+        val rate = StoreRepository(this).getCurrentExchangeRateMilli()
+        val summary = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(14), dp(12), dp(14), dp(12))
+            background = cardBackground()
+        }
+        summary.addView(label("ملخص حسابات الموردين", 16f, green, true, Gravity.RIGHT))
+        summary.addView(label("إجمالي المدفوع: ${formatDualMoney(paidTotal, rate)}",
+            13f, textColor, false, Gravity.RIGHT).apply { setPadding(0, dp(6), 0, dp(3)) })
+        summary.addView(label("المتبقي للموردين: ${formatDualMoney(outstandingTotal, rate)}",
+            14f, green, true, Gravity.RIGHT))
+        content.addView(summary, fieldParams(-2, dp(14)))
         content.addView(sectionHeading("سجل فواتير الشراء"))
         val list = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
         content.addView(list, matchWidth())
@@ -521,8 +553,6 @@ class MainActivity : Activity() {
         page.addView(header, matchWidth())
         page.addView(body, LinearLayout.LayoutParams(-1, 0, 1f))
         setContentView(page)
-        val rate = StoreRepository(this).getCurrentExchangeRateMilli()
-        val invoices = repository.listPurchaseInvoices()
         if (invoices.isEmpty()) {
             list.addView(label("لا توجد فواتير مشتريات بعد.", 14f, mutedColor, false, Gravity.CENTER)
                 .apply { setPadding(0, dp(30), 0, dp(30)) })
@@ -533,14 +563,365 @@ class MainActivity : Activity() {
                 background = cardBackground()
             }
             card.addView(label(invoice.invoiceNumber, 16f, green, true, Gravity.RIGHT))
-            card.addView(label("التاريخ: ${invoice.date}   •   الحالة: ${invoiceStatusArabic(invoice.status)}",
+            card.addView(label("التاريخ: ${invoice.date}  •  اعتماد الفاتورة: ${invoiceStatusArabic(invoice.invoiceStatus)}",
                 12f, mutedColor, false, Gravity.RIGHT).apply { setPadding(0, dp(4), 0, dp(4)) })
-            card.addView(label("المورد: ${invoice.partyName ?: "غير محدد"}", 12f, mutedColor, false, Gravity.RIGHT))
+            card.addView(label("المورد: ${invoice.supplierName ?: "غير محدد"}",
+                12f, mutedColor, false, Gravity.RIGHT))
+            card.addView(label("حالة الدفع: ${paymentStatusArabic(invoice.paymentStatus)}",
+                13f, green, true, Gravity.RIGHT).apply { setPadding(0, dp(5), 0, dp(3)) })
             card.addView(label("الإجمالي: ${formatDualMoney(invoice.totalUsdCents, rate)}",
-                14f, green, true, Gravity.RIGHT).apply { setPadding(0, dp(5), 0, 0) })
+                13f, textColor, false, Gravity.RIGHT))
+            card.addView(label("المدفوع: ${formatDualMoney(invoice.paidUsdCents, rate)}",
+                13f, textColor, false, Gravity.RIGHT))
+            card.addView(label("المتبقي: ${formatDualMoney(invoice.outstandingUsdCents, rate)}",
+                14f, if (invoice.outstandingUsdCents > 0L) green else mutedColor,
+                true, Gravity.RIGHT))
+            if (invoice.outstandingUsdCents > 0L &&
+                (invoice.invoiceStatus == "POSTED" || invoice.invoiceStatus == "PARTIALLY_PAID")) {
+                card.addView(smallButton("＋ تسجيل دفعة للمورد") {
+                    showPurchasePaymentDialog(invoice.id, invoice.invoiceNumber) { showPurchases() }
+                }, fieldParams(dp(44), dp(4)))
+            }
+            val history = repository.listPayments(invoice.id)
+            if (history.isNotEmpty()) {
+                val historyText = history.joinToString("\n") {
+                    "${formatAccountBalance(it.amountMinor, it.currencyCode)} • ${it.accountName} • ${it.createdAt.take(10)}"
+                }
+                card.addView(label("سجل الدفعات:\n$historyText", 11f, mutedColor, false, Gravity.RIGHT)
+                    .apply { setPadding(0, dp(6), 0, 0) })
+            }
             list.addView(card, matchWidth().apply { bottomMargin = dp(10) })
         }
     }
+
+    private fun paymentStatusArabic(status: String): String = when (status) {
+        "UNPAID" -> "آجلة – غير مدفوعة"
+        "PARTIALLY_PAID" -> "مدفوعة جزئياً"
+        "PAID" -> "مدفوعة بالكامل"
+        "DRAFT" -> "مسودة"
+        "CANCELLED" -> "ملغاة"
+        else -> status
+    }
+
+    private fun showPurchasePaymentDialog(
+        invoiceId: String, invoiceNumber: String, onSaved: () -> Unit
+    ) {
+        val payments = PurchasePaymentRepository(this)
+        val accounts = CashAccountRepository(this).listActive()
+        if (accounts.isEmpty()) {
+            AlertDialog.Builder(this).setTitle("لا توجد حسابات مالية")
+                .setMessage("أنشئ صندوقاً أو محفظة وأدخل رصيدها الافتتاحي قبل تسجيل دفعة.")
+                .setNegativeButton("لاحقاً", null)
+                .setPositiveButton("إضافة حساب") { _, _ -> showCashAccounts() }.show()
+            return
+        }
+        val content = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(18), dp(8), dp(18), dp(4))
+        }
+        val accountSpinner = Spinner(this)
+        val accountLabels = accounts.map {
+            "${it.name} • ${cashAccountTypeArabic(it.accountType)} • ${it.currencyCode} • الرصيد ${formatAccountBalance(it.balanceMinor, it.currencyCode)}"
+        }
+        accountSpinner.adapter = ArrayAdapter(this, android.R.layout.simple_spinner_dropdown_item, accountLabels)
+        val amount = fieldForDialog("مبلغ الدفعة")
+        amount.inputType = InputType.TYPE_CLASS_NUMBER or InputType.TYPE_NUMBER_FLAG_DECIMAL
+        val note = fieldForDialog("ملاحظة (اختياري)")
+        val history = payments.listPayments(invoiceId)
+        val historyText = if (history.isEmpty()) "لا توجد دفعات سابقة." else history.joinToString("\n") {
+            "${formatAccountBalance(it.amountMinor, it.currencyCode)} • ${it.accountName} • ${it.createdAt.take(10)}"
+        }
+        content.addView(label("الفاتورة: $invoiceNumber", 15f, green, true, Gravity.RIGHT))
+        content.addView(label("اختر الصندوق أو المحفظة", 12f, mutedColor, false, Gravity.RIGHT)
+            .apply { setPadding(0, dp(10), 0, dp(4)) })
+        content.addView(accountSpinner, fieldParams(dp(48), dp(8)))
+        content.addView(amount, fieldParams(dp(48), dp(8)))
+        content.addView(note, fieldParams(dp(48), dp(8)))
+        content.addView(label("الدفعات السابقة:\n$historyText", 11f, mutedColor, false, Gravity.RIGHT)
+            .apply { setPadding(0, dp(8), 0, dp(4)) })
+        val dialog = AlertDialog.Builder(this).setTitle("تسجيل دفعة للمورد")
+            .setView(content).setNegativeButton("إلغاء", null)
+            .setPositiveButton("تأكيد الدفع", null).create()
+        dialog.setOnShowListener {
+            dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener {
+                try {
+                    val account = accounts[accountSpinner.selectedItemPosition]
+                    val entered = amount.text.toString().trim()
+                    val amountMinor = if (account.currencyCode == "USD")
+                        parseUsdCents(entered) else parseSypAmount(entered)
+                    require(amountMinor > 0L) { "أدخل مبلغاً أكبر من صفر" }
+                    val result = payments.addPayment(
+                        invoiceId, UUID.randomUUID().toString(), account.id, amountMinor,
+                        note.text.toString().trim().ifEmpty { null }
+                    )
+                    dialog.dismiss()
+                    Toast.makeText(this,
+                        if (result.paymentStatus == "PAID") "تم تسديد الفاتورة بالكامل"
+                        else "تم تسجيل الدفعة الجزئية بنجاح",
+                        Toast.LENGTH_LONG).show()
+                    onSaved()
+                } catch (e: Exception) {
+                    Toast.makeText(this, e.message ?: "تعذر تسجيل الدفعة", Toast.LENGTH_LONG).show()
+                }
+            }
+        }
+        dialog.show()
+    }
+
+    private fun showSuppliers() {
+        val repository = PurchasePaymentRepository(this)
+        val suppliers = repository.listSupplierSummaries()
+        val rate = StoreRepository(this).getCurrentExchangeRateMilli()
+        val page = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setBackgroundColor(backgroundColor)
+        }
+        val header = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(dp(14), dp(10), dp(14), dp(10))
+            setBackgroundColor(Color.WHITE)
+        }
+        val back = Button(this).apply {
+            text = "‹"; textSize = 25f; isAllCaps = false
+            setTextColor(green); setBackgroundColor(Color.TRANSPARENT)
+            setOnClickListener { showPurchases() }
+        }
+        header.addView(back, LinearLayout.LayoutParams(dp(48), dp(48)))
+        header.addView(label("حسابات الموردين", 19f, green, true, Gravity.CENTER),
+            LinearLayout.LayoutParams(0, -2, 1f))
+        val body = ScrollView(this).apply { isFillViewport = true }
+        val list = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(16), dp(16), dp(16), dp(24))
+        }
+        val totalDue = suppliers.sumOf { it.outstandingUsdCents }
+        val totalPaid = suppliers.sumOf { it.paidUsdCents }
+        list.addView(label("إجمالي ما دُفع: ${formatDualMoney(totalPaid, rate)}",
+            14f, textColor, false, Gravity.RIGHT))
+        list.addView(label("إجمالي المستحق: ${formatDualMoney(totalDue, rate)}",
+            16f, green, true, Gravity.RIGHT).apply { setPadding(0, dp(4), 0, dp(14)) })
+        if (suppliers.isEmpty()) {
+            list.addView(label("لا يوجد موردون مسجلون بعد.", 14f, mutedColor, false, Gravity.CENTER))
+        }
+        suppliers.forEach { supplier ->
+            val card = LinearLayout(this).apply {
+                orientation = LinearLayout.VERTICAL
+                setPadding(dp(14), dp(12), dp(14), dp(12))
+                background = cardBackground()
+                isClickable = true
+                setOnClickListener { showSupplierDetails(supplier.id) }
+            }
+            card.addView(label(supplier.name, 16f, green, true, Gravity.RIGHT))
+            card.addView(label("الفواتير المعتمدة: ${formatDualMoney(supplier.totalPurchaseUsdCents, rate)}",
+                12f, textColor, false, Gravity.RIGHT).apply { setPadding(0, dp(5), 0, dp(2)) })
+            card.addView(label("المدفوع: ${formatDualMoney(supplier.paidUsdCents, rate)}",
+                12f, textColor, false, Gravity.RIGHT))
+            card.addView(label("المتبقي: ${formatDualMoney(supplier.outstandingUsdCents, rate)}",
+                14f, green, true, Gravity.RIGHT).apply { setPadding(0, dp(3), 0, dp(2)) })
+            card.addView(label("فواتير غير مسددة: ${supplier.unpaidInvoiceCount}",
+                11f, mutedColor, false, Gravity.RIGHT))
+            list.addView(card, fieldParams(-2, dp(10)))
+        }
+        body.addView(list)
+        page.addView(header, matchWidth())
+        page.addView(body, LinearLayout.LayoutParams(-1, 0, 1f))
+        setContentView(page)
+    }
+
+    private fun showSupplierDetails(supplierId: String) {
+        val repository = PurchasePaymentRepository(this)
+        val supplier = repository.listSupplierSummaries().firstOrNull { it.id == supplierId }
+            ?: run { showSuppliers(); return }
+        val rate = StoreRepository(this).getCurrentExchangeRateMilli()
+        val page = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setBackgroundColor(backgroundColor)
+        }
+        val header = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(dp(14), dp(10), dp(14), dp(10))
+            setBackgroundColor(Color.WHITE)
+        }
+        val back = Button(this).apply {
+            text = "‹"; textSize = 25f; isAllCaps = false
+            setTextColor(green); setBackgroundColor(Color.TRANSPARENT)
+            setOnClickListener { showSuppliers() }
+        }
+        header.addView(back, LinearLayout.LayoutParams(dp(48), dp(48)))
+        header.addView(label(supplier.name, 18f, green, true, Gravity.CENTER),
+            LinearLayout.LayoutParams(0, -2, 1f))
+        val body = ScrollView(this).apply { isFillViewport = true }
+        val content = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(16), dp(14), dp(16), dp(24))
+        }
+        content.addView(label("إجمالي الفواتير: ${formatDualMoney(supplier.totalPurchaseUsdCents, rate)}",
+            13f, textColor, false, Gravity.RIGHT))
+        content.addView(label("إجمالي المدفوع: ${formatDualMoney(supplier.paidUsdCents, rate)}",
+            13f, textColor, false, Gravity.RIGHT).apply { setPadding(0, dp(4), 0, dp(4)) })
+        content.addView(label("المبلغ المستحق: ${formatDualMoney(supplier.outstandingUsdCents, rate)}",
+            16f, green, true, Gravity.RIGHT).apply { setPadding(0, dp(4), 0, dp(12)) })
+        var filter = "ALL"
+        val filterRow = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
+        val list = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+        fun refreshInvoices() {
+            list.removeAllViews()
+            val filtered = repository.listPurchaseInvoices(supplierId).filter {
+                when (filter) {
+                    "UNPAID" -> it.paymentStatus == "UNPAID"
+                    "PARTIAL" -> it.paymentStatus == "PARTIALLY_PAID"
+                    "PAID" -> it.paymentStatus == "PAID"
+                    else -> true
+                }
+            }
+            if (filtered.isEmpty()) list.addView(label("لا توجد فواتير ضمن هذا التصنيف.", 13f,
+                mutedColor, false, Gravity.CENTER).apply { setPadding(0, dp(20), 0, dp(20)) })
+            filtered.forEach { invoice ->
+                val card = LinearLayout(this).apply {
+                    orientation = LinearLayout.VERTICAL
+                    setPadding(dp(12), dp(10), dp(12), dp(10))
+                    background = cardBackground()
+                }
+                card.addView(label(invoice.invoiceNumber, 15f, green, true, Gravity.RIGHT))
+                card.addView(label("التاريخ: ${invoice.date} • ${paymentStatusArabic(invoice.paymentStatus)}",
+                    12f, mutedColor, false, Gravity.RIGHT).apply { setPadding(0, dp(4), 0, dp(4)) })
+                card.addView(label("الإجمالي: ${formatDualMoney(invoice.totalUsdCents, rate)}",
+                    12f, textColor, false, Gravity.RIGHT))
+                card.addView(label("المدفوع: ${formatDualMoney(invoice.paidUsdCents, rate)}",
+                    12f, textColor, false, Gravity.RIGHT))
+                card.addView(label("المتبقي: ${formatDualMoney(invoice.outstandingUsdCents, rate)}",
+                    13f, green, true, Gravity.RIGHT))
+                if (invoice.outstandingUsdCents > 0L &&
+                    (invoice.invoiceStatus == "POSTED" || invoice.invoiceStatus == "PARTIALLY_PAID")) {
+                    card.addView(smallButton("تسجيل دفعة") {
+                        showPurchasePaymentDialog(invoice.id, invoice.invoiceNumber) {
+                            showSupplierDetails(supplierId)
+                        }
+                    }, fieldParams(dp(42), dp(2)))
+                }
+                list.addView(card, fieldParams(-2, dp(8)))
+            }
+        }
+        listOf("ALL" to "الكل", "UNPAID" to "آجلة", "PARTIAL" to "جزئية", "PAID" to "مدفوعة").forEach { (key, title) ->
+            val button = smallButton(title) {
+                filter = key
+                refreshInvoices()
+            }
+            filterRow.addView(button, LinearLayout.LayoutParams(0, dp(42), 1f))
+        }
+        content.addView(filterRow, fieldParams(dp(42), dp(8)))
+        content.addView(list, matchWidth())
+        refreshInvoices()
+        body.addView(content)
+        page.addView(header, matchWidth())
+        page.addView(body, LinearLayout.LayoutParams(-1, 0, 1f))
+        setContentView(page)
+    }
+
+    private fun showCashAccounts() {
+        val repository = CashAccountRepository(this)
+        val page = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setBackgroundColor(backgroundColor)
+        }
+        val header = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(dp(14), dp(10), dp(14), dp(10))
+            setBackgroundColor(Color.WHITE)
+        }
+        val back = Button(this).apply {
+            text = "‹"; textSize = 25f; isAllCaps = false
+            setTextColor(green); setBackgroundColor(Color.TRANSPARENT)
+            setOnClickListener { showPointOfSale() }
+        }
+        header.addView(back, LinearLayout.LayoutParams(dp(48), dp(48)))
+        header.addView(label("الصناديق والمحافظ", 19f, green, true, Gravity.CENTER),
+            LinearLayout.LayoutParams(0, -2, 1f))
+        val body = ScrollView(this).apply { isFillViewport = true }
+        val content = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(16), dp(16), dp(16), dp(24))
+        }
+        content.addView(label("الحسابات المالية", 22f, green, true, Gravity.RIGHT))
+        content.addView(label("كل حساب يحتفظ بعملة مستقلة، ويُحسب رصيده من الرصيد الافتتاحي والحركات المسجلة.",
+            13f, mutedColor, false, Gravity.RIGHT).apply { setPadding(0, dp(5), 0, dp(12)) })
+        val add = Button(this).apply {
+            text = "+ إضافة صندوق أو محفظة"; isAllCaps = false
+            setTextColor(Color.WHITE); setBackgroundColor(green)
+            setOnClickListener { showCreateCashAccountDialog() }
+        }
+        content.addView(add, fieldParams(dp(50), dp(12)))
+        repository.listAll().forEach { account ->
+            val card = LinearLayout(this).apply {
+                orientation = LinearLayout.VERTICAL
+                setPadding(dp(14), dp(12), dp(14), dp(12))
+                background = cardBackground()
+            }
+            card.addView(label(account.name, 16f, green, true, Gravity.RIGHT))
+            card.addView(label("${cashAccountTypeArabic(account.accountType)} • ${account.currencyCode}",
+                12f, mutedColor, false, Gravity.RIGHT).apply { setPadding(0, dp(4), 0, dp(4)) })
+            card.addView(label("الرصيد الحالي: ${formatAccountBalance(account.balanceMinor, account.currencyCode)}",
+                15f, textColor, true, Gravity.RIGHT))
+            card.addView(label(if (account.isActive) "نشط" else "موقوف", 11f,
+                if (account.isActive) green else mutedColor, false, Gravity.RIGHT))
+            content.addView(card, fieldParams(-2, dp(8)))
+        }
+        body.addView(content)
+        page.addView(header, matchWidth())
+        page.addView(body, LinearLayout.LayoutParams(-1, 0, 1f))
+        setContentView(page)
+    }
+
+    private fun showCreateCashAccountDialog() {
+        val content = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(18), dp(8), dp(18), dp(4))
+        }
+        val name = fieldForDialog("اسم الحساب")
+        val type = Spinner(this)
+        val typeLabels = listOf("صندوق نقدي", "محفظة إلكترونية", "حساب بنكي", "أخرى")
+        type.adapter = ArrayAdapter(this, android.R.layout.simple_spinner_dropdown_item, typeLabels)
+        val currency = Spinner(this)
+        val currencies = listOf("USD", "SYP")
+        currency.adapter = ArrayAdapter(this, android.R.layout.simple_spinner_dropdown_item, currencies)
+        val opening = fieldForDialog("الرصيد الافتتاحي")
+        opening.inputType = InputType.TYPE_CLASS_NUMBER or InputType.TYPE_NUMBER_FLAG_DECIMAL
+        content.addView(name, fieldParams(dp(48), dp(8)))
+        content.addView(label("نوع الحساب", 12f, mutedColor, false, Gravity.RIGHT))
+        content.addView(type, fieldParams(dp(46), dp(6)))
+        content.addView(label("العملة", 12f, mutedColor, false, Gravity.RIGHT))
+        content.addView(currency, fieldParams(dp(46), dp(6)))
+        content.addView(opening, fieldParams(dp(48), dp(6)))
+        AlertDialog.Builder(this).setTitle("إضافة حساب مالي").setView(content)
+            .setNegativeButton("إلغاء", null)
+            .setPositiveButton("حفظ") { _, _ ->
+                try {
+                    val code = currencies[currency.selectedItemPosition]
+                    val balance = if (code == "USD") parseUsdCents(opening.text.toString())
+                        else parseSypAmount(opening.text.toString())
+                    val typeCode = listOf("CASH_BOX", "WALLET", "BANK", "OTHER")[type.selectedItemPosition]
+                    CashAccountRepository(this).create(name.text.toString(), typeCode, code, balance)
+                    Toast.makeText(this, "تم إنشاء الحساب المالي", Toast.LENGTH_SHORT).show()
+                    showCashAccounts()
+                } catch (e: Exception) {
+                    Toast.makeText(this, e.message ?: "تعذر إنشاء الحساب", Toast.LENGTH_LONG).show()
+                }
+            }.show()
+    }
+
+    private fun cashAccountTypeArabic(type: String): String = when (type) {
+        "CASH_BOX" -> "صندوق نقدي"
+        "WALLET" -> "محفظة"
+        "BANK" -> "بنك"
+        else -> "أخرى"
+    }
+
+    private fun formatAccountBalance(amountMinor: Long, currency: String): String =
+        if (currency == "USD") "$" + moneyText(amountMinor)
+        else formatSypAmount(amountMinor) + " ل.س"
 
     private fun invoiceStatusArabic(status: String): String = when (status) {
         "DRAFT" -> "مسودة"
