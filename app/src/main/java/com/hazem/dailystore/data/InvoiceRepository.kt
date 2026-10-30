@@ -77,8 +77,8 @@ class InvoiceRepository(context: Context) {
         require(operationId.isNotBlank()) { "معرّف العملية مطلوب" }
         require(invoiceDate.isNotBlank()) { "تاريخ الفاتورة مطلوب" }
         require(discountUsdCents >= 0L) { "الخصم لا يمكن أن يكون سالباً" }
-        validateLines(lines)
         val db = database.writableDatabase
+        validateLines(db, lines)
         val table = if (type == "PURCHASE") "purchase_invoices" else "sales_invoices"
         val itemTable = if (type == "PURCHASE") "purchase_items" else "sales_items"
         val partyColumn = if (type == "PURCHASE") "supplier_id" else "customer_id"
@@ -246,13 +246,24 @@ class InvoiceRepository(context: Context) {
         return result
     }
 
-    private fun validateLines(lines: List<InvoiceLineInput>) {
+    private fun validateLines(db: SQLiteDatabase, lines: List<InvoiceLineInput>) {
         require(lines.isNotEmpty()) { "أضف صنفاً واحداً على الأقل إلى الفاتورة" }
-        lines.forEach {
-            require(it.productId.isNotBlank()) { "يوجد صنف غير محدد" }
-            require(it.quantity.signum() > 0) { "الكمية يجب أن تكون أكبر من صفر" }
-            require(it.unitPriceUsdCents >= 0L) { "السعر لا يمكن أن يكون سالباً" }
-            require(it.quantity.scale() <= 6) { "دقة الكمية أكبر من المسموح" }
+        lines.forEach { line ->
+            require(line.productId.isNotBlank()) { "يوجد صنف غير محدد" }
+            require(line.quantity.signum() > 0) { "الكمية يجب أن تكون أكبر من صفر" }
+            require(line.unitPriceUsdCents >= 0L) { "السعر لا يمكن أن يكون سالباً" }
+            val decimals = db.rawQuery(
+                """SELECT u.decimal_places FROM products p JOIN units u ON u.id=p.unit_id
+                   WHERE p.id=? AND p.is_active=1""".trimIndent(),
+                arrayOf(line.productId)
+            ).use {
+                require(it.moveToFirst()) { "المنتج غير موجود أو موقوف: ${line.productId}" }
+                it.getInt(0)
+            }
+            val enteredDecimals = line.quantity.stripTrailingZeros().scale().coerceAtLeast(0)
+            require(enteredDecimals <= decimals) {
+                "دقة الكمية لا تتوافق مع وحدة قياس المنتج (المنازل العشرية المسموحة: $decimals)"
+            }
         }
     }
 
