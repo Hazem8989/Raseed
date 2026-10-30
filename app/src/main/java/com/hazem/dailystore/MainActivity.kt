@@ -23,6 +23,7 @@ import android.widget.Toast
 import android.content.ContentValues
 import com.hazem.dailystore.data.AppDatabase
 import com.hazem.dailystore.data.CurrencyConverter
+import com.hazem.dailystore.data.StoreRepository
 import java.math.BigDecimal
 import java.math.RoundingMode
 import java.text.DecimalFormat
@@ -65,6 +66,7 @@ class MainActivity : Activity() {
         window.navigationBarColor = green
         window.setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE)
         window.decorView.layoutDirection = View.LAYOUT_DIRECTION_RTL
+        StoreRepository(this).ensureBaseSetup()
         showLoginScreen()
     }
 
