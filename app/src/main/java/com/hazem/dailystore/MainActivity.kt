@@ -13,6 +13,9 @@ import android.view.Gravity
 import android.view.View
 import android.view.WindowManager
 import android.widget.Button
+import android.widget.ArrayAdapter
+import android.widget.CheckBox
+import android.widget.Spinner
 import android.widget.EditText
 import android.widget.GridLayout
 import android.widget.LinearLayout
@@ -434,7 +437,11 @@ class MainActivity : Activity() {
                 addView(label(title, 15f, textColor, true, Gravity.RIGHT))
                 addView(label(description, 11f, mutedColor, false, Gravity.RIGHT))
                 setOnClickListener {
-                    Toast.makeText(this@MainActivity, "قسم $title سيُفعّل في مرحلته", Toast.LENGTH_SHORT).show()
+                    when (title) {
+                        "نقطة البيع" -> showPointOfSale()
+                        "المنتجات والمخزون" -> showProductManagement()
+                        else -> Toast.makeText(this@MainActivity, "قسم $title سيُفعّل في مرحلته", Toast.LENGTH_SHORT).show()
+                    }
                 }
             }
             menu.addView(item, matchWidth())
@@ -455,6 +462,272 @@ class MainActivity : Activity() {
             setBackgroundDrawable(cardBackground())
         }
         popup.showAtLocation(window.decorView, Gravity.END, 0, 0)
+    }
+
+    private fun showProductManagement() {
+        val repository = StoreRepository(this)
+        repository.ensureBaseSetup()
+        val page = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setBackgroundColor(backgroundColor)
+        }
+        val header = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(dp(14), dp(10), dp(14), dp(10))
+            setBackgroundColor(Color.WHITE)
+        }
+        val back = Button(this).apply {
+            text = "‹"
+            textSize = 25f
+            setTextColor(green)
+            isAllCaps = false
+            setBackgroundColor(Color.TRANSPARENT)
+            setOnClickListener { showPointOfSale() }
+        }
+        header.addView(back, LinearLayout.LayoutParams(dp(48), dp(48)))
+        header.addView(label("إدارة المنتجات", 19f, green, true, Gravity.CENTER), LinearLayout.LayoutParams(0, -2, 1f))
+        val body = ScrollView(this).apply { isFillViewport = true }
+        val content = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(16), dp(16), dp(16), dp(24))
+        }
+        val search = EditText(this).apply {
+            hint = "ابحث بالاسم أو الباركود أو SKU"
+            textSize = 14f
+            setSingleLine(true)
+            setPadding(dp(14), 0, dp(14), 0)
+            background = inputBackground()
+        }
+        val add = Button(this).apply {
+            text = "+ إضافة منتج جديد"
+            textSize = 16f
+            isAllCaps = false
+            setTextColor(Color.WHITE)
+            setBackgroundColor(green)
+            setOnClickListener { showProductEditor(null) }
+        }
+        val category = Button(this).apply {
+            text = "إضافة تصنيف"
+            textSize = 14f
+            isAllCaps = false
+            setTextColor(green)
+            setOnClickListener { showAddCategoryDialog() }
+        }
+        val list = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+        content.addView(label("كتالوج المتجر", 24f, green, true, Gravity.RIGHT))
+        content.addView(label("أدخل بيانات المنتجات مرة واحدة لتظهر مباشرة في نقطة البيع", 13f, mutedColor, false, Gravity.RIGHT).apply {
+            setPadding(0, dp(4), 0, dp(14))
+        })
+        content.addView(add, fieldParams(dp(52), dp(8)))
+        content.addView(category, fieldParams(dp(44), dp(14)))
+        content.addView(search, fieldParams(dp(50), dp(12)))
+        content.addView(list, matchWidth())
+        body.addView(content)
+        page.addView(header, matchWidth())
+        page.addView(body, LinearLayout.LayoutParams(-1, 0, 1f))
+        setContentView(page)
+
+        fun refresh(query: String = search.text.toString()) {
+            list.removeAllViews()
+            val items = repository.listProducts().filter {
+                query.isBlank() || it.name.contains(query, true) ||
+                    (it.barcode?.contains(query, true) == true) ||
+                    (it.sku?.contains(query, true) == true)
+            }
+            if (items.isEmpty()) {
+                list.addView(label("لا توجد منتجات بعد. ابدأ بإضافة أول منتج إلى متجرك.", 14f, mutedColor, false, Gravity.CENTER).apply {
+                    setPadding(dp(12), dp(32), dp(12), dp(32))
+                })
+            }
+            items.forEach { product ->
+                val card = LinearLayout(this).apply {
+                    orientation = LinearLayout.VERTICAL
+                    setPadding(dp(14), dp(12), dp(14), dp(12))
+                    background = cardBackground()
+                }
+                card.addView(label(product.name, 16f, green, true, Gravity.RIGHT))
+                card.addView(label(
+                    "باركود: @@{product.barcode ?: "—"}   |   SKU: @@{product.sku ?: "—"}",
+                    11f, mutedColor, false, Gravity.RIGHT
+                ).apply { setPadding(0, dp(5), 0, dp(3)) })
+                card.addView(label(
+                    "التصنيف: @@{product.categoryName ?: "غير محدد"}   •   الوحدة: @@{product.unitName}",
+                    12f, mutedColor, false, Gravity.RIGHT
+                ))
+                card.addView(label(
+                    "شراء: $@@{moneyText(product.purchaseCostUsdCents)}   |   بيع: $@@{moneyText(product.salePriceUsdCents)}",
+                    13f, textColor, true, Gravity.RIGHT
+                ).apply { setPadding(0, dp(5), 0, dp(3)) })
+                card.addView(label(
+                    if (product.tracksInventory) "المخزون المتاح: @@{formatQuantity(product.stock)} @@{product.unitSymbol}"
+                    else "لا يتتبع المخزون",
+                    12f, mutedColor, false, Gravity.RIGHT
+                ))
+                val actions = LinearLayout(this).apply {
+                    orientation = LinearLayout.HORIZONTAL
+                    gravity = Gravity.CENTER_VERTICAL
+                }
+                val edit = smallButton("تعديل") { showProductEditor(product) }
+                val deactivate = smallButton("إيقاف") {
+                    AlertDialog.Builder(this@MainActivity)
+                        .setTitle("إيقاف المنتج")
+                        .setMessage("سيختفي @@{product.name} من نقطة البيع، مع الاحتفاظ بسجلاته.")
+                        .setNegativeButton("إلغاء", null)
+                        .setPositiveButton("إيقاف") { _, _ ->
+                            try {
+                                repository.setProductActive(product.id, false)
+                                refresh()
+                                Toast.makeText(this@MainActivity, "تم إيقاف المنتج", Toast.LENGTH_SHORT).show()
+                            } catch (e: Exception) {
+                                Toast.makeText(this@MainActivity, e.message ?: "تعذر إيقاف المنتج", Toast.LENGTH_LONG).show()
+                            }
+                        }.show()
+                }
+                actions.addView(edit, LinearLayout.LayoutParams(0, dp(42), 1f))
+                actions.addView(deactivate, LinearLayout.LayoutParams(0, dp(42), 1f))
+                card.addView(actions)
+                val params = matchWidth().apply { bottomMargin = dp(10) }
+                list.addView(card, params)
+            }
+        }
+        search.addTextChangedListener(object : TextWatcher {
+            override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) {}
+            override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) { refresh(s?.toString().orEmpty()) }
+            override fun afterTextChanged(s: Editable?) {}
+        })
+        refresh("")
+    }
+
+    private fun showProductEditor(existing: com.hazem.dailystore.data.StoreProduct?) {
+        val repository = StoreRepository(this)
+        val units = repository.getUnits()
+        val categories = repository.getCategories()
+        val form = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(20), dp(8), dp(20), dp(4))
+        }
+        fun field(hintText: String, value: String = "", type: Int = InputType.TYPE_CLASS_TEXT): EditText {
+            return EditText(this).apply {
+                hint = hintText
+                setText(value)
+                inputType = type
+                textSize = 14f
+                setSingleLine(true)
+                setPadding(dp(12), 0, dp(12), 0)
+                background = inputBackground()
+            }
+        }
+        fun addField(view: View) { form.addView(view, fieldParams(dp(48), dp(9))) }
+        val name = field("اسم المنتج *", existing?.name.orEmpty())
+        val barcode = field("الباركود (اختياري)", existing?.barcode.orEmpty())
+        val sku = field("رمز SKU (اختياري)", existing?.sku.orEmpty())
+        val purchase = field("تكلفة الشراء بالدولار", existing?.let { moneyText(it.purchaseCostUsdCents) } ?: "0", InputType.TYPE_CLASS_NUMBER or InputType.TYPE_NUMBER_FLAG_DECIMAL)
+        val sale = field("سعر البيع المرجعي بالدولار *", existing?.let { moneyText(it.salePriceUsdCents) } ?: "", InputType.TYPE_CLASS_NUMBER or InputType.TYPE_NUMBER_FLAG_DECIMAL)
+        val quantity = field("الكمية الافتتاحية", "0", InputType.TYPE_CLASS_NUMBER or InputType.TYPE_NUMBER_FLAG_DECIMAL)
+        val unitSpinner = Spinner(this)
+        unitSpinner.adapter = ArrayAdapter(this, android.R.layout.simple_spinner_dropdown_item, units.map { "@@{it.name} (@@{it.symbol})" })
+        val categorySpinner = Spinner(this)
+        val categoryOptions = listOf("بدون تصنيف") + categories.map { it.name }
+        categorySpinner.adapter = ArrayAdapter(this, android.R.layout.simple_spinner_dropdown_item, categoryOptions)
+        existing?.let { p ->
+            val unitIndex = units.indexOfFirst { it.name == p.unitName }
+            if (unitIndex >= 0) unitSpinner.setSelection(unitIndex)
+            val categoryIndex = categories.indexOfFirst { it.name == p.categoryName }
+            categorySpinner.setSelection(if (categoryIndex >= 0) categoryIndex + 1 else 0)
+        }
+        val tracks = CheckBox(this).apply {
+            text = "يتتبع المخزون"
+            textSize = 14f
+            isChecked = existing?.tracksInventory ?: true
+            setTextColor(textColor)
+        }
+        form.addView(label("البيانات الأساسية", 17f, green, true, Gravity.RIGHT).apply {
+            setPadding(0, 0, 0, dp(8))
+        })
+        addField(name); addField(barcode); addField(sku)
+        form.addView(label("وحدة القياس", 13f, mutedColor, false, Gravity.RIGHT))
+        form.addView(unitSpinner, fieldParams(dp(48), dp(8)))
+        form.addView(label("التصنيف", 13f, mutedColor, false, Gravity.RIGHT))
+        form.addView(categorySpinner, fieldParams(dp(48), dp(8)))
+        form.addView(label("الأسعار بالدولار (مرجع ثابت)", 15f, green, true, Gravity.RIGHT).apply {
+            setPadding(0, dp(6), 0, dp(6))
+        })
+        addField(purchase); addField(sale)
+        form.addView(tracks, fieldParams(dp(44), dp(4)))
+        if (existing == null) {
+            form.addView(label("المخزون الافتتاحي", 14f, green, true, Gravity.RIGHT))
+            addField(quantity)
+        } else {
+            form.addView(label("المخزون الحالي: @@{formatQuantity(existing.stock)} @@{existing.unitSymbol}\nلا يتم تعديل المخزون من شاشة بيانات المنتج؛ استخدم حركة مخزون لاحقاً.", 12f, mutedColor, false, Gravity.RIGHT).apply {
+                setPadding(0, dp(8), 0, dp(8))
+            })
+        }
+        val scroll = ScrollView(this).apply { addView(form) }
+        val dialog = AlertDialog.Builder(this)
+            .setTitle(if (existing == null) "إضافة منتج" else "تعديل المنتج")
+            .setView(scroll)
+            .setNegativeButton("إلغاء", null)
+            .setPositiveButton("حفظ", null)
+            .create()
+        dialog.setOnShowListener {
+            dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener {
+                try {
+                    val cleanName = name.text.toString().trim()
+                    val cost = parseUsdCents(purchase.text.toString())
+                    val price = parseUsdCents(sale.text.toString())
+                    val opening = if (existing == null) quantity.text.toString().toDoubleOrNull() ?: 0.0 else 0.0
+                    require(cleanName.isNotEmpty()) { "اسم المنتج مطلوب" }
+                    require(price > 0L) { "أدخل سعر بيع صحيحاً بالدولار" }
+                    require(cost >= 0L && opening >= 0.0) { "تحقق من السعر والكمية" }
+                    val unit = units.getOrNull(unitSpinner.selectedItemPosition) ?: error("اختر وحدة قياس")
+                    val categoryId = if (categorySpinner.selectedItemPosition > 0)
+                        categories.getOrNull(categorySpinner.selectedItemPosition - 1)?.id else null
+                    repository.saveProduct(
+                        existing?.id, cleanName, barcode.text.toString(), sku.text.toString(),
+                        categoryId, unit.id, cost, price, tracks.isChecked, opening
+                    )
+                    dialog.dismiss()
+                    Toast.makeText(this, "تم حفظ بيانات المنتج", Toast.LENGTH_SHORT).show()
+                    showProductManagement()
+                } catch (e: Exception) {
+                    Toast.makeText(this, e.message ?: "تعذر حفظ المنتج؛ تحقق من عدم تكرار الباركود أو SKU", Toast.LENGTH_LONG).show()
+                }
+            }
+        }
+        dialog.show()
+    }
+
+    private fun showAddCategoryDialog() {
+        val input = EditText(this).apply {
+            hint = "اسم التصنيف"
+            textSize = 16f
+            setSingleLine(true)
+            setPadding(dp(14), 0, dp(14), 0)
+        }
+        AlertDialog.Builder(this)
+            .setTitle("إضافة تصنيف")
+            .setView(input)
+            .setNegativeButton("إلغاء", null)
+            .setPositiveButton("إضافة") { _, _ ->
+                try {
+                    StoreRepository(this).addCategory(input.text.toString())
+                    Toast.makeText(this, "تمت إضافة التصنيف", Toast.LENGTH_SHORT).show()
+                    showProductManagement()
+                } catch (e: Exception) {
+                    Toast.makeText(this, e.message ?: "تعذر إضافة التصنيف؛ ربما الاسم مستخدم", Toast.LENGTH_LONG).show()
+                }
+            }.show()
+    }
+
+    private fun moneyText(cents: Long): String =
+        BigDecimal.valueOf(cents, 2).setScale(2, RoundingMode.HALF_UP).toPlainString()
+
+    private fun parseUsdCents(value: String): Long {
+        val normalized = value.trim().replace(',', '.')
+        val amount = BigDecimal(normalized)
+        require(amount.signum() >= 0) { "لا يمكن إدخال سعر سالب" }
+        return amount.multiply(BigDecimal.valueOf(100)).setScale(0, RoundingMode.HALF_UP).longValueExact()
     }
 
     private fun formatPrice(usdCents: Long): String {
