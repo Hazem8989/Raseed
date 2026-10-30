@@ -708,9 +708,9 @@ class MainActivity : Activity() {
                         lines.map { InvoiceLineInput(it.product.id, it.quantity, it.unitCostUsdCents) }
                     )
                     draftId = saved.invoiceId
-                    Toast.makeText(this, "تم حفظ المسودة ${saved.invoiceNumber}", Toast.LENGTH_SHORT).show()
+                    Toast.makeText(this@MainActivity, "تم حفظ المسودة ${saved.invoiceNumber}", Toast.LENGTH_SHORT).show()
                 } catch (e: Exception) {
-                    Toast.makeText(this, e.message ?: "تعذر حفظ المسودة", Toast.LENGTH_LONG).show()
+                    Toast.makeText(this@MainActivity, e.message ?: "تعذر حفظ المسودة", Toast.LENGTH_LONG).show()
                 } finally { processing = false }
             }
         }
@@ -730,10 +730,10 @@ class MainActivity : Activity() {
                     )
                     draftId = saved.invoiceId
                     invoiceRepository.postPurchase(saved.invoiceId, UUID.randomUUID().toString())
-                    Toast.makeText(this, "تم اعتماد الفاتورة وتحديث المخزون", Toast.LENGTH_LONG).show()
+                    Toast.makeText(this@MainActivity, "تم اعتماد الفاتورة وتحديث المخزون", Toast.LENGTH_LONG).show()
                     showPurchases()
                 } catch (e: Exception) {
-                    Toast.makeText(this, e.message ?: "تعذر اعتماد الفاتورة", Toast.LENGTH_LONG).show()
+                    Toast.makeText(this@MainActivity, e.message ?: "تعذر اعتماد الفاتورة", Toast.LENGTH_LONG).show()
                 } finally { processing = false }
             }
         }
