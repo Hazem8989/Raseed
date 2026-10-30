@@ -28,7 +28,10 @@ class MainActivity : Activity() {
         window.setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE)
         window.decorView.layoutDirection = android.view.View.LAYOUT_DIRECTION_RTL
 
-        // A fixed, compact login screen: no scroll view, oversized logo, or watermark.
+        showLoginScreen()
+    }
+
+    private fun showLoginScreen() {
         val page = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             gravity = Gravity.CENTER
@@ -84,7 +87,7 @@ class MainActivity : Activity() {
             textSize = 16f
             setSingleLine(true)
             gravity = Gravity.CENTER_VERTICAL
-            setInputType(InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_PASSWORD)
+            inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_PASSWORD
             setPadding(dp(16), 0, dp(16), 0)
             background = inputBackground()
         }
@@ -96,11 +99,19 @@ class MainActivity : Activity() {
             setBackgroundColor(green)
             isAllCaps = false
             setOnClickListener {
-                Toast.makeText(
-                    this@MainActivity,
-                    "سيتم ربط التحقق من بيانات الدخول في المرحلة التالية",
-                    Toast.LENGTH_LONG
-                ).show()
+                val enteredUsername = username.text.toString().trim()
+                val enteredPassword = password.text.toString()
+                if (enteredUsername.equals(TEST_USERNAME, ignoreCase = true) &&
+                    enteredPassword == TEST_PASSWORD
+                ) {
+                    showPointOfSale()
+                } else {
+                    Toast.makeText(
+                        this@MainActivity,
+                        "اسم المستخدم أو كلمة المرور غير صحيحة",
+                        Toast.LENGTH_SHORT
+                    ).show()
+                }
             }
         }
 
@@ -120,6 +131,92 @@ class MainActivity : Activity() {
         page.addView(password, fieldParams(dp(54), dp(18)))
         page.addView(login, fieldParams(dp(52), 0))
         page.addView(footer, matchWidth())
+
+        setContentView(page)
+    }
+
+    private fun showPointOfSale() {
+        val page = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(20), dp(22), dp(20), dp(20))
+            setBackgroundColor(backgroundColor)
+        }
+
+        val header = TextView(this).apply {
+            text = "THE DAILY SHOP"
+            textSize = 23f
+            setTextColor(green)
+            typeface = Typeface.DEFAULT_BOLD
+            gravity = Gravity.CENTER
+            setPadding(0, dp(8), 0, dp(4))
+        }
+
+        val welcome = TextView(this).apply {
+            text = "مرحباً، المدير التجريبي"
+            textSize = 16f
+            setTextColor(Color.rgb(85, 95, 88))
+            gravity = Gravity.CENTER
+            setPadding(0, 0, 0, dp(22))
+        }
+
+        val title = TextView(this).apply {
+            text = "نقطة البيع"
+            textSize = 25f
+            setTextColor(green)
+            typeface = Typeface.DEFAULT_BOLD
+            gravity = Gravity.RIGHT
+            setPadding(0, dp(12), 0, dp(12))
+        }
+
+        val search = EditText(this).apply {
+            hint = "ابحث عن منتج أو امسح الباركود"
+            textSize = 15f
+            setSingleLine(true)
+            setPadding(dp(14), 0, dp(14), 0)
+            background = inputBackground()
+            isEnabled = false
+        }
+
+        val emptyState = TextView(this).apply {
+            text = "سلة المبيعات فارغة\nستظهر المنتجات هنا عند تفعيل كتالوج المنتجات"
+            textSize = 16f
+            setTextColor(Color.rgb(105, 112, 106))
+            gravity = Gravity.CENTER
+            setPadding(dp(12), dp(42), dp(12), dp(42))
+        }
+
+        val total = TextView(this).apply {
+            text = "الإجمالي\n0 ل.س"
+            textSize = 21f
+            setTextColor(green)
+            typeface = Typeface.DEFAULT_BOLD
+            gravity = Gravity.CENTER
+            setPadding(0, dp(16), 0, dp(16))
+            background = inputBackground()
+        }
+
+        val note = TextView(this).apply {
+            text = "نسخة اختبار: واجهة نقطة البيع قيد التطوير"
+            textSize = 12f
+            setTextColor(Color.rgb(130, 105, 65))
+            gravity = Gravity.CENTER
+            setPadding(0, dp(18), 0, dp(12))
+        }
+
+        val logout = Button(this).apply {
+            text = "تسجيل الخروج"
+            isAllCaps = false
+            setOnClickListener { showLoginScreen() }
+        }
+
+        page.addView(header, matchWidth())
+        page.addView(welcome, matchWidth())
+        page.addView(title, matchWidth())
+        page.addView(search, fieldParams(dp(52), dp(12)))
+        page.addView(emptyState, matchWidth())
+        page.addView(total, matchWidth())
+        page.addView(note, matchWidth())
+        page.addView(logout, fieldParams(dp(50), 0))
 
         setContentView(page)
     }
@@ -149,5 +246,11 @@ class MainActivity : Activity() {
         ).apply {
             bottomMargin = bottom
         }
+    }
+
+    companion object {
+        // TEST ONLY. Replace with database-backed authentication before release.
+        const val TEST_USERNAME = "admin"
+        const val TEST_PASSWORD = "1234"
     }
 }
