@@ -25,7 +25,7 @@ class SplashActivity : Activity() {
 
         val splashImage = ImageView(this).apply {
             setImageResource(R.drawable.the_daily_shop_splash)
-            scaleType = ImageView.ScaleType.FIT_XY
+            scaleType = ImageView.ScaleType.FIT_CENTER
             contentDescription = "The Daily Shop"
         }
 
