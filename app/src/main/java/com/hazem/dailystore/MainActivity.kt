@@ -33,7 +33,7 @@ class MainActivity : Activity() {
             orientation = LinearLayout.VERTICAL
             gravity = Gravity.CENTER
             setPadding(28, 32, 28, 32)
-            setBackgroundColor(backgroundColor)
+            setBackgroundResource(R.drawable.login_watermark)
         }
 
         val scroll = ScrollView(this).apply {
