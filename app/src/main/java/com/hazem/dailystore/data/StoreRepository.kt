@@ -3,6 +3,8 @@ package com.hazem.dailystore.data
 import android.content.ContentValues
 import android.content.Context
 import android.database.sqlite.SQLiteConstraintException
+import java.math.BigDecimal
+import java.math.RoundingMode
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -89,6 +91,28 @@ class StoreRepository(context: Context) {
             while (c.moveToNext()) result.add(StoreCategory(c.getLong(0), c.getString(1)))
         }
         return result
+    }
+
+    fun getCurrentExchangeRateMilli(): Long =
+        helper.readableDatabase.rawQuery(
+            "SELECT rate_syp_per_usd_milli FROM exchange_rates ORDER BY effective_at DESC, created_at DESC LIMIT 1", null
+        ).use { c -> if (c.moveToFirst()) c.getLong(0) else 0L }
+
+    fun saveExchangeRate(rateSypPerUsd: BigDecimal): Long {
+        require(rateSypPerUsd.signum() > 0) { "سعر الصرف يجب أن يكون أكبر من صفر" }
+        val milli = rateSypPerUsd.multiply(BigDecimal.valueOf(1000))
+            .setScale(0, RoundingMode.HALF_UP).longValueExact()
+        require(milli > 0L) { "سعر الصرف غير صالح" }
+        val now = timestamp()
+        val values = ContentValues().apply {
+            put("id", UUID.randomUUID().toString())
+            put("currency_code", "USD")
+            put("rate_syp_per_usd_milli", milli)
+            put("effective_at", now)
+            put("created_at", now)
+        }
+        helper.writableDatabase.insertOrThrow("exchange_rates", null, values)
+        return milli
     }
 
     fun addCategory(name: String): Long {
