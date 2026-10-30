@@ -15,6 +15,7 @@ data class StoreProduct(
     val id: String,
     val name: String,
     val barcode: String?,
+    val sku: String?,
     val unitName: String,
     val unitSymbol: String,
     val categoryName: String?,
@@ -174,10 +175,19 @@ class StoreRepository(context: Context) {
         return productId
     }
 
+    fun setProductActive(id: String, active: Boolean) {
+        val values = ContentValues().apply {
+            put("is_active", if (active) 1 else 0)
+            put("updated_at", timestamp())
+        }
+        val changed = helper.writableDatabase.update("products", values, "id=?", arrayOf(id))
+        require(changed == 1) { "المنتج المطلوب غير موجود" }
+    }
+
     fun listProducts(): List<StoreProduct> {
         val result = mutableListOf<StoreProduct>()
         helper.readableDatabase.rawQuery(
-            """SELECT p.id,p.name,p.barcode,u.name,u.symbol,c.name,
+            """SELECT p.id,p.name,p.barcode,p.sku,u.name,u.symbol,c.name,
                       p.purchase_cost_usd_cents,p.sale_price_usd_cents,p.track_inventory,
                       COALESCE((SELECT SUM(ib.quantity) FROM inventory_balances ib
                                 WHERE ib.product_id=p.id),0)
@@ -187,8 +197,8 @@ class StoreRepository(context: Context) {
         ).use { c ->
             while (c.moveToNext()) result.add(
                 StoreProduct(c.getString(0),c.getString(1),if(c.isNull(2)) null else c.getString(2),
-                    c.getString(3),c.getString(4),if(c.isNull(5)) null else c.getString(5),
-                    c.getLong(6),c.getLong(7),c.getInt(8)==1,c.getDouble(9))
+                    if(c.isNull(3)) null else c.getString(3),c.getString(4),c.getString(5),
+                    if(c.isNull(6)) null else c.getString(6),c.getLong(7),c.getLong(8),c.getInt(9)==1,c.getDouble(10))
             )
         }
         return result
