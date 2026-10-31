@@ -1635,6 +1635,7 @@ class MainActivity : Activity() {
             orientation = LinearLayout.VERTICAL
             setPadding(dp(16), dp(16), dp(16), dp(24))
         }
+        val serviceWallets = ServiceTransferRepository(this).listWallets()
         content.addView(label("الحسابات المالية", 22f, green, true, Gravity.RIGHT))
         content.addView(label("الحسابات الأساسية تُنشأ وتُربط تلقائياً: درج البيع اليومي، صندوق الموردين المدور، صندوق شراء رصيد الخدمات، ومحفظتا سيرياتيل وشام كاش. يمكنك إضافة حسابات أخرى عند الحاجة.",
             13f, mutedColor, false, Gravity.RIGHT).apply { setPadding(0, dp(5), 0, dp(12)) })
@@ -1666,6 +1667,10 @@ class MainActivity : Activity() {
                 .apply { setPadding(0, dp(4), 0, dp(2)) })
             if (rechargeAccountId == account.id) card.addView(label("صندوق شراء رصيد الخدمات الموحد", 12f, green, true, Gravity.RIGHT)
                 .apply { setPadding(0, dp(4), 0, dp(2)) })
+            serviceWallets.firstOrNull { it.accountId == account.id }?.let { wallet ->
+                val roleName = if(wallet.serviceKey==ServiceTransferRepository.SYRIATEL_SHARED) "محفظة سيرياتيل • تشغيل وقبض إلكتروني" else "محفظة شام كاش • تشغيل وقبض إلكتروني"
+                card.addView(label(roleName, 12f, green, true, Gravity.RIGHT).apply { setPadding(0, dp(4), 0, dp(2)) })
+            }
             if (supplierRoleAccountId == account.id) card.addView(label("الصندوق الأساسي للنقد المدور للبضاعة", 12f, green, true, Gravity.RIGHT)
                 .apply { setPadding(0, dp(4), 0, dp(2)) })
             if (isManager() && account.isActive && account.accountType == "CASH_BOX" && account.currencyCode == "SYP" &&
@@ -1939,7 +1944,7 @@ class MainActivity : Activity() {
         header.addView(label("تحويل رصيد",19f,green,true,Gravity.CENTER),LinearLayout.LayoutParams(0,-2,1f))
         val body=ScrollView(this).apply{isFillViewport=true}
         val content=LinearLayout(this).apply{orientation=LinearLayout.VERTICAL;setPadding(dp(16),dp(14),dp(16),dp(24))}
-        content.addView(label("أرصدة تشغيل خدمات التحويل",21f,green,true,Gravity.RIGHT))
+        content.addView(label("محافظ التشغيل والقبض الإلكتروني للخدمات",21f,green,true,Gravity.RIGHT))
         content.addView(label("محفظتا سيرياتيل وشام كاش هما رصيد التشغيل نفسه وحساب القبض الإلكتروني للخدمة؛ كل حركة بيع أو قبض أو تحويل داخلي تظهر على رصيد المحفظة ذاتها.",13f,mutedColor,false,Gravity.RIGHT).apply{setPadding(0,dp(5),0,dp(12))})
         repo.listWallets().forEach { w ->
             val card=LinearLayout(this).apply{orientation=LinearLayout.VERTICAL;setPadding(dp(14),dp(12),dp(14),dp(12));background=cardBackground()}
