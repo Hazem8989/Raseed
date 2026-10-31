@@ -65,8 +65,17 @@ class CashAccountRepository(context: Context) {
             "SELECT setting_value FROM app_settings WHERE setting_key='service_recharge_cash_account_id'",null
         ).use { if(it.moveToFirst())it.getString(0)else null }
         val validConfigured=configuredRecharge?.let { id ->
-            db.rawQuery("SELECT 1 FROM cash_accounts WHERE id=? AND account_type='CASH_BOX' AND currency_code='SYP' AND is_active=1",arrayOf(id)).use{it.moveToFirst()}
+            id!=dailyId && id!=supplierId &&
+                db.rawQuery("SELECT 1 FROM cash_accounts WHERE id=? AND account_type='CASH_BOX' AND currency_code='SYP' AND is_active=1",arrayOf(id)).use{it.moveToFirst()}
         } ?: false
+        if(!validConfigured) {
+            val linkedRecharge=db.rawQuery("SELECT account_id FROM system_cash_account_roles WHERE role_key='SERVICE_RECHARGE'",null).use {
+                if(it.moveToFirst())it.getString(0)else null
+            }
+            if(linkedRecharge==dailyId || linkedRecharge==supplierId) {
+                db.delete("system_cash_account_roles","role_key='SERVICE_RECHARGE'",null)
+            }
+        }
         val rechargeId=if(validConfigured) configuredRecharge!! else ensureRoleAccount(db,"SERVICE_RECHARGE",
             "system_cash_service_recharge","صندوق شراء رصيد الخدمات",
             listOf("صندوق رصيد خدمات نقدي","صندوق شراء رصيد الخدمات","صندوق رصيد الخدمات","صندوق تعبئة رصيد الخدمات"))
@@ -314,6 +323,8 @@ class CashAccountRepository(context: Context) {
                 "SELECT opening_balance_minor FROM cash_accounts WHERE id=?", arrayOf(accountId)
             ).use { it.moveToFirst() && it.getLong(0) != 0L } || db.rawQuery(
                 "SELECT 1 FROM service_wallet_account_links WHERE account_id=? LIMIT 1", arrayOf(accountId)
+            ).use { it.moveToFirst() } || db.rawQuery(
+                "SELECT 1 FROM system_cash_account_roles WHERE account_id=? LIMIT 1", arrayOf(accountId)
             ).use { it.moveToFirst() }
             if (hasHistory) {
                 require(accountType == old.second && currency == old.third) {
