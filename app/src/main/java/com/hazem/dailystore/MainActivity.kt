@@ -1866,6 +1866,19 @@ class MainActivity : Activity() {
             content.addView(smallButton("شراء / شحن رصيد الخدمة"){showServiceRechargeDialog()},fieldParams(dp(46),dp(12)))
         }
         content.addView(Button(this).apply{text="＋ تنفيذ تحويل للزبون";isAllCaps=false;setTextColor(Color.WHITE);setBackgroundColor(green);setOnClickListener{showServiceTransferDialog()}},fieldParams(dp(52),dp(12)))
+        content.addView(sectionHeading("ملخص عمليات اليوم ومبلغ إعادة التعبئة"))
+        val daily=repo.dailySummary()
+        if(daily.isEmpty()) content.addView(label("لا توجد عمليات تحويل رصيد اليوم.",12f,mutedColor,false,Gravity.CENTER))
+        daily.forEach { d ->
+            val card=LinearLayout(this).apply{orientation=LinearLayout.VERTICAL;setPadding(dp(12),dp(10),dp(12),dp(10));background=cardBackground()}
+            card.addView(label(d.serviceName+" • "+d.operationCount+" عملية",14f,green,true,Gravity.RIGHT))
+            card.addView(label("إجمالي ما أُرسل من رصيد الخدمة: "+formatSypAmount(d.deliveredMinor)+" ل.س",12f,textColor,false,Gravity.RIGHT))
+            card.addView(label("إجمالي ما قبضه المتجر من الزبائن: "+formatSypAmount(d.customerReceiptsMinor)+" ل.س",12f,textColor,false,Gravity.RIGHT))
+            card.addView(label("ربح المتجر: "+formatSypAmount(d.profitMinor)+" ل.س • رسوم الشركة: "+formatSypAmount(d.providerFeeMinor)+" ل.س",12f,green,true,Gravity.RIGHT))
+            card.addView(label("تقدير كلفة إعادة التعبئة: "+formatSypAmount(d.rechargeFeeEstimateMinor)+" ل.س • المبلغ المقترح تخصيصه: "+formatSypAmount(d.rechargeReserveMinor)+" ل.س",12f,mutedColor,true,Gravity.RIGHT))
+            content.addView(card,fieldParams(-2,dp(7)))
+        }
+        content.addView(label("مبالغ الزبائن تُقبض في الدرج الرئيسي (أو محفظة القبض عند الدفع إلكترونياً). مبلغ إعادة التعبئة تقديري: قيمة الرصيد المستهلك، مضافاً إليها 2% لسيرياتيل فقط، ولا يُخصم تلقائياً من الدرج.",11f,mutedColor,false,Gravity.RIGHT).apply{setPadding(0,dp(3),0,dp(10))})
         content.addView(sectionHeading("سجل تحويلات الرصيد"))
         val rows=repo.listTransfers(80)
         if(rows.isEmpty()) content.addView(label("لا توجد تحويلات مسجلة حتى الآن.",13f,mutedColor,false,Gravity.CENTER).apply{setPadding(0,dp(18),0,dp(18))})
@@ -1903,11 +1916,11 @@ class MainActivity : Activity() {
     private fun showServiceRechargeDialog() {
         if(!isManager())return
         val repo=ServiceTransferRepository(this)
-        val sources=CashAccountRepository(this).listActive().filter{it.accountType=="WALLET"&&it.currencyCode=="SYP"}
-        if(sources.isEmpty()){AlertDialog.Builder(this).setMessage("أنشئ محفظة قبض إلكترونية بالليرة السورية أولاً لتمويل شراء رصيد الخدمة.").setPositiveButton("فتح الصناديق والمحافظ"){_,_->showCashAccounts()}.show();return}
+        val sources=CashAccountRepository(this).listActive().filter{it.accountType=="CASH_BOX"&&it.currencyCode=="SYP"}
+        if(sources.isEmpty()){AlertDialog.Builder(this).setMessage("أنشئ صندوقاً نقدياً مستقلاً بالليرة السورية مخصصاً لشراء رصيد الخدمات أولاً.").setPositiveButton("فتح الصناديق والمحافظ"){_,_->showCashAccounts()}.show();return}
         val form=LinearLayout(this).apply{orientation=LinearLayout.VERTICAL;setPadding(dp(18),dp(8),dp(18),dp(4))}
         val service=Spinner(this).apply{adapter=ArrayAdapter(this@MainActivity,android.R.layout.simple_spinner_dropdown_item,listOf("رصيد سيرياتيل المشترك","رصيد شام كاش"))}
-        val source=Spinner(this).apply{adapter=ArrayAdapter(this@MainActivity,android.R.layout.simple_spinner_dropdown_item,sources.map{it.name+" • المتاح "+formatSypAmount(it.balanceMinor)+" ل.س"})}
+        val source=Spinner(this).apply{adapter=ArrayAdapter(this@MainActivity,android.R.layout.simple_spinner_dropdown_item,sources.map{it.name+" • صندوق شراء الرصيد • المتاح "+formatSypAmount(it.balanceMinor)+" ل.س"})}
         val amount=fieldForDialog("قيمة الرصيد المراد شراؤه").apply{inputType=InputType.TYPE_CLASS_NUMBER or InputType.TYPE_NUMBER_FLAG_DECIMAL}
         val fee=label("عمولة شحن سيرياتيل 2% عند الشحن فقط؛ شام كاش بلا عمولة شحن.",12f,green,false,Gravity.RIGHT)
         service.onItemSelectedListener=object:android.widget.AdapterView.OnItemSelectedListener{
