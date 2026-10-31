@@ -12,7 +12,7 @@ import java.util.UUID
 
 data class ServiceWalletSummary(val serviceKey:String,val name:String,val balanceMinor:Long)
 data class ServiceTransferRecord(val id:String,val serviceType:String,val serviceName:String,val deliveredMinor:Long,val profitMinor:Long,val providerFeeMinor:Long,val customerChargeMinor:Long,val receiptAccountName:String,val receiptChannel:String,val createdAt:String,val status:String)
-data class ServiceDailySummary(val serviceType:String,val serviceName:String,val operationCount:Int,val deliveredMinor:Long,val customerReceiptsMinor:Long,val profitMinor:Long,val providerFeeMinor:Long,val rechargeFeePaidMinor:Long,val rechargeReserveMinor:Long get()=deliveredMinor)
+data class ServiceDailySummary(val serviceType:String,val serviceName:String,val operationCount:Int,val deliveredMinor:Long,val customerReceiptsMinor:Long,val profitMinor:Long,val providerFeeMinor:Long,val rechargeFeePaidMinor:Long,val rechargeReserveMinor:Long=deliveredMinor)
 data class ServiceTransferResult(val transferId:String,val deliveredMinor:Long,val profitMinor:Long,val providerFeeMinor:Long,val customerChargeMinor:Long,val replayed:Boolean)
 
 /** Provider operational balances are separate from store collection accounts. All amounts are integer SYP units. */
