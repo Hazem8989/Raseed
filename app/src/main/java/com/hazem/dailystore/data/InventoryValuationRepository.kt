@@ -109,12 +109,12 @@ class InventoryValuationRepository(context: Context) {
                     }
                     if (outgoing > 0.0000001) {
                         deficits[key] = (deficits[key] ?: 0.0) + outgoing
-                        affectedProducts.add(productId)
                     }
                 }
             }
         }
 
+        deficits.keys.forEach { affectedProducts.add(it.substringBefore("|")) }
         var unvaluedAmount = deficits.values.sum()
         val allKeys = (layers.keys + balances.keys + deficits.keys).toSet()
         for (key in allKeys) {
