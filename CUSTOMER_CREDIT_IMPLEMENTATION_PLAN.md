@@ -74,3 +74,26 @@ This clarification supersedes any earlier wording in this plan that implied cust
 - Legacy invoices without a trustworthy original exchange-rate snapshot remain excluded from automatic revaluation and collection conversion under this rule until safely reviewed.
 
 Implementation remains pending: database/repository logic, SYP-only collection UI, migration/backfill safeguards, account statement display, and automated tests must be completed before this milestone is considered implemented.
+
+
+## Customer debt collection destination and daily cash treatment (approved 2026-10-31)
+
+- A customer credit collection is a receipt of an old receivable, not a new sale. It must never create a new sales invoice or inflate today's sales/revenue/profit totals.
+- If the customer pays physical cash in SYP, post the receipt automatically to the **current day's designated primary daily cash drawer**. It must increase that drawer's actual balance and appear in today's daily cash receipts/closing totals, even when the debt originated from an older invoice.
+- The primary daily cash drawer is a specifically designated active SYP cash account for the current operating day. It is distinct from any carried-over/rolled cash box used for supplier-payment and purchase/expense balance workflows. Never select a carried-over supplier-payment box as the default destination for customer cash collections.
+- The application must provide a reliable configuration/identity for the primary daily cash drawer and the current operating day. If no valid primary drawer is configured, block cash collection with a clear instruction to configure it; do not silently post to another account.
+- If the customer pays electronically, the operator explicitly selects the receiving active electronic wallet. Increase that wallet's balance by the SYP amount received; do not post it to the daily physical-cash drawer.
+- The collection screen should make the destination clear: cash = current primary daily drawer (shown, not arbitrarily replaced by the rollover box); electronic = selected wallet. USD collection remains unavailable.
+- Every receipt must create one linked, idempotent financial movement and one customer-payment allocation atomically. The statement must show actual collection date/time, customer, invoice allocation(s), SYP amount, collection channel, receiving drawer/wallet, applicable FX snapshots and USD-reference reduction.
+- Daily cash report/closing must include cash collections of old customer debts as today's cash inflows, separately categorized as **customer debt collections**, not sales. Electronic wallet collections appear in that wallet's ledger and balance, not in physical-cash totals.
+- Supplier-payment rollover balances remain a separate workflow and must not be increased by customer collections unless a distinct, explicitly approved transfer is recorded.
+- Corrections/refunds must reverse or adjust the original linked movement with an auditable record; never delete the collection or silently rewrite the daily close.
+
+Required tests:
+- Cash collection increases the configured current-day primary SYP drawer and today's cash-in total exactly once.
+- Cash collection does not increase sales count, sales revenue, or sales profit.
+- A previous-day/rollover supplier-payment box is not selected as the collection destination.
+- Electronic collection increases only the selected wallet and appears in its statement, not the physical cash drawer.
+- Missing/inactive primary drawer blocks cash collection safely.
+- Collection, payment allocation, account movement, and audit record commit or roll back together; retries do not duplicate any of them.
+- Daily close reconciles opening balance + today's cash sales receipts + today's customer debt cash collections + other classified cash inflows - outflows.

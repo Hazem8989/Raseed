@@ -155,3 +155,13 @@ This section distinguishes code present from features that are merely planned. B
 - A SYP payment reduces the USD reference using `max(collection-time rate, original invoice rate)`, calculated separately for each invoice allocation. This prevents a below-original exchange rate from reducing the USD debt by too much and breaching the SYP floor.
 - Preserve the SYP received, collection-time/original/effective rates, USD reference reduction, invoice allocation, and linked cash movement in an immutable idempotent audit trail.
 - This is an approved specification only. SYP-only collection conversion, revaluation ledger, UI, migration safeguards, and tests remain pending implementation.
+
+
+### Customer debt collections — daily drawer and e-wallet routing (approved 2026-10-31)
+
+- Cash SYP collection of an old customer credit debt must increase the designated current-day primary cash drawer automatically and count in today's cash receipts/closing totals as **customer debt collection**.
+- This is not a new sale: do not create a sales invoice or include the receipt in today's sales revenue/profit.
+- The current-day primary drawer must be explicitly identifiable/configurable and separate from the carried-over cash box used for supplier payments. Do not route collections to that rollover box by default. If the primary drawer is missing or inactive, block cash collection safely.
+- For electronic payment, the operator selects the receiving active wallet; increase that wallet only and show the receipt in its wallet statement, not physical cash.
+- Keep customer collections, daily cash sales, supplier-payment rollover funds, and e-wallet balances separately classified and reconcilable.
+- The feature is an approved requirement; daily drawer designation/routing, wallet routing, reports, and atomic/idempotent tests remain to be implemented and verified.

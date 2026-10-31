@@ -51,3 +51,12 @@ This section is the final approved rule and supersedes any earlier ambiguity abo
 - If the rate falls to 100 and the customer pays 750 SYP: effective rate remains the original 150, the reference reduction is $5, and $5 remains, valued at the 750 SYP original-rate floor.
 
 Status remains **approved business rule; implementation pending**. This document does not mean the feature is already available in the APK.
+
+
+## Receiving account and daily cash classification (approved 2026-10-31)
+
+- Customer debt collection is a receivable settlement, not a new sale; it must not create a sales invoice or count as today's sales revenue/profit.
+- SYP physical-cash collections post by default to the configured **current-day primary cash drawer** and count as today's cash inflow/customer-debt-collection category. The primary daily drawer must be distinct from a carried-over cash box used for supplier payments. If no valid primary drawer exists, block the cash collection rather than choosing another account silently.
+- Electronic SYP collections require explicit selection of the receiving active wallet and increase only that wallet's balance. They must appear in that wallet's statement and not in physical-cash totals.
+- Keep the supplier-payment rollover workflow separate. Do not route customer collections into it or merge its balance with the daily drawer automatically.
+- The immutable collection record and account movement must include the actual collection timestamp, customer, invoice allocation(s), SYP amount, channel, destination account, FX details, USD-reference reduction, and idempotency key. Daily reports classify the receipt as customer debt collection, not a sale.
