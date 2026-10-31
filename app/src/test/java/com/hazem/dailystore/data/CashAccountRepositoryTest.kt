@@ -52,6 +52,17 @@ class CashAccountRepositoryTest {
         assertEquals(1000L, accounts.balance(account.id))
     }
 
+    @Test fun supplierRolloverAccountCannotAlsoBeTheDailySalesDrawer() {
+        val supplierCash = accounts.create("صندوق موردين " + UUID.randomUUID(), "CASH_BOX", "SYP", 50000L)
+        DailyBalanceRepository(RuntimeEnvironment.getApplication())
+            .setSupplierRollover(adminId, supplierCash.id, 30000L, "فصل الصناديق")
+        try {
+            accounts.setCurrentDayPrimaryDrawer("ADMIN", adminId, supplierCash.id)
+            fail("Supplier rollover account must not also be the daily drawer")
+        } catch (_: IllegalArgumentException) { }
+        assertEquals(null, accounts.currentDayPrimaryDrawer())
+    }
+
     @Test fun nonManagerCannotEditAccount() {
         val account = accounts.create("محفظة اختبار ${UUID.randomUUID()}", "WALLET", "USD", 0L)
         try {
