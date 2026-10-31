@@ -227,6 +227,18 @@ class StoreRepository(context: Context) {
             require(row.salePriceSyp != null || row.salePriceUsdCents != null) {
                 "سعر البيع مفقود في الصف ${row.rowNumber}"
             }
+            if (row.purchaseCostSyp != null && row.purchaseCostUsdCents != null) {
+                val converted = CurrencyConverter.sypToUsdCents(row.purchaseCostSyp, exchangeRateMilli)
+                require(kotlin.math.abs(converted - row.purchaseCostUsdCents) <= 1L) {
+                    "تكلفة الشراء بالليرة والدولار غير متطابقة في الصف ${row.rowNumber}"
+                }
+            }
+            if (row.salePriceSyp != null && row.salePriceUsdCents != null) {
+                val converted = CurrencyConverter.sypToUsdCents(row.salePriceSyp, exchangeRateMilli)
+                require(kotlin.math.abs(converted - row.salePriceUsdCents) <= 1L) {
+                    "سعر البيع بالليرة والدولار غير متطابق في الصف ${row.rowNumber}"
+                }
+            }
         }
 
         val db = helper.writableDatabase
