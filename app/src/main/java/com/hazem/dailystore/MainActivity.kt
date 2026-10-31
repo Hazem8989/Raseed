@@ -1709,7 +1709,7 @@ class MainActivity : Activity() {
         }
         val repo = DailyBalanceRepository(this)
         val all = CashAccountRepository(this).listActive()
-        val actions = listOf("تحديد النقد المدور للموردين", "تسجيل مسحوبات شخصية", "تحديد الرصيد الافتتاحي لمحفظة", "تغذية / شراء رصيد محفظة", "تحويل محفظة إلى صندوق نقدي تختاره")
+        val actions = listOf("تحديد النقد المدور للموردين", "تسجيل مسحوبات شخصية", "مطابقة الرصيد الافتتاحي اليومي لمحفظة", "تحويل محفظة إلى صندوق نقدي تختاره")
         val content = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(dp(18), dp(8), dp(18), dp(4)) }
         val action = Spinner(this)
         action.adapter = ArrayAdapter(this, android.R.layout.simple_spinner_dropdown_item, actions)
@@ -1751,7 +1751,7 @@ class MainActivity : Activity() {
             val previousDestinationId = availableDestinations.getOrNull(destination.selectedItemPosition)?.id
             val rechargeId = ServiceTransferRepository(this).rechargeAccountId()
             val supplierId = repo.currentSupplierRollover()?.accountId
-            val destinationOptions = if (selected == 4) all.filter {
+            val destinationOptions = if (selected == 3) all.filter {
                 it.accountType == "CASH_BOX" && it.currencyCode == "SYP" &&
                     it.id != rechargeId && it.id != supplierId
             } else emptyList()
@@ -1760,9 +1760,9 @@ class MainActivity : Activity() {
                 if (destinationOptions.isEmpty()) listOf("لا توجد وجهة نقدية متاحة")
                 else destinationOptions.map { it.name + " • " + formatAccountBalance(it.balanceMinor, it.currencyCode) })
             destination.isEnabled = destinationOptions.isNotEmpty()
-            destinationTitle.visibility = if (selected == 4) View.VISIBLE else View.GONE
-            destination.visibility = if (selected == 4) View.VISIBLE else View.GONE
-            destinationHint.visibility = if (selected == 4 && destinationOptions.isEmpty()) View.VISIBLE else View.GONE
+            destinationTitle.visibility = if (selected == 3) View.VISIBLE else View.GONE
+            destination.visibility = if (selected == 3) View.VISIBLE else View.GONE
+            destinationHint.visibility = if (selected == 3 && destinationOptions.isEmpty()) View.VISIBLE else View.GONE
             destinationHint.text = "أنشئ صندوقاً نقدياً نشطاً بالليرة السورية، مع استبعاد صندوق الموردين وصندوق شراء رصيد الخدمات."
             if (previousDestinationId != null) {
                 val restored = destinationOptions.indexOfFirst { it.id == previousDestinationId }
@@ -1814,8 +1814,7 @@ class MainActivity : Activity() {
                         }
                         1 -> repo.addPersonalWithdrawal(actor, selected.id, value, operationId, note)
                         2 -> repo.setWalletOpening(actor, selected.id, value, note)
-                        3 -> repo.addWalletTopUp(actor, selected.id, value, operationId, note, note)
-                        4 -> {
+                        3 -> {
                             val target = availableDestinations.getOrNull(destination.selectedItemPosition)
                                 ?: error("اختر صندوقاً نقدياً كوجهة للتحويل")
                             require(target.id != selected.id) { "لا يمكن التحويل إلى الحساب نفسه" }
