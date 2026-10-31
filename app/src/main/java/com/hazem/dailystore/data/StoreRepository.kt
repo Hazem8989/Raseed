@@ -200,6 +200,128 @@ class StoreRepository(context: Context) {
         return productId
     }
 
+    /**
+     * Imports a catalog atomically. Imported stock is always zero; opening stock
+     * must be entered later through a counted stock-opening operation.
+     */
+    fun importProducts(rows: List<ProductImportRow>, exchangeRateMilli: Long): Int {
+        require(rows.isNotEmpty()) { "لا توجد أصناف للاستيراد" }
+        if (rows.any { it.usesSypPrices }) {
+            require(exchangeRateMilli > 0L) {
+                "الملف يحتوي أسعاراً بالليرة السورية؛ سجّل سعر الصرف أولاً ولا يمكن تخمين التحويل"
+            }
+        }
+        val normalizedNames = mutableSetOf<String>()
+        val normalizedSkus = mutableSetOf<String>()
+        val normalizedBarcodes = mutableSetOf<String>()
+        rows.forEach { row ->
+            val nameKey = row.name.trim().lowercase(Locale.ROOT)
+            require(normalizedNames.add(nameKey)) { "اسم صنف مكرر داخل الملف: ${row.name} (الصف ${row.rowNumber})" }
+            row.sku?.trim()?.takeIf { it.isNotEmpty() }?.let {
+                require(normalizedSkus.add(it.lowercase(Locale.ROOT))) { "رمز SKU مكرر داخل الملف: $it" }
+            }
+            row.barcode?.trim()?.takeIf { it.isNotEmpty() }?.let {
+                require(normalizedBarcodes.add(it)) { "باركود مكرر داخل الملف: $it" }
+            }
+            require(row.salePriceSyp != null || row.salePriceUsdCents != null) {
+                "سعر البيع مفقود في الصف ${row.rowNumber}"
+            }
+        }
+
+        val db = helper.writableDatabase
+        val now = timestamp()
+        db.beginTransaction()
+        try {
+            rows.forEach { row ->
+                val cleanName = row.name.trim()
+                val existsName = db.rawQuery(
+                    "SELECT 1 FROM products WHERE name=? COLLATE NOCASE LIMIT 1",
+                    arrayOf(cleanName)
+                ).use { it.moveToFirst() }
+                require(!existsName) { "الصنف موجود مسبقاً: $cleanName؛ أوقف الاستيراد لتجنب إنشاء تكرار" }
+
+                val sku = row.sku?.trim()?.takeIf { it.isNotEmpty() }
+                if (sku != null) {
+                    val exists = db.rawQuery("SELECT 1 FROM products WHERE sku=? LIMIT 1", arrayOf(sku)).use { it.moveToFirst() }
+                    require(!exists) { "رمز SKU مستخدم مسبقاً: $sku" }
+                }
+                val barcode = row.barcode?.trim()?.takeIf { it.isNotEmpty() }
+                if (barcode != null) {
+                    val exists = db.rawQuery("SELECT 1 FROM products WHERE barcode=? LIMIT 1", arrayOf(barcode)).use { it.moveToFirst() }
+                    require(!exists) { "الباركود مستخدم مسبقاً: $barcode" }
+                }
+
+                val categoryName = row.category?.trim()?.takeIf { it.isNotEmpty() } ?: "غير مصنف"
+                val categoryId = db.rawQuery(
+                    "SELECT id FROM categories WHERE name=? COLLATE NOCASE LIMIT 1",
+                    arrayOf(categoryName)
+                ).use { cursor ->
+                    if (cursor.moveToFirst()) cursor.getLong(0) else {
+                        val categoryValues = ContentValues().apply {
+                            put("name", categoryName)
+                            put("created_at", now)
+                        }
+                        db.insertOrThrow("categories", null, categoryValues)
+                    }
+                }
+
+                val unitName = row.unit?.trim()?.takeIf { it.isNotEmpty() } ?: "قطعة"
+                val unitId = resolveImportUnit(db, unitName)
+                val costUsd = when {
+                    row.purchaseCostUsdCents != null -> row.purchaseCostUsdCents
+                    row.purchaseCostSyp != null -> CurrencyConverter.sypToUsdCents(row.purchaseCostSyp, exchangeRateMilli)
+                    else -> 0L
+                }
+                val saleUsd = when {
+                    row.salePriceUsdCents != null -> row.salePriceUsdCents
+                    row.salePriceSyp != null -> CurrencyConverter.sypToUsdCents(row.salePriceSyp, exchangeRateMilli)
+                    else -> 0L
+                }
+                require(costUsd >= 0L && saleUsd > 0L) { "تكلفة أو سعر بيع غير صالح للصنف: $cleanName" }
+
+                val product = ContentValues().apply {
+                    put("id", UUID.randomUUID().toString())
+                    putNullable("barcode", barcode)
+                    putNullable("sku", sku)
+                    put("name", cleanName)
+                    put("category_id", categoryId)
+                    put("unit_id", unitId)
+                    put("purchase_cost_usd_cents", costUsd)
+                    put("sale_price_usd_cents", saleUsd)
+                    put("track_inventory", 1)
+                    put("created_at", now)
+                    put("updated_at", now)
+                }
+                db.insertOrThrow("products", null, product)
+                // No stock is imported. The user will enter a verified physical count later.
+            }
+            db.setTransactionSuccessful()
+        } finally {
+            db.endTransaction()
+        }
+        return rows.size
+    }
+
+    private fun resolveImportUnit(db: android.database.sqlite.SQLiteDatabase, rawName: String): Long {
+        val normalized = rawName.trim().lowercase(Locale.ROOT)
+        val aliases = when (normalized) {
+            "كغ", "kg", "كيلو", "كيلوغرام", "كيلوجرام" -> listOf("كيلوغرام", "كغ")
+            "غ", "g", "غرام", "جرام" -> listOf("غرام", "غ")
+            "ل", "l", "liter", "litre", "لتر" -> listOf("لتر", "ل")
+            "piece", "pcs", "pc", "قطعة" -> listOf("قطعة")
+            "box", "علبة" -> listOf("علبة")
+            "bundle", "ربطة" -> listOf("ربطة")
+            "carton", "كرتونة" -> listOf("كرتونة")
+            "pack", "طرد" -> listOf("طرد")
+            else -> listOf(rawName.trim())
+        }
+        for (candidate in aliases) {
+            db.rawQuery("SELECT id FROM units WHERE name=? COLLATE NOCASE OR symbol=? COLLATE NOCASE LIMIT 1",
+                arrayOf(candidate, candidate)).use { if (it.moveToFirst()) return it.getLong(0) }
+        }
+        error("وحدة القياس غير معروفة: $rawName؛ أضفها من إعدادات الوحدات ثم أعد الاستيراد")
+    }
+
     fun setProductActive(id: String, active: Boolean) {
         val values = ContentValues().apply {
             put("is_active", if (active) 1 else 0)
