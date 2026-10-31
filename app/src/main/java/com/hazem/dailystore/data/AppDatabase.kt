@@ -94,6 +94,64 @@ class AppDatabase private constructor(context: Context) :
                 db.endTransaction()
             }
         }
+        if (version < 4) {
+            db.beginTransaction()
+            try {
+                db.execSQL("ALTER TABLE cash_transactions ADD COLUMN operating_date TEXT")
+                db.execSQL("UPDATE cash_transactions SET operating_date=substr(created_at,1,10) WHERE operating_date IS NULL")
+                db.execSQL("""
+                    CREATE TABLE daily_supplier_rollovers (
+                        operating_date TEXT PRIMARY KEY NOT NULL,
+                        account_id TEXT NOT NULL,
+                        allocated_minor INTEGER NOT NULL CHECK(allocated_minor >= 0),
+                        note TEXT,
+                        updated_by TEXT NOT NULL,
+                        created_at TEXT NOT NULL,
+                        updated_at TEXT NOT NULL,
+                        FOREIGN KEY(account_id) REFERENCES cash_accounts(id) ON UPDATE RESTRICT ON DELETE RESTRICT,
+                        FOREIGN KEY(updated_by) REFERENCES users(id) ON UPDATE RESTRICT ON DELETE RESTRICT
+                    )
+                """.trimIndent())
+                db.execSQL("""
+                    CREATE TABLE wallet_daily_openings (
+                        operating_date TEXT NOT NULL,
+                        account_id TEXT NOT NULL,
+                        opening_minor INTEGER NOT NULL CHECK(opening_minor >= 0),
+                        note TEXT,
+                        updated_by TEXT NOT NULL,
+                        created_at TEXT NOT NULL,
+                        updated_at TEXT NOT NULL,
+                        PRIMARY KEY(operating_date, account_id),
+                        FOREIGN KEY(account_id) REFERENCES cash_accounts(id) ON UPDATE RESTRICT ON DELETE RESTRICT,
+                        FOREIGN KEY(updated_by) REFERENCES users(id) ON UPDATE RESTRICT ON DELETE RESTRICT
+                    )
+                """.trimIndent())
+                db.execSQL("""
+                    CREATE TABLE cash_account_transfers (
+                        id TEXT PRIMARY KEY NOT NULL,
+                        operation_id TEXT NOT NULL UNIQUE,
+                        source_account_id TEXT NOT NULL,
+                        destination_account_id TEXT NOT NULL,
+                        amount_minor INTEGER NOT NULL CHECK(amount_minor > 0),
+                        currency_code TEXT NOT NULL,
+                        reference TEXT,
+                        note TEXT,
+                        payload_hash TEXT NOT NULL,
+                        created_by TEXT NOT NULL,
+                        created_at TEXT NOT NULL,
+                        FOREIGN KEY(source_account_id) REFERENCES cash_accounts(id) ON UPDATE RESTRICT ON DELETE RESTRICT,
+                        FOREIGN KEY(destination_account_id) REFERENCES cash_accounts(id) ON UPDATE RESTRICT ON DELETE RESTRICT,
+                        FOREIGN KEY(created_by) REFERENCES users(id) ON UPDATE RESTRICT ON DELETE RESTRICT
+                    )
+                """.trimIndent())
+                db.execSQL("CREATE INDEX idx_cash_transactions_operating_date ON cash_transactions(operating_date, account_id)")
+                db.execSQL("CREATE INDEX idx_cash_transfers_accounts ON cash_account_transfers(source_account_id, destination_account_id, created_at)")
+                db.setTransactionSuccessful()
+                version = 4
+            } finally {
+                db.endTransaction()
+            }
+        }
         if (version != newVersion) {
             throw IllegalStateException("Missing database migration from version $version to $newVersion")
         }
@@ -101,7 +159,7 @@ class AppDatabase private constructor(context: Context) :
 
     companion object {
         const val DATABASE_NAME = "the_daily_shop.db"
-        const val DATABASE_VERSION = 3
+        const val DATABASE_VERSION = 4
 
         @Volatile
         private var INSTANCE: AppDatabase? = null
@@ -411,6 +469,54 @@ class AppDatabase private constructor(context: Context) :
             """.trimIndent(),
 
             """
+            CREATE TABLE daily_supplier_rollovers (
+                operating_date TEXT PRIMARY KEY NOT NULL,
+                account_id TEXT NOT NULL,
+                allocated_minor INTEGER NOT NULL CHECK(allocated_minor >= 0),
+                note TEXT,
+                updated_by TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                FOREIGN KEY(account_id) REFERENCES cash_accounts(id) ON UPDATE RESTRICT ON DELETE RESTRICT,
+                FOREIGN KEY(updated_by) REFERENCES users(id) ON UPDATE RESTRICT ON DELETE RESTRICT
+            )
+            """.trimIndent(),
+
+            """
+            CREATE TABLE wallet_daily_openings (
+                operating_date TEXT NOT NULL,
+                account_id TEXT NOT NULL,
+                opening_minor INTEGER NOT NULL CHECK(opening_minor >= 0),
+                note TEXT,
+                updated_by TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                PRIMARY KEY(operating_date, account_id),
+                FOREIGN KEY(account_id) REFERENCES cash_accounts(id) ON UPDATE RESTRICT ON DELETE RESTRICT,
+                FOREIGN KEY(updated_by) REFERENCES users(id) ON UPDATE RESTRICT ON DELETE RESTRICT
+            )
+            """.trimIndent(),
+
+            """
+            CREATE TABLE cash_account_transfers (
+                id TEXT PRIMARY KEY NOT NULL,
+                operation_id TEXT NOT NULL UNIQUE,
+                source_account_id TEXT NOT NULL,
+                destination_account_id TEXT NOT NULL,
+                amount_minor INTEGER NOT NULL CHECK(amount_minor > 0),
+                currency_code TEXT NOT NULL,
+                reference TEXT,
+                note TEXT,
+                payload_hash TEXT NOT NULL,
+                created_by TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                FOREIGN KEY(source_account_id) REFERENCES cash_accounts(id) ON UPDATE RESTRICT ON DELETE RESTRICT,
+                FOREIGN KEY(destination_account_id) REFERENCES cash_accounts(id) ON UPDATE RESTRICT ON DELETE RESTRICT,
+                FOREIGN KEY(created_by) REFERENCES users(id) ON UPDATE RESTRICT ON DELETE RESTRICT
+            )
+            """.trimIndent(),
+
+            """
             CREATE TABLE customer_credit_revaluations (
                 id TEXT PRIMARY KEY NOT NULL,
                 invoice_id TEXT NOT NULL,
@@ -444,6 +550,7 @@ class AppDatabase private constructor(context: Context) :
                 description TEXT,
                 created_by TEXT,
                 created_at TEXT NOT NULL,
+                operating_date TEXT,
                 FOREIGN KEY(account_id) REFERENCES cash_accounts(id)
                     ON UPDATE RESTRICT ON DELETE RESTRICT,
                 FOREIGN KEY(created_by) REFERENCES users(id)
