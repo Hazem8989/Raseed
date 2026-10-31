@@ -204,7 +204,7 @@ class StoreRepository(context: Context) {
      * Imports a catalog atomically. Imported stock is always zero; opening stock
      * must be entered later through a counted stock-opening operation.
      */
-    fun importProducts(rows: List<ProductImportRow>, exchangeRateMilli: Long): Int {
+    fun importProducts(rows: List<ProductImportRow>, exchangeRateMilli: Long, actorUserId: String): Int {
         require(rows.isNotEmpty()) { "لا توجد أصناف للاستيراد" }
         if (rows.any { it.usesSypPrices }) {
             require(exchangeRateMilli > 0L) {
@@ -295,6 +295,18 @@ class StoreRepository(context: Context) {
                 db.insertOrThrow("products", null, product)
                 // No stock is imported. The user will enter a verified physical count later.
             }
+            val batchId = UUID.randomUUID().toString()
+            val sourceCurrency = if (rows.any { it.usesSypPrices }) "SYP_CONVERTED_TO_USD" else "USD_REFERENCE"
+            val audit = ContentValues().apply {
+                put("id", UUID.randomUUID().toString())
+                put("user_id", actorUserId)
+                put("action", "PRODUCTS_IMPORTED")
+                put("entity_type", "PRODUCT_IMPORT_BATCH")
+                put("entity_id", batchId)
+                put("after_json", """{"count":${rows.size},"source_currency":"$sourceCurrency","exchange_rate_syp_per_usd_milli":$exchangeRateMilli,"opening_stock":"ZERO"}""")
+                put("created_at", now)
+            }
+            db.insertOrThrow("audit_log", null, audit)
             db.setTransactionSuccessful()
         } finally {
             db.endTransaction()
