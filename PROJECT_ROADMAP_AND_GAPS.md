@@ -78,7 +78,7 @@ This section distinguishes code present from features that are merely planned. B
 - FIFO cost layers and FIFO COGS/profit calculations.
 - Customer credit FX revaluation ledger and account display (implemented; phone acceptance pending).
 - Full supplier and customer running statements with all adjustments.
-- Daily purchase/expense/personal-withdrawal balance workflow.
+- Daily purchase/expense/personal-withdrawal balance workflow, including user-entered and daily-editable supplier cash rollover, separate personal withdrawals, daily opening balances per e-wallet, Cash/Sham Cash purchase/top-up recording, and fee-free internal store receipts into the selected wallet (see DAILY_CASH_AND_WALLET_BALANCE_POLICY.md).
 - Cash transfers between accounts, deposits, withdrawals, and operating/personal expenses.
 - Complete returns/refunds and payment-provider fee handling.
 - Posted invoice correction/version history with safe inventory and financial reversals.
@@ -146,6 +146,15 @@ This section distinguishes code present from features that are merely planned. B
 - Do not claim a feature is complete based only on a schema table, UI element, documentation, or successful APK build.
 - A milestone is complete only after code, automated tests, verified APK, and required user-device acceptance.
 
+
+### Daily rollover cash, personal withdrawals, and wallet balances (approved 2026-10-31)
+
+- The user enters the supplier-payment rollover amount each operating day based on the previous day's close; it must be editable daily and must not be auto-assumed from the prior cash balance.
+- Keep this supplier float separate from the primary daily sales/customer-collection drawer.
+- Record personal withdrawals as distinct cash outflows that reduce the allocated available balance and remain visible in the day's statement.
+- Record each e-wallet's daily opening balance independently, either manually or through a documented purchase/top-up operation for Cash or Sham Cash, without double-counting.
+- Store sales and customer-debt receipts received through a selected wallet increase that wallet automatically by the full amount, with no provider fee charged/deducted for these internal store transactions.
+- This is an approved requirement for the future daily balance implementation phase; it is not yet implemented. Detailed rules and tests are in DAILY_CASH_AND_WALLET_BALANCE_POLICY.md.
 
 ### Customer credit collection — final currency rule (approved 2026-10-31)
 
