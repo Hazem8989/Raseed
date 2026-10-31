@@ -1636,7 +1636,7 @@ class MainActivity : Activity() {
             setPadding(dp(16), dp(16), dp(16), dp(24))
         }
         content.addView(label("الحسابات المالية", 22f, green, true, Gravity.RIGHT))
-        content.addView(label("كل حساب يحتفظ بعملة مستقلة. عيّن درجاً نقدياً رئيسياً لليوم؛ تحصيلات الديون النقدية تذهب إليه حصراً، وتبقى صناديق الموردين المدورة منفصلة.",
+        content.addView(label("الحسابات الأساسية تُنشأ وتُربط تلقائياً: درج البيع اليومي، صندوق الموردين المدور، صندوق شراء رصيد الخدمات، ومحفظتا سيرياتيل وشام كاش. يمكنك إضافة حسابات أخرى عند الحاجة.",
             13f, mutedColor, false, Gravity.RIGHT).apply { setPadding(0, dp(5), 0, dp(12)) })
         val add = Button(this).apply {
             text = "+ إضافة صندوق أو محفظة"; isAllCaps = false
@@ -1661,13 +1661,15 @@ class MainActivity : Activity() {
                 if (account.isActive) green else mutedColor, false, Gravity.RIGHT))
             val primaryDrawer = repository.currentDayPrimaryDrawer()
             val rechargeAccountId = ServiceTransferRepository(this).rechargeAccountId()
+            val supplierRoleAccountId = repository.systemRoleAccountId("SUPPLIER_ROLLOVER")
             if (primaryDrawer?.id == account.id) card.addView(label("الدرج النقدي الرئيسي لليوم", 12f, green, true, Gravity.RIGHT)
                 .apply { setPadding(0, dp(4), 0, dp(2)) })
             if (rechargeAccountId == account.id) card.addView(label("صندوق شراء رصيد الخدمات الموحد", 12f, green, true, Gravity.RIGHT)
                 .apply { setPadding(0, dp(4), 0, dp(2)) })
-            if (repository.systemRoleAccountId("SUPPLIER_ROLLOVER") == account.id) card.addView(label("الصندوق الأساسي للنقد المدور للبضاعة", 12f, green, true, Gravity.RIGHT)
+            if (supplierRoleAccountId == account.id) card.addView(label("الصندوق الأساسي للنقد المدور للبضاعة", 12f, green, true, Gravity.RIGHT)
                 .apply { setPadding(0, dp(4), 0, dp(2)) })
-            if (isManager() && account.isActive && account.accountType == "CASH_BOX" && account.currencyCode == "SYP") {
+            if (isManager() && account.isActive && account.accountType == "CASH_BOX" && account.currencyCode == "SYP" &&
+                account.id != primaryDrawer?.id && account.id != supplierRoleAccountId) {
                 card.addView(smallButton("تعيين كصندوق شراء رصيد الخدمات") {
                     try {
                         ServiceTransferRepository(this).setRechargeAccount(currentUserId ?: error("جلسة المدير غير صالحة"), account.id)
@@ -1678,7 +1680,8 @@ class MainActivity : Activity() {
                     }
                 }, fieldParams(dp(42), dp(4)))
             }
-            if (isManager() && account.isActive && account.accountType == "CASH_BOX" && account.currencyCode == "SYP") {
+            if (isManager() && account.isActive && account.accountType == "CASH_BOX" && account.currencyCode == "SYP" &&
+                account.id != rechargeAccountId && account.id != supplierRoleAccountId) {
                 card.addView(smallButton("تعيين كدرج اليوم الرئيسي") {
                     try {
                         repository.setCurrentDayPrimaryDrawer(
