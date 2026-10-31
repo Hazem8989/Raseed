@@ -79,6 +79,7 @@ This section distinguishes code present from features that are merely planned. B
 
 ### Approved but not yet implemented
 - FIFO cost layers and FIFO COGS/profit calculations.
+- Complete external provider API integration and reconciliation for service transfers; current section records the local accounting operation only.
 - Customer credit FX revaluation ledger and account display (implemented; phone acceptance pending).
 - Full supplier and customer running statements with all adjustments.
 
@@ -112,6 +113,7 @@ This section distinguishes code present from features that are merely planned. B
 - [ ] Complete customer and supplier running statements.
 - [ ] Implement returns/refunds and provider-fee rules.
 - [x] Implement daily supplier rollover, personal withdrawals, daily wallet openings, daily cash/electronic receipts report, and wallet-to-drawer internal transfer (automated tests/build passed; phone acceptance pending).
+- [x] Implement provider service-transfer accounting with separate Syriatel shared float and Sham Cash float, 20%/10%/5% profit rules, separate manual provider fee, 2% Syriatel recharge cost, receipt-account posting, audit/idempotency, reversals, and daily-report classification (automated tests/build passed; phone acceptance pending).
 - [ ] Implement account transfers, deposits, withdrawals, and cash reconciliation.
 - [ ] Implement manager-only posted invoice correction with immutable version/audit trail.
 
