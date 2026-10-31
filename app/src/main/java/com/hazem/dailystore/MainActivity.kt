@@ -2100,7 +2100,7 @@ class MainActivity : Activity() {
         capitalCard.addView(label("آخر احتساب: ${capital.current.asOfLabel}", 10f, mutedColor, false, Gravity.RIGHT)
             .apply { setPadding(0, dp(5), 0, 0) })
         content.addView(capitalCard, fieldParams(-2, dp(10)))
-        if (!capital.current.isComplete) {
+        if (!capital.current.isComplete || !capital.previousClose.isComplete) {
             content.addView(label(
                 "تنبيه: لم نحتسب قيمة الأصناف التي تحتوي على كميات بلا تكلفة مسجلة أو فروقات في سجل المخزون. الأصناف المتأثرة حالياً: ${capital.current.unvaluedProductCount}، وعند إغلاق أمس: ${capital.previousClose.unvaluedProductCount}. الرقم أعلاه هو رأس المال المؤكد فقط.",
                 12f, Color.rgb(170, 80, 45), true, Gravity.RIGHT
