@@ -1818,7 +1818,7 @@ class MainActivity : Activity() {
                 list.addView(label(d.serviceName+": المقبوض "+formatSypAmount(d.customerReceiptsMinor)+" ل.س • الربح "+formatSypAmount(d.profitMinor)+" ل.س • رسوم الشركة "+formatSypAmount(d.providerFeeMinor)+" ل.س",12f,textColor,false,Gravity.RIGHT).apply{setPadding(0,dp(3),0,dp(3))})
                 list.addView(label("الرصيد المستهلك "+formatSypAmount(d.deliveredMinor)+" ل.س • قيمة الرصيد المطلوب تعويضه "+formatSypAmount(d.rechargeReserveMinor)+" ل.س",12f,green,true,Gravity.RIGHT).apply{setPadding(0,dp(2),0,dp(5))})
             }
-            list.addView(label("قيمة الرصيد المستهلك هي المبلغ الأساسي اللازم لتعويض الرصيد. عمولة 2% لا تُحسب إلا عند تعبئة سيرياتيل فعلياً، وتظهر حينها ضمن رسوم التعبئة المدفوعة.",11f,mutedColor,false,Gravity.RIGHT).apply{setPadding(0,dp(2),0,dp(8))})
+            list.addView(label("قيمة الرصيد المستهلك هي المبلغ الأساسي اللازم لتعويض الرصيد. عمولة 2% تُحسب فقط عند تعبئة رصيد سيرياتيل أو شام كاش من تاجر خارجي، وتظهر حينها ضمن رسوم التعبئة المدفوعة.",11f,mutedColor,false,Gravity.RIGHT).apply{setPadding(0,dp(2),0,dp(8))})
         }
         val electronicText = if (report.electronicReceiptsByCurrency.isEmpty()) "لا توجد مقبوضات إلكترونية" else
             report.electronicReceiptsByCurrency.entries.joinToString(" • ") { formatAccountBalance(it.value, it.key) }
@@ -1901,7 +1901,7 @@ class MainActivity : Activity() {
             card.addView(label("رسوم التعبئة المدفوعة فعلياً اليوم: "+formatSypAmount(d.rechargeFeePaidMinor)+" ل.س • قيمة الرصيد اللازم تعويضه: "+formatSypAmount(d.rechargeReserveMinor)+" ل.س",12f,mutedColor,true,Gravity.RIGHT))
             content.addView(card,fieldParams(-2,dp(7)))
         }
-        content.addView(label("مبالغ الزبائن تُقبض في الدرج الرئيسي (أو محفظة القبض عند الدفع إلكترونياً). قيمة الرصيد المستهلك تُعرض لتقدير ما يلزم تعويضه. عمولة 2% تُحسب وتُسجل فقط عند تنفيذ تعبئة سيرياتيل فعلياً، ولا تُضاف إلى كل تحويل.",11f,mutedColor,false,Gravity.RIGHT).apply{setPadding(0,dp(3),0,dp(10))})
+        content.addView(label("مبالغ الزبائن تُقبض في الدرج الرئيسي (أو محفظة القبض عند الدفع إلكترونياً). قيمة الرصيد المستهلك تُعرض لتقدير ما يلزم تعويضه. عمولة 2% تُسجل فقط عند تعبئة رصيد سيرياتيل أو شام كاش من تاجر خارجي، ولا تُضاف إلى تحويلات الزبائن.",11f,mutedColor,false,Gravity.RIGHT).apply{setPadding(0,dp(3),0,dp(10))})
         content.addView(sectionHeading("سجل تحويلات الرصيد"))
         val rows=repo.listTransfers(80)
         if(rows.isEmpty()) content.addView(label("لا توجد تحويلات مسجلة حتى الآن.",13f,mutedColor,false,Gravity.CENTER).apply{setPadding(0,dp(18),0,dp(18))})
@@ -1946,7 +1946,7 @@ class MainActivity : Activity() {
         val service=Spinner(this).apply{adapter=ArrayAdapter(this@MainActivity,android.R.layout.simple_spinner_dropdown_item,listOf("رصيد سيرياتيل المشترك","رصيد شام كاش"))}
         val source=Spinner(this).apply{adapter=ArrayAdapter(this@MainActivity,android.R.layout.simple_spinner_dropdown_item,sources.map{it.name+" • صندوق شراء الرصيد • المتاح "+formatSypAmount(it.balanceMinor)+" ل.س"})}
         val amount=fieldForDialog("قيمة الرصيد المراد شراؤه").apply{inputType=InputType.TYPE_CLASS_NUMBER or InputType.TYPE_NUMBER_FLAG_DECIMAL}
-        val fee=label("عمولة شحن سيرياتيل 2% عند الشحن فقط؛ شام كاش بلا عمولة شحن.",12f,green,false,Gravity.RIGHT)
+        val fee=label("عمولة تعبئة 2% عند شراء رصيد سيرياتيل أو شام كاش من تاجر خارجي فقط؛ لا عمولة على تحويلات الزبائن.",12f,green,false,Gravity.RIGHT)
         service.onItemSelectedListener=object:android.widget.AdapterView.OnItemSelectedListener{
             override fun onNothingSelected(parent:android.widget.AdapterView<*>?){}
             override fun onItemSelected(parent:android.widget.AdapterView<*>?,view:View?,position:Int,id:Long){fee.text=if(position==0)"عمولة شحن سيرياتيل: 2% من قيمة الرصيد المشتَرى" else "لا توجد عمولة شحن على رصيد شام كاش"}
