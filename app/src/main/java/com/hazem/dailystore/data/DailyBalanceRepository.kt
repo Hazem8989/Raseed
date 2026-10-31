@@ -183,7 +183,10 @@ class DailyBalanceRepository(context:Context) {
                 val id=c.getString(0);val base=c.getLong(4)
                 val opening=db.rawQuery("SELECT opening_minor FROM wallet_daily_openings WHERE operating_date=? AND account_id=?",arrayOf(date,id)).use { if(it.moveToFirst())it.getLong(0)else openingBefore(db,id,base,date) }
                 val s=totals(db,id,date)
-                rows.add(DailyAccountSummary(id,c.getString(1),c.getString(2),c.getString(3),opening,s[0],s[1],s[8],s[2],s[3],s[4],s[5],s[6],s[7],Math.addExact(opening,s.sum())))
+                val totalInflows = Math.addExact(Math.addExact(s[0], s[1]), Math.addExact(s[2], Math.addExact(s[5], s[8])))
+                val totalOutflows = Math.addExact(Math.addExact(s[3], s[4]), Math.addExact(s[6], s[7]))
+                val closing = Math.addExact(opening, Math.subtractExact(totalInflows, totalOutflows))
+                rows.add(DailyAccountSummary(id,c.getString(1),c.getString(2),c.getString(3),opening,s[0],s[1],s[8],s[2],s[3],s[4],s[5],s[6],s[7],closing))
             }
         }
         val walletRows=rows.filter{it.accountType=="WALLET"}
