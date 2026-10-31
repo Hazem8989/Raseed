@@ -111,6 +111,19 @@ class DailyBalanceRepositoryTest {
             daily.dailyReport().accounts.single { it.accountId == drawer.id }.closingMinor)
     }
 
+    @Test fun walletOpeningCannotBeChangedAfterDailyMovementsBegin() {
+        val wallet = accounts.create("محفظة مطابقة " + UUID.randomUUID(), "WALLET", "SYP", 0L)
+        daily.setWalletOpening(actorId, wallet.id, 10_000L, "رصيد بداية اليوم")
+        insertMovement(wallet.id, "CUSTOMER_CREDIT_COLLECTION", 1_000L, "wallet-opening-activity")
+        try {
+            daily.setWalletOpening(actorId, wallet.id, 20_000L, "محاولة تعديل بعد الحركة")
+            throw AssertionError("Opening balance must be locked after daily activity")
+        } catch (expected: IllegalArgumentException) {
+            assertTrue(expected.message!!.contains("بعد بدء الحركات"))
+        }
+        assertEquals(11_000L, accounts.balance(wallet.id))
+    }
+
     @Test fun supplierRolloverIsSeparateAndPersonalWithdrawalsReduceItsAvailability() {
         val drawer = accounts.create("درج رئيسي " + UUID.randomUUID(), "CASH_BOX", "SYP", 0L)
         val supplierCash = accounts.create("نقد الموردين " + UUID.randomUUID(), "CASH_BOX", "SYP", 100_000L)
