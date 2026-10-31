@@ -37,7 +37,7 @@ class DailyBalanceRepository(context:Context) {
             require(!isRechargeAccount){"هذا الصندوق مخصص لشراء رصيد الخدمات ولا يمكن تخصيصه للموردين"}
             val date=today();val used=usage(db,date,accountId)
             val unrelatedMovements=db.rawQuery(
-                "SELECT COUNT(*) FROM cash_transactions WHERE account_id=? AND COALESCE(operating_date,substr(created_at,1,10))=? AND transaction_type NOT IN ('PURCHASE_PAYMENT','PERSONAL_WITHDRAWAL')",
+                "SELECT COUNT(*) FROM cash_transactions WHERE account_id=? AND COALESCE(operating_date,substr(created_at,1,10))=? AND transaction_type NOT IN ('PURCHASE_PAYMENT','PERSONAL_WITHDRAWAL','ACCOUNT_TRANSFER_IN')",
                 arrayOf(accountId,date)
             ).use { it.moveToFirst();it.getInt(0) }
             require(unrelatedMovements==0) {
