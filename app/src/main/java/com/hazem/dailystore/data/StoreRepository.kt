@@ -229,13 +229,15 @@ class StoreRepository(context: Context) {
             }
             if (row.purchaseCostSyp != null && row.purchaseCostUsdCents != null) {
                 val converted = CurrencyConverter.sypToUsdCents(row.purchaseCostSyp, exchangeRateMilli)
-                require(kotlin.math.abs(converted - row.purchaseCostUsdCents) <= 1L) {
+                val difference = BigDecimal.valueOf(converted).subtract(BigDecimal.valueOf(row.purchaseCostUsdCents)).abs()
+                require(difference <= BigDecimal.ONE) {
                     "تكلفة الشراء بالليرة والدولار غير متطابقة في الصف ${row.rowNumber}"
                 }
             }
             if (row.salePriceSyp != null && row.salePriceUsdCents != null) {
                 val converted = CurrencyConverter.sypToUsdCents(row.salePriceSyp, exchangeRateMilli)
-                require(kotlin.math.abs(converted - row.salePriceUsdCents) <= 1L) {
+                val difference = BigDecimal.valueOf(converted).subtract(BigDecimal.valueOf(row.salePriceUsdCents)).abs()
+                require(difference <= BigDecimal.ONE) {
                     "سعر البيع بالليرة والدولار غير متطابق في الصف ${row.rowNumber}"
                 }
             }
@@ -379,6 +381,13 @@ class StoreRepository(context: Context) {
             ).use { it.moveToFirst() }
             require(!priorMovement) {
                 "يوجد سجل حركة سابق لهذا المنتج؛ لا يجوز إنشاء رصيد افتتاحي جديد فوق سجل قائم. استخدم تسوية جرد مستقلة."
+            }
+            val existingQuantity = db.rawQuery(
+                "SELECT COALESCE(SUM(quantity),0) FROM inventory_balances WHERE product_id=?",
+                arrayOf(productId)
+            ).use { cursor -> cursor.moveToFirst(); cursor.getDouble(0) }
+            require(kotlin.math.abs(existingQuantity) <= 0.0000001) {
+                "يوجد رصيد مخزون مسجل بالفعل؛ لا يجوز استبداله برصيد افتتاحي"
             }
             val warehouseId = db.rawQuery(
                 "SELECT id FROM warehouses WHERE is_default=1 AND is_active=1 LIMIT 1", null
