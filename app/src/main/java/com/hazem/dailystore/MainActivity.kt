@@ -727,11 +727,22 @@ class MainActivity : Activity() {
             }
             val history = repository.listPayments(invoice.id)
             if (history.isNotEmpty()) {
-                val historyText = history.joinToString("\n") {
-                    "${formatAccountBalance(it.amountMinor, it.currencyCode)} • ${it.accountName} • ${it.createdAt.take(10)}"
+                card.addView(label("سجل الدفعات:", 12f, mutedColor, true, Gravity.RIGHT)
+                    .apply { setPadding(0, dp(8), 0, dp(3)) })
+                history.forEach { payment ->
+                    val paymentRow = LinearLayout(this).apply {
+                        orientation = LinearLayout.VERTICAL
+                        setPadding(dp(8), dp(6), dp(8), dp(6))
+                    }
+                    paymentRow.addView(label(
+                        "${formatAccountBalance(payment.amountMinor, payment.currencyCode)} • ${payment.accountName} • ${payment.createdAt.take(10)}",
+                        11f, textColor, false, Gravity.RIGHT
+                    ))
+                    if (isManager()) paymentRow.addView(smallButton("تعديل هذه الدفعة") {
+                        showEditPurchasePaymentDialog(invoice.id, payment) { showPurchases() }
+                    }, fieldParams(dp(38), 0))
+                    card.addView(paymentRow, matchWidth())
                 }
-                card.addView(label("سجل الدفعات:\n$historyText", 11f, mutedColor, false, Gravity.RIGHT)
-                    .apply { setPadding(0, dp(6), 0, 0) })
             }
             list.addView(card, matchWidth().apply { bottomMargin = dp(10) })
         }
@@ -744,6 +755,70 @@ class MainActivity : Activity() {
         "DRAFT" -> "مسودة"
         "CANCELLED" -> "ملغاة"
         else -> status
+    }
+
+    private fun showEditPurchasePaymentDialog(
+        invoiceId: String, payment: PurchasePaymentRecord, onSaved: () -> Unit
+    ) {
+        if (!isManager()) {
+            Toast.makeText(this, "تعديل دفعات الموردين متاح للمدير فقط", Toast.LENGTH_SHORT).show()
+            return
+        }
+        val accounts = CashAccountRepository(this).listActive()
+            .filter { it.currencyCode == payment.currencyCode }
+        if (accounts.isEmpty()) {
+            Toast.makeText(this, "لا يوجد حساب نشط بعملة هذه الدفعة", Toast.LENGTH_LONG).show()
+            return
+        }
+        val content = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(18), dp(8), dp(18), dp(4))
+        }
+        val accountSpinner = Spinner(this)
+        accountSpinner.adapter = ArrayAdapter(this, android.R.layout.simple_spinner_dropdown_item,
+            accounts.map { "${it.name} • ${it.currencyCode}" })
+        accountSpinner.setSelection(accounts.indexOfFirst { it.id == payment.cashAccountId }.coerceAtLeast(0))
+        val amount = fieldForDialog("المبلغ").apply {
+            setText(if (payment.currencyCode == "USD") moneyText(payment.amountMinor)
+                else formatSypAmount(payment.amountMinor))
+            inputType = InputType.TYPE_CLASS_NUMBER or InputType.TYPE_NUMBER_FLAG_DECIMAL
+        }
+        val note = fieldForDialog("الملاحظة").apply { setText(payment.note.orEmpty()) }
+        content.addView(label("تصحيح دفعة المورد", 15f, green, true, Gravity.RIGHT))
+        content.addView(label(
+            "يمكن تعديل المبلغ أو الحساب من نفس العملة أو الملاحظة. سيُعاد احتساب رصيد الحساب والمتبقي على الفاتورة، مع الاحتفاظ بسعر الصرف الأصلي.",
+            11f, mutedColor, false, Gravity.RIGHT
+        ).apply { setPadding(0, dp(4), 0, dp(8)) })
+        content.addView(label("الحساب المالي", 12f, mutedColor, false, Gravity.RIGHT))
+        content.addView(accountSpinner, fieldParams(dp(48), dp(8)))
+        content.addView(amount, fieldParams(dp(48), dp(8)))
+        content.addView(note, fieldParams(dp(48), dp(8)))
+        AlertDialog.Builder(this).setTitle("تعديل دفعة المورد").setView(content)
+            .setNegativeButton("إلغاء", null)
+            .setPositiveButton("حفظ التصحيح", null).create().also { dialog ->
+                dialog.setOnShowListener {
+                    dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener {
+                        try {
+                            val account = accounts[accountSpinner.selectedItemPosition]
+                            val entered = amount.text.toString().trim()
+                            val amountMinor = if (payment.currencyCode == "USD")
+                                parseUsdCents(entered) else parseSypAmount(entered)
+                            require(amountMinor > 0L) { "أدخل مبلغاً أكبر من صفر" }
+                            PurchasePaymentRepository(this).editPayment(
+                                currentUserRole, currentUserId ?: error("جلسة المدير غير صالحة"),
+                                payment.id, account.id, amountMinor,
+                                note.text.toString().trim().ifEmpty { null }
+                            )
+                            dialog.dismiss()
+                            Toast.makeText(this, "تم تصحيح الدفعة وتحديث الحساب والفاتورة", Toast.LENGTH_LONG).show()
+                            onSaved()
+                        } catch (e: Exception) {
+                            Toast.makeText(this, e.message ?: "تعذر تعديل الدفعة", Toast.LENGTH_LONG).show()
+                        }
+                    }
+                }
+                dialog.show()
+            }
     }
 
     private fun showPurchasePaymentDialog(
@@ -1278,6 +1353,8 @@ class MainActivity : Activity() {
         dialog.show()
     }
 
+    private fun isManager(): Boolean = currentUserRole == "ADMIN" && !currentUserId.isNullOrBlank()
+
     private fun showCashAccounts() {
         val repository = CashAccountRepository(this)
         val page = LinearLayout(this).apply {
@@ -1325,12 +1402,69 @@ class MainActivity : Activity() {
                 15f, textColor, true, Gravity.RIGHT))
             card.addView(label(if (account.isActive) "نشط" else "موقوف", 11f,
                 if (account.isActive) green else mutedColor, false, Gravity.RIGHT))
+            if (isManager()) card.addView(smallButton("تعديل الحساب") {
+                showEditCashAccountDialog(account) { showCashAccounts() }
+            }, fieldParams(dp(42), dp(4)))
             content.addView(card, fieldParams(-2, dp(8)))
         }
         body.addView(content)
         page.addView(header, matchWidth())
         page.addView(body, LinearLayout.LayoutParams(-1, 0, 1f))
         setContentView(page)
+    }
+
+    private fun showEditCashAccountDialog(
+        account: CashAccountSummary, onSaved: () -> Unit
+    ) {
+        if (!isManager()) {
+            Toast.makeText(this, "تعديل الحسابات المالية متاح للمدير فقط", Toast.LENGTH_SHORT).show()
+            return
+        }
+        val repository = CashAccountRepository(this)
+        val hasHistory = repository.hasTransactions(account.id)
+        val content = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(18), dp(8), dp(18), dp(4))
+        }
+        val name = fieldForDialog("اسم الحساب").apply { setText(account.name) }
+        val type = Spinner(this)
+        val typeLabels = listOf("صندوق نقدي", "محفظة إلكترونية", "حساب بنكي", "أخرى")
+        val typeCodes = listOf("CASH_BOX", "WALLET", "BANK", "OTHER")
+        type.adapter = ArrayAdapter(this, android.R.layout.simple_spinner_dropdown_item, typeLabels)
+        type.setSelection(typeCodes.indexOf(account.accountType).coerceAtLeast(0))
+        val currency = Spinner(this)
+        val currencies = listOf("USD", "SYP")
+        currency.adapter = ArrayAdapter(this, android.R.layout.simple_spinner_dropdown_item, currencies)
+        currency.setSelection(currencies.indexOf(account.currencyCode).coerceAtLeast(0))
+        if (hasHistory) {
+            type.isEnabled = false
+            currency.isEnabled = false
+        }
+        content.addView(label("اسم الحساب", 12f, mutedColor, false, Gravity.RIGHT))
+        content.addView(name, fieldParams(dp(48), dp(8)))
+        content.addView(label("نوع الحساب", 12f, mutedColor, false, Gravity.RIGHT))
+        content.addView(type, fieldParams(dp(46), dp(6)))
+        content.addView(label("العملة", 12f, mutedColor, false, Gravity.RIGHT))
+        content.addView(currency, fieldParams(dp(46), dp(6)))
+        if (hasHistory) content.addView(label(
+            "لأن الحساب يحتوي حركات مالية سابقة، يمكن تعديل الاسم فقط. نوع الحساب والعملة محميان حتى لا تتغير دلالة الحركات التاريخية.",
+            11f, gold.toInt(), true, Gravity.RIGHT
+        ).apply { setPadding(0, dp(4), 0, dp(4)) })
+        AlertDialog.Builder(this).setTitle("تعديل الحساب المالي").setView(content)
+            .setNegativeButton("إلغاء", null)
+            .setPositiveButton("حفظ التعديلات") { _, _ ->
+                try {
+                    repository.updateDetails(
+                        currentUserRole, currentUserId ?: error("جلسة المدير غير صالحة"),
+                        account.id, name.text.toString(), typeCodes[type.selectedItemPosition],
+                        currencies[currency.selectedItemPosition]
+                    )
+                    Toast.makeText(this, "تم تعديل الحساب مع حفظ سجل التدقيق", Toast.LENGTH_SHORT).show()
+                    onSaved()
+                } catch (e: Exception) {
+                    Toast.makeText(this, e.message ?: "تعذر تعديل الحساب", Toast.LENGTH_LONG).show()
+                }
+            }.show()
     }
 
     private fun showCreateCashAccountDialog() {
