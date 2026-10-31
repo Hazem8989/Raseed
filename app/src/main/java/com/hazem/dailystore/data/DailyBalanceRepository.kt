@@ -47,6 +47,9 @@ class DailyBalanceRepository(context:Context) {
             require(primary == null || primary != accountId) {
                 "يجب فصل صندوق الموردين المدور عن درج الكاش الرئيسي اليومي"
             }
+            require(balance(db, accountId) >= amount) {
+                "المبلغ المخصص يتجاوز الرصيد الفعلي الموجود في صندوق الموردين"
+            }
             val now=stamp();val v=ContentValues().apply {
                 put("operating_date",date);put("account_id",accountId);put("allocated_minor",amount)
                 put("note",note?.trim()?.takeIf { x->x.isNotEmpty() });put("updated_by",actor)
