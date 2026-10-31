@@ -91,6 +91,7 @@ class InvoiceRepositoryTest {
 
     @Test
     fun draftSaveIsIdempotentAndRejectsOperationIdReuseWithDifferentPayload() {
+        val invoiceCountBefore = invoices.listSalesInvoices().size
         val first = invoices.saveSalesDraft(
             "sale-draft-retry", null, null, "2026-10-31",
             0, null, listOf(InvoiceLineInput(productId, BigDecimal("1"), 250))
@@ -110,7 +111,7 @@ class InvoiceRepositoryTest {
         } catch (_: IllegalArgumentException) {
             // Expected idempotency guard.
         }
-        assertEquals(1, invoices.listSalesInvoices().size)
+        assertEquals(invoiceCountBefore + 1, invoices.listSalesInvoices().size)
     }
 
     @Test
