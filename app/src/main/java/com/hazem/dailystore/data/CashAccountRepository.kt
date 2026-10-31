@@ -112,6 +112,10 @@ class CashAccountRepository(context: Context) {
     }
 
     private fun setSystemRole(db:android.database.sqlite.SQLiteDatabase,role:String,accountId:String) {
+        val current=db.rawQuery("SELECT account_id FROM system_cash_account_roles WHERE role_key=?",arrayOf(role)).use {
+            if(it.moveToFirst())it.getString(0)else null
+        }
+        if(current==accountId)return
         val values=ContentValues().apply{put("role_key",role);put("account_id",accountId);put("linked_at",timestamp())}
         db.insertWithOnConflict("system_cash_account_roles",null,values,android.database.sqlite.SQLiteDatabase.CONFLICT_REPLACE)
     }
@@ -221,7 +225,10 @@ class CashAccountRepository(context: Context) {
     private fun jsonEscape(value: String): String =
         value.replace("\\", "\\\\").replace("\"", "\\\"").replace("\n", "\\n")
 
-    fun listAll(): List<CashAccountSummary> = listAccounts(false)
+    fun listAll(): List<CashAccountSummary> {
+        ensureSystemCashAccounts()
+        return listAccounts(false)
+    }
 
     private fun listAccounts(activeOnly: Boolean): List<CashAccountSummary> {
         val result = mutableListOf<CashAccountSummary>()
@@ -270,7 +277,9 @@ class CashAccountRepository(context: Context) {
                SELECT 1 FROM cash_accounts WHERE id=? AND opening_balance_minor<>0
                UNION ALL
                SELECT 1 FROM service_wallet_account_links WHERE account_id=?
-               LIMIT 1""".trimIndent(), arrayOf(accountId, accountId, accountId)
+               UNION ALL
+               SELECT 1 FROM system_cash_account_roles WHERE account_id=?
+               LIMIT 1""".trimIndent(), arrayOf(accountId, accountId, accountId, accountId)
         ).use { it.moveToFirst() }
 
     fun updateDetails(
