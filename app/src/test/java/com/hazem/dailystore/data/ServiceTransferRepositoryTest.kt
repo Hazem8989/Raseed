@@ -23,7 +23,9 @@ class ServiceTransferRepositoryTest {
         database = AppDatabase.getInstance(context)
         database.writableDatabase.execSQL("DELETE FROM service_transfers")
         database.writableDatabase.execSQL("DELETE FROM service_wallet_transactions")
-        database.writableDatabase.execSQL("DELETE FROM cash_transactions WHERE transaction_type IN ('SERVICE_TRANSFER_RECEIPT','SERVICE_RECHARGE','SERVICE_TRANSFER_REVERSAL')")
+        database.writableDatabase.execSQL("DELETE FROM cash_transactions WHERE transaction_type IN ('SERVICE_TRANSFER_RECEIPT','SERVICE_RECHARGE','SERVICE_TRANSFER_REVERSAL','SERVICE_FLOAT_OPENING','SERVICE_RECHARGE_IN','SERVICE_TRANSFER_OUT','SERVICE_TRANSFER_REVERSAL_IN')")
+        database.writableDatabase.execSQL("DELETE FROM wallet_daily_openings")
+        database.writableDatabase.execSQL("UPDATE cash_accounts SET opening_balance_minor=0 WHERE id IN (SELECT account_id FROM service_wallet_account_links)")
         StoreRepository(context).ensureBaseSetup()
         val auth = AuthRepository(context)
         auth.ensureInitialAdmin()
@@ -77,12 +79,12 @@ class ServiceTransferRepositoryTest {
     }
 
     @Test fun electronicReceiptIncreasesCollectionWalletNotServiceFloat() {
-        val collection = accounts.create("محفظة قبض خدمة " + UUID.randomUUID(), "WALLET", "SYP", 0L)
+        val collection = repo.serviceAccountId(ServiceTransferRepository.SYRIATEL_SHARED)
         repo.setOpeningBalance(actor, ServiceTransferRepository.SYRIATEL_SHARED, 40_000L)
         val result = repo.executeTransfer(actor, ServiceTransferRepository.SYRIATEL_BALANCE,
-            5_000L, 0L, collection.id, "svc-electronic-" + UUID.randomUUID())
-        assertEquals(6_000L, accounts.balance(collection.id))
-        assertEquals(35_000L, repo.listWallets().single { it.serviceKey == ServiceTransferRepository.SYRIATEL_SHARED }.balanceMinor)
+            5_000L, 0L, collection, "svc-electronic-" + UUID.randomUUID())
+        assertEquals(41_000L, accounts.balance(collection))
+        assertEquals(41_000L, repo.listWallets().single { it.serviceKey == ServiceTransferRepository.SYRIATEL_SHARED }.balanceMinor)
         assertEquals("ELECTRONIC", repo.listTransfers().first().receiptChannel)
         assertEquals(6_000L, result.customerChargeMinor)
         val daily = DailyBalanceRepository(RuntimeEnvironment.getApplication()).dailyReport()
@@ -91,6 +93,7 @@ class ServiceTransferRepositoryTest {
         assertEquals(6_000L, row.electronicReceiptsMinor)
         assertEquals(6_000L, row.liquidatableElectronicReceiptsMinor)
         assertEquals(0L, row.salesReceiptsMinor)
+        assertEquals(41_000L, row.closingMinor)
     }
 
     @Test fun rechargeDeductsFromDedicatedCashBoxAndAppliesTwoPercentOnlyOnExternalRecharge() {
@@ -111,6 +114,27 @@ class ServiceTransferRepositoryTest {
         assertEquals(400L, daily.single { it.serviceType == ServiceTransferRepository.SHAM_CASH_TRANSFER }.rechargeFeePaidMinor)
     }
 
+
+    @Test fun electronicServiceReceiptCanBeMovedToCashAndBothBalancesReconcile() {
+        val drawer = accounts.create("درج تصريف خدمة " + UUID.randomUUID(), "CASH_BOX", "SYP", 0L)
+        val walletId = repo.serviceAccountId(ServiceTransferRepository.SYRIATEL_SHARED)
+        repo.setOpeningBalance(actor, ServiceTransferRepository.SYRIATEL_SHARED, 40_000L)
+        repo.executeTransfer(actor, ServiceTransferRepository.SYRIATEL_BALANCE,
+            5_000L, 0L, walletId, "svc-wallet-receipt-" + UUID.randomUUID())
+        assertEquals(41_000L, accounts.balance(walletId))
+        dailyTransferToCash(walletId, drawer.id, 6_000L)
+        assertEquals(35_000L, accounts.balance(walletId))
+        assertEquals(6_000L, accounts.balance(drawer.id))
+        val report = DailyBalanceRepository(RuntimeEnvironment.getApplication()).dailyReport()
+        assertEquals(35_000L, report.accounts.single { it.accountId == walletId }.closingMinor)
+        assertEquals(6_000L, report.accounts.single { it.accountId == drawer.id }.closingMinor)
+    }
+
+    private fun dailyTransferToCash(walletId:String,drawerId:String,amount:Long) {
+        DailyBalanceRepository(RuntimeEnvironment.getApplication()).transferWalletToDrawer(
+            actor,walletId,drawerId,amount,"service-wallet-cash-" + UUID.randomUUID(),"تصريف قبض خدمة","تحويل داخلي"
+        )
+    }
 
     @Test fun managerCanReverseTransferWithAuditedOppositeMovements() {
         val drawer = accounts.create("درج عكس " + UUID.randomUUID(), "CASH_BOX", "SYP", 0L)
