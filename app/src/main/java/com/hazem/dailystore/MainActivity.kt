@@ -1969,13 +1969,15 @@ class MainActivity : Activity() {
         ).apply { setPadding(0, dp(5), 0, dp(3)) })
         val changePrefix = if (capital.changeUsdCents >= 0L) "+" else "−"
         val changeAbs = if (capital.changeUsdCents == Long.MIN_VALUE) Long.MAX_VALUE else kotlin.math.abs(capital.changeUsdCents)
+        val capitalChangeLabel = if (capital.current.isComplete && capital.previousClose.isComplete)
+            "التغير عن إغلاق اليوم السابق: " else "التغير في الجزء المقيم فقط (مقارنة بإغلاق أمس): "
         list.addView(label(
-            "التغير عن إغلاق اليوم السابق: " + changePrefix + formatDualMoney(changeAbs, capitalRate),
+            capitalChangeLabel + changePrefix + formatDualMoney(changeAbs, capitalRate),
             14f, if (capital.changeUsdCents >= 0L) green else textColor, true, Gravity.RIGHT
         ).apply { setPadding(0, dp(2), 0, dp(4)) })
-        if (!capital.current.isComplete) {
+        if (!capital.current.isComplete || !capital.previousClose.isComplete) {
             list.addView(label(
-                "تنبيه محاسبي: توجد كميات غير مقيمة أو فروقات بين سجل حركات المخزون ورصيد المخزون الحالي. عدد الأصناف المتأثرة: ${capital.current.unvaluedProductCount}. قيمة رأس المال المعروضة هي الجزء المؤكد فقط، ولا تشمل هذه الكميات.",
+                "تنبيه محاسبي: توجد كميات غير مقيمة أو فروقات في سجل المخزون. الأصناف المتأثرة حالياً: ${capital.current.unvaluedProductCount}، وعند إغلاق أمس: ${capital.previousClose.unvaluedProductCount}. قيمة رأس المال المعروضة هي الجزء المؤكد فقط.",
                 12f, Color.rgb(170, 80, 45), true, Gravity.RIGHT
             ).apply { setPadding(0, dp(2), 0, dp(9)) })
         } else {
@@ -2089,8 +2091,10 @@ class MainActivity : Activity() {
         val sign = if (capital.changeUsdCents >= 0L) "+" else "−"
         val absoluteChange = if (capital.changeUsdCents == Long.MIN_VALUE) Long.MAX_VALUE
             else kotlin.math.abs(capital.changeUsdCents)
+        val capitalChangeLabel = if (capital.current.isComplete && capital.previousClose.isComplete)
+            "التغير عن إغلاق اليوم السابق: " else "التغير في الجزء المقيم فقط (مقارنة بإغلاق أمس): "
         capitalCard.addView(label(
-            "التغير عن إغلاق اليوم السابق: $sign${formatDualMoney(absoluteChange, rate)}",
+            capitalChangeLabel + sign + formatDualMoney(absoluteChange, rate),
             14f, if (capital.changeUsdCents >= 0L) green else textColor, true, Gravity.RIGHT
         ))
         capitalCard.addView(label("آخر احتساب: ${capital.current.asOfLabel}", 10f, mutedColor, false, Gravity.RIGHT)
@@ -2098,7 +2102,7 @@ class MainActivity : Activity() {
         content.addView(capitalCard, fieldParams(-2, dp(10)))
         if (!capital.current.isComplete) {
             content.addView(label(
-                "تنبيه: لم نحتسب قيمة الأصناف التي تحتوي على كميات بلا تكلفة مسجلة أو فروقات بين سجل الحركات ورصيد المخزون. عدد الأصناف المتأثرة: ${capital.current.unvaluedProductCount}. الرقم أعلاه هو رأس المال المؤكد فقط، ولا يخفي أي نقص في البيانات.",
+                "تنبيه: لم نحتسب قيمة الأصناف التي تحتوي على كميات بلا تكلفة مسجلة أو فروقات في سجل المخزون. الأصناف المتأثرة حالياً: ${capital.current.unvaluedProductCount}، وعند إغلاق أمس: ${capital.previousClose.unvaluedProductCount}. الرقم أعلاه هو رأس المال المؤكد فقط.",
                 12f, Color.rgb(170, 80, 45), true, Gravity.RIGHT
             ).apply { setPadding(0, dp(2), 0, dp(12)) })
         } else {
