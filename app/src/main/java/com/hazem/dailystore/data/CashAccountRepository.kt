@@ -62,7 +62,10 @@ class CashAccountRepository(context: Context) {
 
     fun hasTransactions(accountId: String): Boolean =
         database.readableDatabase.rawQuery(
-            "SELECT 1 FROM cash_transactions WHERE account_id=? LIMIT 1", arrayOf(accountId)
+            """SELECT 1 FROM cash_transactions WHERE account_id=?
+               UNION ALL
+               SELECT 1 FROM cash_accounts WHERE id=? AND opening_balance_minor<>0
+               LIMIT 1""".trimIndent(), arrayOf(accountId, accountId)
         ).use { it.moveToFirst() }
 
     fun updateDetails(
