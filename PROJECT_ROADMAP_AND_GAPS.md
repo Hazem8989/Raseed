@@ -113,7 +113,7 @@ This section distinguishes code present from features that are merely planned. B
 - [ ] Complete customer and supplier running statements.
 - [ ] Implement returns/refunds and provider-fee rules.
 - [x] Implement daily supplier rollover, personal withdrawals, daily wallet openings, daily cash/electronic receipts report, and wallet-to-drawer internal transfer (automated tests/build passed; phone acceptance pending).
-- [x] Implement provider service-transfer accounting with separate Syriatel shared float and Sham Cash float, 20%/10%/5% profit rules, separate manual provider fee, 2% Syriatel recharge cost, receipt-account posting, audit/idempotency, reversals, and daily-report classification (automated tests/build passed; phone acceptance pending).
+- [ ] Verify provider service-transfer accounting with separate Syriatel shared float and Sham Cash float, 20%/10%/5% profit rules, separate manual provider fee, 2% Syriatel recharge cost, receipt-account posting, audit/idempotency, reversals, and daily-report classification (implementation coded; CI verification and phone acceptance pending).
 - [ ] Implement account transfers, deposits, withdrawals, and cash reconciliation.
 - [ ] Implement manager-only posted invoice correction with immutable version/audit trail.
 
