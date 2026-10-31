@@ -1934,7 +1934,7 @@ class MainActivity : Activity() {
             card.addView(label("رسوم التعبئة المدفوعة فعلياً اليوم: "+formatSypAmount(d.rechargeFeePaidMinor)+" ل.س • قيمة الرصيد اللازم تعويضه: "+formatSypAmount(d.rechargeReserveMinor)+" ل.س",12f,mutedColor,true,Gravity.RIGHT))
             content.addView(card,fieldParams(-2,dp(7)))
         }
-        content.addView(label("مبالغ الزبائن تُقبض في الدرج الرئيسي (أو محفظة القبض عند الدفع إلكترونياً). قيمة الرصيد المستهلك تُعرض لتقدير ما يلزم تعويضه. عمولة 2% تُسجل فقط عند تعبئة رصيد سيرياتيل أو شام كاش من تاجر خارجي، ولا تُضاف إلى تحويلات الزبائن.",11f,mutedColor,false,Gravity.RIGHT).apply{setPadding(0,dp(3),0,dp(10))})
+        content.addView(label("المقبوض النقدي يذهب إلى الدرج الرئيسي، والمقبوض الإلكتروني يضاف إلى محفظة الخدمة نفسها افتراضياً أو إلى المحفظة التي تختارها. عند تصريف المحفظة إلى النقدية تنقص المحفظة ويزيد الصندوق بالمبلغ نفسه. عمولة 2% تُسجل فقط عند تعبئة رصيد سيرياتيل أو شام كاش من تاجر خارجي، ولا تُضاف إلى تحويلات الزبائن.",11f,mutedColor,false,Gravity.RIGHT).apply{setPadding(0,dp(3),0,dp(10))})
         content.addView(sectionHeading("سجل تحويلات الرصيد"))
         val rows=repo.listTransfers(80)
         if(rows.isEmpty()) content.addView(label("لا توجد تحويلات مسجلة حتى الآن.",13f,mutedColor,false,Gravity.CENTER).apply{setPadding(0,dp(18),0,dp(18))})
@@ -1982,7 +1982,7 @@ class MainActivity : Activity() {
         val fee=label("عمولة تعبئة 2% عند شراء رصيد سيرياتيل أو شام كاش من تاجر خارجي فقط؛ لا عمولة على تحويلات الزبائن.",12f,green,false,Gravity.RIGHT)
         service.onItemSelectedListener=object:android.widget.AdapterView.OnItemSelectedListener{
             override fun onNothingSelected(parent:android.widget.AdapterView<*>?){}
-            override fun onItemSelected(parent:android.widget.AdapterView<*>?,view:View?,position:Int,id:Long){fee.text=if(position==0)"عمولة شحن سيرياتيل: 2% من قيمة الرصيد المشتَرى" else "لا توجد عمولة شحن على رصيد شام كاش"}
+            override fun onItemSelected(parent:android.widget.AdapterView<*>?,view:View?,position:Int,id:Long){fee.text=if(position==0)"عمولة شحن سيرياتيل: 2% من قيمة الرصيد المشتَرى" else "عمولة شحن شام كاش: 2% من قيمة الرصيد المشتَرى"}
         }
         val ref=fieldForDialog("مرجع عملية الشراء / ملاحظة")
         form.addView(label("محفظة الخدمة",12f,mutedColor,false,Gravity.RIGHT));form.addView(service,fieldParams(dp(48),dp(8)))
@@ -2013,6 +2013,17 @@ class MainActivity : Activity() {
         val amount=fieldForDialog("المبلغ الواصل للزبون").apply{inputType=InputType.TYPE_CLASS_NUMBER or InputType.TYPE_NUMBER_FLAG_DECIMAL}
         val companyFee=fieldForDialog("رسوم الشركة (أدخلها يدوياً إن وجدت)").apply{inputType=InputType.TYPE_CLASS_NUMBER or InputType.TYPE_NUMBER_FLAG_DECIMAL;setText("0")}
         val receipt=Spinner(this).apply{adapter=ArrayAdapter(this@MainActivity,android.R.layout.simple_spinner_dropdown_item,receiptOptions.map{it.name+if(it.accountType=="WALLET")" • قبض إلكتروني" else " • قبض نقدي"})}
+        fun selectDefaultServiceWallet() {
+            val key=if(service.selectedItemPosition==2) ServiceTransferRepository.SHAM_CASH else ServiceTransferRepository.SYRIATEL_SHARED
+            val linkedId=repo.serviceAccountId(key)
+            val index=receiptOptions.indexOfFirst{it.id==linkedId}
+            if(index>=0) receipt.setSelection(index)
+        }
+        service.onItemSelectedListener=object:android.widget.AdapterView.OnItemSelectedListener {
+            override fun onNothingSelected(parent:android.widget.AdapterView<*>?) {}
+            override fun onItemSelected(parent:android.widget.AdapterView<*>?,view:View?,position:Int,id:Long) { selectDefaultServiceWallet() }
+        }
+        selectDefaultServiceWallet()
         val ref=fieldForDialog("رقم الزبون / مرجع التحويل / ملاحظة")
         val preview=label("أدخل مبلغ التحويل لاحتساب ربح المتجر وإجمالي المقبوض.",13f,green,true,Gravity.RIGHT)
         fun updatePreview(){
