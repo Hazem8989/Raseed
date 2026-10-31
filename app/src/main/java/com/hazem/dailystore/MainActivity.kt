@@ -123,7 +123,7 @@ class MainActivity : Activity() {
                 .setNegativeButton("إلغاء", null)
                 .setPositiveButton("اعتماد الاستيراد") { _, _ ->
                     try {
-                        val count = store.importProducts(rows, rate)
+                        val count = store.importProducts(rows, rate, currentUserId ?: error("جلسة المستخدم غير صالحة"))
                         Toast.makeText(this, "تم استيراد $count صنفاً بنجاح. المخزون الافتتاحي بقي صفراً بانتظار الجرد.", Toast.LENGTH_LONG).show()
                         showProductManagement()
                     } catch (e: Exception) {
@@ -2712,6 +2712,10 @@ class MainActivity : Activity() {
             setTextColor(green)
             setBackgroundColor(Color.WHITE)
             setOnClickListener {
+                if (!isManager()) {
+                    Toast.makeText(this@MainActivity, "استيراد الأصناف متاح للمدير فقط", Toast.LENGTH_LONG).show()
+                    return@setOnClickListener
+                }
                 val intent = android.content.Intent(android.content.Intent.ACTION_OPEN_DOCUMENT).apply {
                     addCategory(android.content.Intent.CATEGORY_OPENABLE)
                     type = "*/*"
