@@ -144,12 +144,12 @@ object SpreadsheetProductImporter {
     private fun mapRows(table: List<List<String>>): List<ProductImportRow> {
         val headers = table.first().map(::normalizeHeader)
         fun column(vararg names: String) = headers.indexOfFirst { it in names.map(::normalizeHeader) }
-        val nameCol = column("اسم المنتج", "الاسم", "product name", "name")
+        val nameCol = column("اسم المنتج", "اسم الصنف", "اسم المادة", "الاسم", "product name", "name")
         require(nameCol >= 0) { "لم أجد عمود اسم المنتج في الصف الأول" }
-        val categoryCol = column("التصنيف", "الفئة", "category")
-        val unitCol = column("وحدة القياس", "الوحدة", "unit")
+        val categoryCol = column("التصنيف", "اسم التصنيف", "الفئة", "category")
+        val unitCol = column("وحدة القياس", "الوحدة", "وحدة", "unit")
         val costSypCol = column("تكلفة الشراء ل س", "تكلفة الشراء بالليرة السورية", "purchase cost syp", "cost syp")
-        val saleSypCol = column("سعر البيع ل س", "سعر المبيع ل س", "سعر البيع بالليرة السورية", "sale price syp", "selling price syp")
+        val saleSypCol = column("سعر البيع ل س", "سعر المبيع ل س", "سعر البيع بالليرة السورية", "سعر المبيع بالليرة السورية", "sale price syp", "selling price syp")
         val costUsdCol = column("تكلفة الشراء بالدولار", "purchase cost usd", "cost usd")
         val saleUsdCol = column("سعر البيع بالدولار", "سعر المبيع بالدولار", "sale price usd", "selling price usd")
         val skuCol = column("sku", "رمز sku")
