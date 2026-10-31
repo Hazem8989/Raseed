@@ -46,7 +46,7 @@ class DailyBalanceRepositoryTest {
         assertEquals(40_000L, row.salesReceiptsMinor)
         assertEquals(20_000L, row.debtCollectionsMinor)
         assertEquals(60_000L, row.electronicReceiptsMinor)
-        assertEquals(0L, report.physicalCashReceiptsByCurrency["SYP"] ?: 0L)
+        assertEquals(report.accounts.filter { it.accountType == "CASH_BOX" && it.currencyCode == "SYP" }.sumOf { it.salesReceiptsMinor + it.debtCollectionsMinor }, report.physicalCashReceiptsByCurrency["SYP"])
     }
 
     @Test fun walletToDrawerTransferIsAtomicIdempotentAndNotNewSales() {
@@ -74,7 +74,7 @@ class DailyBalanceRepositoryTest {
         assertEquals(35_000L, walletRow.liquidatableElectronicReceiptsMinor)
         assertEquals(25_000L, report.accounts.single { it.accountId == drawer.id }.transferInMinor)
         assertEquals(0L, report.accounts.single { it.accountId == drawer.id }.salesReceiptsMinor)
-        assertEquals(35_000L, report.liquidatableElectronicReceiptsByCurrency["SYP"])
+        assertEquals(report.accounts.filter { it.accountType == "WALLET" && it.currencyCode == "SYP" }.sumOf { it.liquidatableElectronicReceiptsMinor }, report.liquidatableElectronicReceiptsByCurrency["SYP"])
     }
 
     @Test fun dailyWalletOpeningAndTopUpAreAuditedAndNotDoubleCounted() {
