@@ -670,20 +670,19 @@ class MainActivity : Activity() {
         actions.addView(suppliers, LinearLayout.LayoutParams(0, dp(50), 1f))
         content.addView(actions, fieldParams(dp(50), dp(12)))
         val invoices = repository.listPurchaseInvoices()
-        val outstandingTotal = invoices.filter {
+        val outstandingTotalSyp = invoices.filter {
             it.invoiceStatus != "DRAFT" && it.invoiceStatus != "CANCELLED"
-        }.sumOf { it.outstandingUsdCents }
-        val paidTotal = invoices.sumOf { it.paidUsdCents }
-        val rate = StoreRepository(this).getCurrentExchangeRateMilli()
+        }.sumOf { it.outstandingSypMinor }
+        val paidTotalSyp = invoices.sumOf { it.paidSypMinor }
         val summary = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             setPadding(dp(14), dp(12), dp(14), dp(12))
             background = cardBackground()
         }
         summary.addView(label("ملخص حسابات الموردين", 16f, green, true, Gravity.RIGHT))
-        summary.addView(label("إجمالي المدفوع: ${formatDualMoney(paidTotal, rate)}",
+        summary.addView(label("إجمالي المدفوع: ${formatSypAmount(paidTotalSyp)} ل.س",
             13f, textColor, false, Gravity.RIGHT).apply { setPadding(0, dp(6), 0, dp(3)) })
-        summary.addView(label("المتبقي للموردين: ${formatDualMoney(outstandingTotal, rate)}",
+        summary.addView(label("المتبقي للموردين: ${formatSypAmount(outstandingTotalSyp)} ل.س",
             14f, green, true, Gravity.RIGHT))
         content.addView(summary, fieldParams(-2, dp(14)))
         content.addView(sectionHeading("سجل فواتير الشراء"))
@@ -709,14 +708,17 @@ class MainActivity : Activity() {
                 12f, mutedColor, false, Gravity.RIGHT))
             card.addView(label("حالة الدفع: ${paymentStatusArabic(invoice.paymentStatus)}",
                 13f, green, true, Gravity.RIGHT).apply { setPadding(0, dp(5), 0, dp(3)) })
-            card.addView(label("الإجمالي: ${formatDualMoney(invoice.totalUsdCents, rate)}",
+            card.addView(label("الإجمالي المتفق عليه: ${formatSypAmount(invoice.totalSypMinor)} ل.س",
                 13f, textColor, false, Gravity.RIGHT))
-            card.addView(label("المدفوع: ${formatDualMoney(invoice.paidUsdCents, rate)}",
+            card.addView(label("المدفوع: ${formatSypAmount(invoice.paidSypMinor)} ل.س",
                 13f, textColor, false, Gravity.RIGHT))
-            card.addView(label("المتبقي: ${formatDualMoney(invoice.outstandingUsdCents, rate)}",
-                14f, if (invoice.outstandingUsdCents > 0L) green else mutedColor,
+            card.addView(label("المتبقي الثابت: ${formatSypAmount(invoice.outstandingSypMinor)} ل.س",
+                14f, if (invoice.outstandingSypMinor > 0L) green else mutedColor,
                 true, Gravity.RIGHT))
-            if (invoice.outstandingUsdCents > 0L &&
+            if (invoice.invoiceRateMilli <= 0L) card.addView(label(
+                "تنبيه: لا يوجد سعر صرف محفوظ في هذه الفاتورة القديمة، لذلك لا يمكن حساب رصيدها السوري تلقائياً.",
+                11f, gold.toInt(), true, Gravity.RIGHT))
+            if (invoice.outstandingSypMinor > 0L && invoice.invoiceRateMilli > 0L &&
                 (invoice.invoiceStatus == "POSTED" || invoice.invoiceStatus == "PARTIALLY_PAID")) {
                 card.addView(smallButton("＋ تسجيل دفعة للمورد") {
                     showPurchasePaymentDialog(invoice.id, invoice.invoiceNumber) { showPurchases() }
@@ -886,7 +888,7 @@ class MainActivity : Activity() {
     private fun showSuppliers() {
         val repository = PurchasePaymentRepository(this)
         val suppliers = repository.listSupplierSummaries()
-        val rate = StoreRepository(this).getCurrentExchangeRateMilli()
+
         val page = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             setBackgroundColor(backgroundColor)
@@ -910,11 +912,11 @@ class MainActivity : Activity() {
             orientation = LinearLayout.VERTICAL
             setPadding(dp(16), dp(16), dp(16), dp(24))
         }
-        val totalDue = suppliers.sumOf { it.outstandingUsdCents }
-        val totalPaid = suppliers.sumOf { it.paidUsdCents }
-        list.addView(label("إجمالي ما دُفع: ${formatDualMoney(totalPaid, rate)}",
+        val totalDueSyp = suppliers.sumOf { it.outstandingSypMinor }
+        val totalPaidSyp = suppliers.sumOf { it.paidSypMinor }
+        list.addView(label("إجمالي ما دُفع: ${formatSypAmount(totalPaidSyp)} ل.س",
             14f, textColor, false, Gravity.RIGHT))
-        list.addView(label("إجمالي المستحق: ${formatDualMoney(totalDue, rate)}",
+        list.addView(label("إجمالي المستحق الثابت: ${formatSypAmount(totalDueSyp)} ل.س",
             16f, green, true, Gravity.RIGHT).apply { setPadding(0, dp(4), 0, dp(14)) })
         if (suppliers.isEmpty()) {
             list.addView(label("لا يوجد موردون مسجلون بعد.", 14f, mutedColor, false, Gravity.CENTER))
@@ -928,11 +930,11 @@ class MainActivity : Activity() {
                 setOnClickListener { showSupplierDetails(supplier.id) }
             }
             card.addView(label(supplier.name, 16f, green, true, Gravity.RIGHT))
-            card.addView(label("الفواتير المعتمدة: ${formatDualMoney(supplier.totalPurchaseUsdCents, rate)}",
+            card.addView(label("الفواتير المعتمدة: ${formatSypAmount(supplier.totalPurchaseSypMinor)} ل.س",
                 12f, textColor, false, Gravity.RIGHT).apply { setPadding(0, dp(5), 0, dp(2)) })
-            card.addView(label("المدفوع: ${formatDualMoney(supplier.paidUsdCents, rate)}",
+            card.addView(label("المدفوع: ${formatSypAmount(supplier.paidSypMinor)} ل.س",
                 12f, textColor, false, Gravity.RIGHT))
-            card.addView(label("المتبقي: ${formatDualMoney(supplier.outstandingUsdCents, rate)}",
+            card.addView(label("المتبقي الثابت: ${formatSypAmount(supplier.outstandingSypMinor)} ل.س",
                 14f, green, true, Gravity.RIGHT).apply { setPadding(0, dp(3), 0, dp(2)) })
             card.addView(label("فواتير غير مسددة: ${supplier.unpaidInvoiceCount}",
                 11f, mutedColor, false, Gravity.RIGHT))
@@ -972,11 +974,11 @@ class MainActivity : Activity() {
             orientation = LinearLayout.VERTICAL
             setPadding(dp(16), dp(14), dp(16), dp(24))
         }
-        content.addView(label("إجمالي الفواتير: ${formatDualMoney(supplier.totalPurchaseUsdCents, rate)}",
+        content.addView(label("إجمالي الفواتير: ${formatSypAmount(supplier.totalPurchaseSypMinor)} ل.س",
             13f, textColor, false, Gravity.RIGHT))
-        content.addView(label("إجمالي المدفوع: ${formatDualMoney(supplier.paidUsdCents, rate)}",
+        content.addView(label("إجمالي المدفوع: ${formatSypAmount(supplier.paidSypMinor)} ل.س",
             13f, textColor, false, Gravity.RIGHT).apply { setPadding(0, dp(4), 0, dp(4)) })
-        content.addView(label("المبلغ المستحق: ${formatDualMoney(supplier.outstandingUsdCents, rate)}",
+        content.addView(label("المبلغ المستحق الثابت: ${formatSypAmount(supplier.outstandingSypMinor)} ل.س",
             16f, green, true, Gravity.RIGHT).apply { setPadding(0, dp(4), 0, dp(12)) })
         var filter = "ALL"
         val filterRow = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
@@ -1002,13 +1004,13 @@ class MainActivity : Activity() {
                 card.addView(label(invoice.invoiceNumber, 15f, green, true, Gravity.RIGHT))
                 card.addView(label("التاريخ: ${invoice.date} • ${paymentStatusArabic(invoice.paymentStatus)}",
                     12f, mutedColor, false, Gravity.RIGHT).apply { setPadding(0, dp(4), 0, dp(4)) })
-                card.addView(label("الإجمالي: ${formatDualMoney(invoice.totalUsdCents, rate)}",
+                card.addView(label("الإجمالي المتفق عليه: ${formatSypAmount(invoice.totalSypMinor)} ل.س",
                     12f, textColor, false, Gravity.RIGHT))
-                card.addView(label("المدفوع: ${formatDualMoney(invoice.paidUsdCents, rate)}",
+                card.addView(label("المدفوع: ${formatSypAmount(invoice.paidSypMinor)} ل.س",
                     12f, textColor, false, Gravity.RIGHT))
-                card.addView(label("المتبقي: ${formatDualMoney(invoice.outstandingUsdCents, rate)}",
+                card.addView(label("المتبقي الثابت: ${formatSypAmount(invoice.outstandingSypMinor)} ل.س",
                     13f, green, true, Gravity.RIGHT))
-                if (invoice.outstandingUsdCents > 0L &&
+                if (invoice.outstandingSypMinor > 0L && invoice.invoiceRateMilli > 0L &&
                     (invoice.invoiceStatus == "POSTED" || invoice.invoiceStatus == "PARTIALLY_PAID")) {
                     card.addView(smallButton("تسجيل دفعة") {
                         showPurchasePaymentDialog(invoice.id, invoice.invoiceNumber) {
