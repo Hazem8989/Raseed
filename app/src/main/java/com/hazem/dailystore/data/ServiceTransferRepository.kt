@@ -245,9 +245,9 @@ class ServiceTransferRepository(context:Context) {
     private fun ensureSystemAccounts(db:SQLiteDatabase) {
         ensureWallets(db)
         ensureServiceAccountLink(db,SYRIATEL_SHARED,"system_service_syriatel","محفظة سيرياتيل كاش",
-            listOf("محفظة سيرياتيل كاش","محفظة سيرياتيل","رصيد سيرياتيل المشترك","رصيد سيرياتيل","محفظة رصيد سيرياتيل"))
+            listOf("محفظة سيرياتيل كاش","سيرياتيل كاش","محفظة سيرياتيل","رصيد سيرياتيل المشترك","رصيد سيرياتيل","محفظة رصيد سيرياتيل"))
         ensureServiceAccountLink(db,SHAM_CASH,"system_service_sham_cash","محفظة شام كاش",
-            listOf("محفظة شام كاش","رصيد شام كاش","محفظة شام"))
+            listOf("محفظة شام كاش","شام كاش","رصيد شام كاش","محفظة شام"))
         migrateLegacyWalletMovements(db,SYRIATEL_SHARED)
         migrateLegacyWalletMovements(db,SHAM_CASH)
     }
