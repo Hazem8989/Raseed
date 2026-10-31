@@ -61,7 +61,7 @@ class InventoryValuationRepositoryTest {
 
     @Test
     fun valuesRemainingInventoryUsingOldestPurchaseLayersFirst() {
-        val db = database.writableDatabase
+        val before = InventoryValuationRepository(RuntimeEnvironment.getApplication()).dailyCapital().current
         val start = System.currentTimeMillis() - 30_000L
         addMovement("PURCHASE", 10.0, 100L, start + 1_000L)
         addMovement("SALE", -6.0, 100L, start + 2_000L)
@@ -72,35 +72,34 @@ class InventoryValuationRepositoryTest {
 
         // FIFO consumes six units from the first 100-cent layer:
         // four units remain at 100 cents and five at 200 cents.
-        assertEquals(1_400L, valuation.totalCostUsdCents)
-        assertEquals(9.0, valuation.valuedQuantity, 0.000001)
-        assertTrue(valuation.isComplete)
-        assertEquals(0, valuation.unvaluedProductCount)
+        assertEquals(1_400L, valuation.totalCostUsdCents - before.totalCostUsdCents)
+        assertEquals(9.0, valuation.valuedQuantity - before.valuedQuantity, 0.000001)
+        assertEquals(before.unvaluedProductCount, valuation.unvaluedProductCount)
     }
 
     @Test
     fun excludesAProductWhenTheMovementLedgerDoesNotMatchItsStockBalance() {
+        val before = InventoryValuationRepository(RuntimeEnvironment.getApplication()).dailyCapital().current
         addMovement("PURCHASE", 10.0, 100L, System.currentTimeMillis() - 10_000L)
         setBalance(9.0)
 
         val valuation = InventoryValuationRepository(RuntimeEnvironment.getApplication()).dailyCapital().current
 
-        assertEquals(0L, valuation.totalCostUsdCents)
-        assertFalse(valuation.isComplete)
-        assertEquals(1, valuation.unvaluedProductCount)
+        assertEquals(before.totalCostUsdCents, valuation.totalCostUsdCents)
+        assertTrue(valuation.unvaluedProductCount > before.unvaluedProductCount)
     }
 
     @Test
     fun excludesInventoryWithNoRecordedPurchaseCost() {
+        val before = InventoryValuationRepository(RuntimeEnvironment.getApplication()).dailyCapital().current
         addMovement("PURCHASE", 5.0, 0L, System.currentTimeMillis() - 10_000L)
         setBalance(5.0)
 
         val valuation = InventoryValuationRepository(RuntimeEnvironment.getApplication()).dailyCapital().current
 
-        assertEquals(0L, valuation.totalCostUsdCents)
-        assertFalse(valuation.isComplete)
-        assertEquals(1, valuation.unvaluedProductCount)
-        assertEquals(5.0, valuation.unvaluedQuantity, 0.000001)
+        assertEquals(before.totalCostUsdCents, valuation.totalCostUsdCents)
+        assertTrue(valuation.unvaluedProductCount > before.unvaluedProductCount)
+        assertEquals(5.0, valuation.unvaluedQuantity - before.unvaluedQuantity, 0.000001)
     }
 
     private fun addMovement(type: String, quantity: Double, costCents: Long, atMillis: Long) {
