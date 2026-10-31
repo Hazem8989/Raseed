@@ -1665,6 +1665,8 @@ class MainActivity : Activity() {
                 .apply { setPadding(0, dp(4), 0, dp(2)) })
             if (rechargeAccountId == account.id) card.addView(label("صندوق شراء رصيد الخدمات الموحد", 12f, green, true, Gravity.RIGHT)
                 .apply { setPadding(0, dp(4), 0, dp(2)) })
+            if (repository.systemRoleAccountId("SUPPLIER_ROLLOVER") == account.id) card.addView(label("الصندوق الأساسي للنقد المدور للبضاعة", 12f, green, true, Gravity.RIGHT)
+                .apply { setPadding(0, dp(4), 0, dp(2)) })
             if (isManager() && account.isActive && account.accountType == "CASH_BOX" && account.currencyCode == "SYP") {
                 card.addView(smallButton("تعيين كصندوق شراء رصيد الخدمات") {
                     try {
@@ -1708,7 +1710,9 @@ class MainActivity : Activity() {
             return
         }
         val repo = DailyBalanceRepository(this)
-        val all = CashAccountRepository(this).listActive()
+        val cashAccounts = CashAccountRepository(this)
+        val all = cashAccounts.listActive()
+        val supplierDefaultId = cashAccounts.systemRoleAccountId("SUPPLIER_ROLLOVER")
         val actions = listOf("تحديد النقد المدور للموردين", "تسجيل مسحوبات شخصية", "مطابقة الرصيد الافتتاحي اليومي لمحفظة", "تحويل محفظة إلى صندوق نقدي تختاره")
         val content = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(dp(18), dp(8), dp(18), dp(4)) }
         val action = Spinner(this)
@@ -1725,7 +1729,11 @@ class MainActivity : Activity() {
             val selected = action.selectedItemPosition.coerceAtLeast(0)
             val previousId = availableAccounts.getOrNull(account.selectedItemPosition)?.id
             val options = when (selected) {
-                0 -> all.filter { it.accountType == "CASH_BOX" && it.currencyCode == "SYP" && it.id != CashAccountRepository(this).currentDayPrimaryDrawer()?.id }
+                0 -> all.filter {
+                    it.accountType == "CASH_BOX" && it.currencyCode == "SYP" &&
+                        it.id != cashAccounts.currentDayPrimaryDrawer()?.id &&
+                        it.id != ServiceTransferRepository(this).rechargeAccountId()
+                }.sortedBy { if(it.id==supplierDefaultId) 0 else 1 }
                 1 -> all.filter { it.accountType == "CASH_BOX" && it.currencyCode == "SYP" && it.id == repo.currentSupplierRollover()?.accountId }
                 2 -> all.filter { it.accountType == "WALLET" }
                 else -> all.filter { it.accountType == "WALLET" && it.currencyCode == "SYP" }
@@ -1753,7 +1761,7 @@ class MainActivity : Activity() {
             val supplierId = repo.currentSupplierRollover()?.accountId
             val destinationOptions = if (selected == 3) all.filter {
                 it.accountType == "CASH_BOX" && it.currencyCode == "SYP" &&
-                    it.id != rechargeId && it.id != supplierId
+                    it.id != rechargeId && it.id != supplierId && it.id != supplierDefaultId
             } else emptyList()
             availableDestinations = destinationOptions
             destination.adapter = ArrayAdapter(this, android.R.layout.simple_spinner_dropdown_item,
