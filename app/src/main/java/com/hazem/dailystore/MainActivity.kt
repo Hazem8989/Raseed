@@ -1536,20 +1536,38 @@ class MainActivity : Activity() {
         val action = Spinner(this)
         action.adapter = ArrayAdapter(this, android.R.layout.simple_spinner_dropdown_item, actions)
         val account = Spinner(this)
+        val accountHint = label("", 11f, mutedColor, false, Gravity.RIGHT)
+        var availableAccounts: List<CashAccountSummary> = emptyList()
         fun refreshAccounts() {
-            val selected = action.selectedItemPosition
+            val selected = action.selectedItemPosition.coerceAtLeast(0)
             val options = when (selected) {
                 0 -> all.filter { it.accountType == "CASH_BOX" && it.currencyCode == "SYP" && it.id != CashAccountRepository(this).currentDayPrimaryDrawer()?.id }
                 1 -> all.filter { it.accountType == "CASH_BOX" && it.currencyCode == "SYP" && it.id == repo.currentSupplierRollover()?.accountId }
                 2, 3 -> all.filter { it.accountType == "WALLET" }
                 else -> all.filter { it.accountType == "WALLET" && it.currencyCode == "SYP" }
             }
+            val previousId = availableAccounts.getOrNull(account.selectedItemPosition)?.id
+            availableAccounts = options
             account.tag = options
-            account.adapter = ArrayAdapter(this, android.R.layout.simple_spinner_dropdown_item,
-                options.map { it.name + " • " + it.currencyCode + " • " + formatAccountBalance(it.balanceMinor, it.currencyCode) })
+            val labels = if (options.isEmpty()) listOf("لا يوجد حساب مالي مناسب لهذه العملية")
+                else options.map { it.name + " • " + it.currencyCode + " • " + formatAccountBalance(it.balanceMinor, it.currencyCode) }
+            account.adapter = ArrayAdapter(this, android.R.layout.simple_spinner_dropdown_item, labels)
+            account.isEnabled = options.isNotEmpty()
+            accountHint.text = when {
+                options.isNotEmpty() -> ""
+                selected == 0 -> "أنشئ صندوقاً نقدياً بالليرة السورية مخصصاً لمدفوعات الموردين، غير درج اليوم الرئيسي."
+                selected == 1 -> "حدد النقد المدور للموردين لهذا اليوم أولاً من خيار إدارة الأرصدة اليومية."
+                selected == 2 || selected == 3 -> "أنشئ محفظة إلكترونية نشطة أولاً."
+                else -> "أنشئ محفظة قبض إلكترونية نشطة بالليرة السورية أولاً."
+            }
+            accountHint.visibility = if (options.isEmpty()) View.VISIBLE else View.GONE
+            if (previousId != null) {
+                val restored = options.indexOfFirst { it.id == previousId }
+                if (restored >= 0) account.setSelection(restored)
+            }
         }
         action.onItemSelectedListener = object : android.widget.AdapterView.OnItemSelectedListener {
-            override fun onNothingSelected(parent: android.widget.AdapterView<*>?) {}
+            override fun onNothingSelected(parent: android.widget.AdapterView<*>?) { refreshAccounts() }
             override fun onItemSelected(parent: android.widget.AdapterView<*>?, view: View?, position: Int, id: Long) { refreshAccounts() }
         }
         val amount = fieldForDialog("المبلغ")
@@ -1559,6 +1577,11 @@ class MainActivity : Activity() {
         content.addView(action, fieldParams(dp(48), dp(8)))
         content.addView(label("الحساب المالي", 12f, mutedColor, false, Gravity.RIGHT))
         content.addView(account, fieldParams(dp(48), dp(8)))
+        content.addView(accountHint, fieldParams(-2, dp(2)))
+        content.addView(smallButton("إضافة صندوق أو محفظة") {
+            dialog.dismiss()
+            showCreateCashAccountDialog()
+        }, fieldParams(dp(42), dp(4)))
         content.addView(amount, fieldParams(dp(48), dp(8)))
         content.addView(reference, fieldParams(dp(48), dp(8)))
         refreshAccounts()
@@ -1566,11 +1589,12 @@ class MainActivity : Activity() {
         val dialog = AlertDialog.Builder(this).setTitle("إدارة الأرصدة اليومية").setView(content)
             .setNegativeButton("إلغاء", null).setPositiveButton("تنفيذ", null).create()
         dialog.setOnShowListener {
+            action.post { refreshAccounts() }
             dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener {
                 try {
-                    @Suppress("UNCHECKED_CAST")
-                    val options = account.tag as List<CashAccountSummary>
-                    val selected = options.getOrNull(account.selectedItemPosition) ?: error("اختر الحساب المالي")
+                    val selected = availableAccounts.getOrNull(account.selectedItemPosition) ?: error(
+                        accountHint.text.toString().ifBlank { "لا يوجد حساب مالي مناسب للعملية المختارة؛ أنشئ الحساب أولاً." }
+                    )
                     val entered = amount.text.toString().trim()
                     val note = reference.text.toString().trim().ifEmpty { null }
                     val operation = action.selectedItemPosition
