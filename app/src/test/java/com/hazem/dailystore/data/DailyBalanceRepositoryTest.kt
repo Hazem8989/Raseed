@@ -78,15 +78,18 @@ class DailyBalanceRepositoryTest {
         assertEquals(report.accounts.filter { it.accountType == "WALLET" && it.currencyCode == "SYP" }.sumOf { it.liquidatableElectronicReceiptsMinor }, report.liquidatableElectronicReceiptsByCurrency["SYP"])
     }
 
-    @Test fun dailyWalletOpeningAndTopUpAreAuditedAndNotDoubleCounted() {
+    @Test fun dailyWalletOpeningAndCashFundingAreBalancedAndIdempotent() {
+        val source = accounts.create("صندوق تمويل محفظة " + UUID.randomUUID(), "CASH_BOX", "SYP", 10_000L)
         val wallet = accounts.create("محفظة افتتاح " + UUID.randomUUID(), "WALLET", "SYP", 10_000L)
         daily.setWalletOpening(actorId, wallet.id, 15_000L, "مطابقة كشف المحفظة")
-        daily.addWalletTopUp(actorId, wallet.id, 5_000L, "topup-once", "REC-1")
-        daily.addWalletTopUp(actorId, wallet.id, 5_000L, "topup-once", "REC-1")
+        val operation = "wallet-funding-" + UUID.randomUUID()
+        daily.transferCashToWallet(actorId, source.id, wallet.id, 5_000L, operation, "REC-1")
+        daily.transferCashToWallet(actorId, source.id, wallet.id, 5_000L, operation, "REC-1")
         assertEquals(20_000L, accounts.balance(wallet.id))
+        assertEquals(5_000L, accounts.balance(source.id))
         val row = daily.dailyReport().accounts.single { it.accountId == wallet.id }
         assertEquals(15_000L, row.openingMinor)
-        assertEquals(5_000L, row.otherInflowsMinor)
+        assertEquals(5_000L, row.transferInMinor)
         assertEquals(20_000L, row.closingMinor)
     }
 
