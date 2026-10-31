@@ -127,16 +127,8 @@ class CustomerPaymentRepository(context: Context) {
         val payloadHash = hash(invoiceId + "|" + cashAccountId + "|" + amountMinor + "|" + cleanNote.orEmpty())
         db.beginTransaction()
         try {
-            findOperation(db, operationId)?.let { existing ->
-                require(existing.type == "CUSTOMER_PAYMENT" && existing.payloadHash == payloadHash) {
-                    "معرّف العملية مستخدم لعملية أو بيانات مختلفة"
-                }
-                val paymentId = existing.reference ?: error("سجل العملية لا يحتوي مرجع التحصيل")
-                val state = invoicePaymentState(db, invoiceId)
-                db.setTransactionSuccessful()
-                return CustomerPaymentResult(paymentId, state.first, state.second, state.third, true)
-            }
-
+            // Validate the target invoice before honoring an idempotent replay. This prevents
+            // a stale/reused operation token from bypassing the CREDIT-only collection rule.
             val invoice = db.rawQuery(
                 """SELECT status,sale_type,total_usd_cents,customer_id,invoice_number
                    FROM sales_invoices WHERE id=?""".trimIndent(),
@@ -151,6 +143,17 @@ class CustomerPaymentRepository(context: Context) {
             require(invoice.saleType == "CREDIT" && invoice.customerId != null) {
                 "التحصيل متاح لفواتير البيع الآجل المحددة لزبون فقط"
             }
+
+            findOperation(db, operationId)?.let { existing ->
+                require(existing.type == "CUSTOMER_PAYMENT" && existing.payloadHash == payloadHash) {
+                    "معرّف العملية مستخدم لعملية أو بيانات مختلفة"
+                }
+                val paymentId = existing.reference ?: error("سجل العملية لا يحتوي مرجع التحصيل")
+                val state = invoicePaymentState(db, invoiceId)
+                db.setTransactionSuccessful()
+                return CustomerPaymentResult(paymentId, state.first, state.second, state.third, true)
+            }
+
             require(invoice.status == "POSTED" || invoice.status == "PARTIALLY_PAID") {
                 "لا يمكن تحصيل فاتورة غير معتمدة أو مدفوعة أو ملغاة"
             }
