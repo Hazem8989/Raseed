@@ -14,6 +14,7 @@ data class InventoryValuation(
     val totalCostUsdCents: Long,
     val valuedQuantity: Double,
     val unvaluedQuantity: Double,
+    val unvaluedProductCount: Int,
     val isComplete: Boolean
 )
 
@@ -111,6 +112,7 @@ class InventoryValuationRepository(context: Context) {
         var total = BigDecimal.ZERO
         var valuedQty = 0.0
         var unvaluedQty = unvalued.values.sum() + deficits.values.sum()
+        val unvaluedProductIds = (unvalued.keys + deficits.keys).toMutableSet()
         val productIds = (products.keys + balances.keys + unvalued.keys + deficits.keys).toSet()
         for (id in productIds) {
             val lots = products[id] ?: mutableListOf()
@@ -122,10 +124,12 @@ class InventoryValuationRepository(context: Context) {
                 if (mismatch > 0.0000001) {
                     // Physical balance exceeds the supported cost ledger: keep it visible as unvalued.
                     unvaluedQty += mismatch
+                    unvaluedProductIds.add(id)
                 } else if (mismatch < -0.0000001) {
                     // Missing outbound movement. Consume the oldest remaining layers conservatively.
                     var excess = -mismatch
                     unvaluedQty += excess
+                    unvaluedProductIds.add(id)
                     while (excess > 0.0000001 && lots.isNotEmpty()) {
                         val oldest = lots.first()
                         val consumed = minOf(excess, oldest.quantity)
@@ -148,6 +152,7 @@ class InventoryValuationRepository(context: Context) {
             totalCostUsdCents = totalCents,
             valuedQuantity = valuedQty,
             unvaluedQuantity = unvaluedQty,
+            unvaluedProductCount = unvaluedProductIds.size,
             isComplete = unvaluedQty <= 0.0000001
         )
     }
