@@ -228,6 +228,7 @@ class CustomerPaymentRepository(context: Context) {
                 put("id", cashTransactionId); put("account_id", cashAccountId); put("direction", "IN")
                 put("amount_minor", amountSypMinor); put("currency_code", "SYP")
                 put("exchange_rate_syp_per_usd_milli", collectionRate)
+                if (actorUserId.isNullOrBlank()) putNull("created_by") else put("created_by", actorUserId)
                 put("transaction_type", "CUSTOMER_CREDIT_COLLECTION")
                 put("source_type", "CUSTOMER_CREDIT_COLLECTION"); put("source_id", invoiceId)
                 put("operation_id", operationId)
