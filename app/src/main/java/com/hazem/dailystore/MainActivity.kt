@@ -1276,6 +1276,19 @@ class MainActivity : Activity() {
                         amount + " • " + channel + ": " + payment.accountName + " • " + payment.createdAt,
                         11f, mutedColor, false, Gravity.RIGHT
                     ).apply { setPadding(0, dp(2), 0, dp(2)) })
+                    val originalRateText = BigDecimal.valueOf(payment.originalInvoiceRateMilli, 3)
+                        .stripTrailingZeros().toPlainString()
+                    val collectionRateText = BigDecimal.valueOf(payment.collectionRateMilli, 3)
+                        .stripTrailingZeros().toPlainString()
+                    val effectiveRateText = BigDecimal.valueOf(payment.effectiveRateMilli, 3)
+                        .stripTrailingZeros().toPlainString()
+                    card.addView(label(
+                        "خفض مرجع الدين: " + moneyText(payment.usdReferenceReductionCents) +
+                            " USD • سعر الفاتورة: " + originalRateText +
+                            " • سعر التحصيل: " + collectionRateText +
+                            " • السعر الفعال: " + effectiveRateText,
+                        10f, mutedColor, false, Gravity.RIGHT
+                    ).apply { setPadding(0, dp(1), 0, dp(3)) })
                 }
             }
             content.addView(card, fieldParams(-2, dp(10)))
