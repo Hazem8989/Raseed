@@ -238,22 +238,33 @@ class InvoiceRepository(context: Context) {
                     val selectedAccountId = cashAccountId
                         ?: throw IllegalArgumentException("لا يمكن اعتماد البيع النقدي دون تسجيل قبض كامل في صندوق أو محفظة")
                     val account = db.rawQuery(
-                        "SELECT currency_code,is_active FROM cash_accounts WHERE id=?",
+                        "SELECT account_type,currency_code,is_active FROM cash_accounts WHERE id=?",
                         arrayOf(selectedAccountId)
                     ).use { c ->
                         require(c.moveToFirst()) { "الحساب المالي غير موجود" }
-                        require(c.getInt(1) == 1) { "لا يمكن قبض قيمة البيع في حساب موقوف" }
-                        c.getString(0)
+                        require(c.getInt(2) == 1) { "لا يمكن قبض قيمة البيع في حساب موقوف" }
+                        Triple(c.getString(0),c.getString(1),c.getInt(2)==1)
                     }
-                    require(account == "USD" || account == "SYP") { "عملة حساب القبض غير مدعومة" }
-                    val rolloverAccount = db.rawQuery(
-                        "SELECT 1 FROM daily_supplier_rollovers WHERE operating_date=? AND account_id=?",
-                        arrayOf(SimpleDateFormat("yyyy-MM-dd", Locale.US).format(Date()), selectedAccountId)
-                    ).use { it.moveToFirst() }
-                    require(!rolloverAccount) {
-                        "صندوق النقد المدور مخصص لدفع الموردين والمسحوبات الشخصية، ولا يستقبل مبيعات اليوم"
+                    val accountType=account.first
+                    val accountCurrency=account.second
+                    require(accountCurrency == "USD" || accountCurrency == "SYP") { "عملة حساب القبض غير مدعومة" }
+                    if(accountType=="CASH_BOX") {
+                        val date=SimpleDateFormat("yyyy-MM-dd",Locale.US).format(Date())
+                        val primary=db.rawQuery("SELECT primary_cash_account_id FROM daily_cash_sessions WHERE operating_date=?",arrayOf(date)).use {
+                            if(it.moveToFirst())it.getString(0)else null
+                        }
+                        require(primary==selectedAccountId) {
+                            "قبض المبيعات النقدي يجب أن يذهب إلى درج البيع اليومي الرئيسي فقط"
+                        }
+                        val supplierRole=db.rawQuery(
+                            "SELECT 1 FROM system_cash_account_roles WHERE role_key='SUPPLIER_ROLLOVER' AND account_id=?",
+                            arrayOf(selectedAccountId)
+                        ).use{it.moveToFirst()}
+                        require(!supplierRole) { "صندوق النقد المدور للموردين لا يستقبل مبيعات" }
+                    } else require(accountType=="WALLET") {
+                        "يجب اختيار درج البيع اليومي أو محفظة إلكترونية نشطة لقبض المبيعات"
                     }
-                    val amount = when (account) {
+                    val amount = when (accountCurrency) {
                         "USD" -> totalUsdCents
                         "SYP" -> {
                             require(rate > 0L) { "يجب تسجيل سعر الصرف قبل البيع النقدي بالليرة السورية" }
