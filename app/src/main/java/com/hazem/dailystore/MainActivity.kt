@@ -30,6 +30,7 @@ import com.hazem.dailystore.data.StoreRepository
 import com.hazem.dailystore.data.InvoiceRepository
 import com.hazem.dailystore.data.InvoiceLineInput
 import com.hazem.dailystore.data.SupplierRepository
+import com.hazem.dailystore.data.CustomerRepository
 import com.hazem.dailystore.data.CashAccountRepository
 import com.hazem.dailystore.data.CashAccountSummary
 import com.hazem.dailystore.data.PurchasePaymentRepository
@@ -453,6 +454,7 @@ class MainActivity : Activity() {
                         "نقطة البيع" -> showPointOfSale()
                         "المنتجات والمخزون" -> showProductManagement()
                         "المشتريات" -> showPurchases()
+                        "العملاء والديون" -> showCustomers()
                         "الصناديق والمحافظ" -> showCashAccounts()
                         else -> Toast.makeText(this@MainActivity, "قسم $title سيُفعّل في مرحلته", Toast.LENGTH_SHORT).show()
                     }
@@ -818,6 +820,131 @@ class MainActivity : Activity() {
         page.addView(header, matchWidth())
         page.addView(body, LinearLayout.LayoutParams(-1, 0, 1f))
         setContentView(page)
+    }
+
+    private fun showCustomers() {
+        val repository = CustomerRepository(this)
+        val customers = repository.listActive()
+        val page = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setBackgroundColor(backgroundColor)
+        }
+        val header = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(dp(14), dp(10), dp(14), dp(10))
+            setBackgroundColor(Color.WHITE)
+        }
+        val back = Button(this).apply {
+            text = "‹"; textSize = 25f; isAllCaps = false
+            setTextColor(green); setBackgroundColor(Color.TRANSPARENT)
+            setOnClickListener { showPointOfSale() }
+        }
+        header.addView(back, LinearLayout.LayoutParams(dp(48), dp(48)))
+        header.addView(label("العملاء والديون", 19f, green, true, Gravity.CENTER),
+            LinearLayout.LayoutParams(0, -2, 1f))
+        val body = ScrollView(this).apply { isFillViewport = true }
+        val content = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(16), dp(16), dp(16), dp(24))
+        }
+        content.addView(label("ملفات العملاء", 22f, green, true, Gravity.RIGHT))
+        content.addView(label(
+            "يمكنك إنشاء ملف لكل زبون وتحديث بياناته. ستظهر الفواتير والتحصيلات والرصيد بعد استكمال مرحلة الدفع.",
+            12f, mutedColor, false, Gravity.RIGHT
+        ).apply { setPadding(0, dp(5), 0, dp(12)) })
+        val add = Button(this).apply {
+            text = "+ إضافة زبون"; isAllCaps = false
+            setTextColor(Color.WHITE); setBackgroundColor(green)
+            setOnClickListener { showCustomerEditor(null) { showCustomers() } }
+        }
+        content.addView(add, fieldParams(dp(50), dp(12)))
+        if (customers.isEmpty()) {
+            content.addView(label("لا يوجد عملاء مسجلون بعد.", 14f, mutedColor, false, Gravity.CENTER)
+                .apply { setPadding(0, dp(24), 0, dp(24)) })
+        }
+        customers.forEach { customer ->
+            val card = LinearLayout(this).apply {
+                orientation = LinearLayout.VERTICAL
+                setPadding(dp(14), dp(12), dp(14), dp(12))
+                background = cardBackground()
+                isClickable = true
+                setOnClickListener { showCustomerEditor(customer.id) { showCustomers() } }
+                setOnLongClickListener {
+                    AlertDialog.Builder(this@MainActivity)
+                        .setTitle("إيقاف ملف العميل")
+                        .setMessage("سيتم إخفاء ${customer.name} من القوائم الجديدة مع الاحتفاظ بسجلاته.")
+                        .setNegativeButton("إلغاء", null)
+                        .setPositiveButton("إيقاف") { _, _ ->
+                            try {
+                                repository.setActive(customer.id, false)
+                                showCustomers()
+                            } catch (e: Exception) {
+                                Toast.makeText(this@MainActivity, e.message, Toast.LENGTH_LONG).show()
+                            }
+                        }.show()
+                    true
+                }
+            }
+            card.addView(label(customer.name, 16f, green, true, Gravity.RIGHT))
+            card.addView(label(
+                customer.phone?.takeIf { it.isNotBlank() } ?: "لا يوجد رقم هاتف",
+                12f, mutedColor, false, Gravity.RIGHT
+            ).apply { setPadding(0, dp(4), 0, dp(2)) })
+            card.addView(label("اضغط للتعديل • اضغط مطولاً لإيقاف الملف",
+                10f, mutedColor, false, Gravity.RIGHT))
+            content.addView(card, fieldParams(-2, dp(9)))
+        }
+        body.addView(content)
+        page.addView(header, matchWidth())
+        page.addView(body, LinearLayout.LayoutParams(-1, 0, 1f))
+        setContentView(page)
+    }
+
+    private fun showCustomerEditor(customerId: String?, onSaved: () -> Unit) {
+        val repository = CustomerRepository(this)
+        val existing = customerId?.let { repository.get(it) }
+        if (customerId != null && existing == null) {
+            Toast.makeText(this, "ملف العميل غير موجود", Toast.LENGTH_SHORT).show()
+            return
+        }
+        val content = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(18), dp(8), dp(18), dp(4))
+        }
+        val name = fieldForDialog("اسم الزبون *", existing?.name.orEmpty())
+        val phone = fieldForDialog("رقم الهاتف", existing?.phone.orEmpty(),
+            InputType.TYPE_CLASS_PHONE)
+        val address = fieldForDialog("العنوان", existing?.address.orEmpty())
+        val notes = fieldForDialog("ملاحظات", existing?.notes.orEmpty())
+        content.addView(name, fieldParams(dp(48), dp(8)))
+        content.addView(phone, fieldParams(dp(48), dp(8)))
+        content.addView(address, fieldParams(dp(48), dp(8)))
+        content.addView(notes, fieldParams(dp(48), dp(8)))
+        val dialog = AlertDialog.Builder(this)
+            .setTitle(if (existing == null) "إضافة زبون" else "تعديل بيانات الزبون")
+            .setView(content).setNegativeButton("إلغاء", null)
+            .setPositiveButton("حفظ", null).create()
+        dialog.setOnShowListener {
+            dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener {
+                try {
+                    val cleanName = name.text.toString().trim()
+                    require(cleanName.isNotEmpty()) { "اسم الزبون مطلوب" }
+                    if (existing == null) repository.create(
+                        cleanName, phone.text.toString(), address.text.toString(), notes.text.toString()
+                    ) else repository.update(
+                        existing.id, cleanName, phone.text.toString(),
+                        address.text.toString(), notes.text.toString()
+                    )
+                    dialog.dismiss()
+                    Toast.makeText(this, "تم حفظ بيانات الزبون", Toast.LENGTH_SHORT).show()
+                    onSaved()
+                } catch (e: Exception) {
+                    Toast.makeText(this, e.message ?: "تعذر حفظ بيانات الزبون", Toast.LENGTH_LONG).show()
+                }
+            }
+        }
+        dialog.show()
     }
 
     private fun showCashAccounts() {
