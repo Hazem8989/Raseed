@@ -33,6 +33,8 @@ class DailyBalanceRepository(context:Context) {
             val name=db.rawQuery("SELECT name FROM cash_accounts WHERE id=? AND account_type='CASH_BOX' AND currency_code='SYP' AND is_active=1",arrayOf(accountId)).use {
                 require(it.moveToFirst()){"اختر صندوقاً نقدياً نشطاً بالليرة السورية"};it.getString(0)
             }
+            val isRechargeAccount=db.rawQuery("SELECT 1 FROM app_settings WHERE setting_key='service_recharge_cash_account_id' AND setting_value=?",arrayOf(accountId)).use{it.moveToFirst()}
+            require(!isRechargeAccount){"هذا الصندوق مخصص لشراء رصيد الخدمات ولا يمكن تخصيصه للموردين"}
             val date=today();val used=usage(db,date,accountId)
             val unrelatedMovements=db.rawQuery(
                 "SELECT COUNT(*) FROM cash_transactions WHERE account_id=? AND COALESCE(operating_date,substr(created_at,1,10))=? AND transaction_type NOT IN ('PURCHASE_PAYMENT','PERSONAL_WITHDRAWAL')",
