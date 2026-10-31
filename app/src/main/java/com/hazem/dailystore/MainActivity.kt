@@ -737,7 +737,7 @@ class MainActivity : Activity() {
                     card.addView(label(
                         formatSypAmount(adjustment.previousSypMinor) + " ← " +
                             formatSypAmount(adjustment.newSypMinor) + " ل.س • " +
-                            rateText + " ل.س/$ • " + adjustment.createdAt,
+                            rateText + " ل.س/دولار • " + adjustment.createdAt,
                         10f, mutedColor, false, Gravity.RIGHT
                     ).apply { setPadding(0, dp(2), 0, dp(2)) })
                 }
