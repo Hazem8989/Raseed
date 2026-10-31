@@ -247,6 +247,7 @@ class CustomerPaymentRepository(context: Context) {
                 put("operation_id", operationId)
                 put("description", cleanNote ?: "تحصيل دين " + invoice.customerId +
                     " عن الفاتورة " + invoice.invoiceNumber + " • " + channel)
+                put("operating_date", SimpleDateFormat("yyyy-MM-dd", Locale.US).format(Date()))
                 put("created_at", now)
             }
             db.insertOrThrow("cash_transactions", null, cash)
