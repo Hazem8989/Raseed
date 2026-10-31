@@ -11,6 +11,7 @@ import android.text.InputType
 import android.text.TextWatcher
 import android.view.Gravity
 import android.view.View
+import android.view.ViewGroup
 import android.view.WindowManager
 import android.widget.Button
 import android.widget.RadioButton
@@ -50,6 +51,8 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 import java.util.UUID
+import org.json.JSONArray
+import org.json.JSONObject
 
 class MainActivity : Activity() {
 
@@ -66,6 +69,9 @@ class MainActivity : Activity() {
     private var pendingCheckoutDraftId: String? = null
     private var currentUserId: String? = null
     private var currentUserRole: String = "CASHIER"
+    private var activeScreenKey: String = "POS"
+    private var activeScreenArgument: String? = null
+    private val sessionPrefs by lazy { getSharedPreferences("the_daily_shop_session", MODE_PRIVATE) }
 
     private lateinit var productGrid: GridLayout
     private lateinit var cartContainer: LinearLayout
@@ -94,7 +100,137 @@ class MainActivity : Activity() {
         window.decorView.layoutDirection = View.LAYOUT_DIRECTION_RTL
         StoreRepository(this).ensureBaseSetup()
         AuthRepository(this).ensureInitialAdmin()
-        showLoginScreen()
+        if (restoreSession(savedInstanceState)) restoreActiveScreen() else {
+            clearSessionState()
+            showLoginScreen()
+        }
+    }
+
+    override fun setContentView(view: View) {
+        assignStableViewIds(view, intArrayOf(1))
+        super.setContentView(view)
+    }
+
+    private fun assignStableViewIds(view: View, next: IntArray) {
+        view.id = STABLE_VIEW_ID_BASE + next[0]++
+        if (view is ViewGroup) {
+            for (index in 0 until view.childCount) assignStableViewIds(view.getChildAt(index), next)
+        }
+    }
+
+    override fun onPause() {
+        persistSessionState()
+        super.onPause()
+    }
+
+    override fun onSaveInstanceState(outState: Bundle) {
+        persistSessionState()
+        outState.putString(STATE_USER_ID, currentUserId)
+        outState.putString(STATE_SCREEN, activeScreenKey)
+        outState.putString(STATE_SCREEN_ARGUMENT, activeScreenArgument)
+        outState.putString(STATE_CART, serializeCart())
+        outState.putString(STATE_CHECKOUT_DRAFT, pendingCheckoutDraftId)
+        super.onSaveInstanceState(outState)
+    }
+
+    @Deprecated("Deprecated in Android API; retained for compatibility with the current Activity navigation")
+    override fun onBackPressed() {
+        if (currentUserId.isNullOrBlank()) {
+            super.onBackPressed()
+            return
+        }
+        AlertDialog.Builder(this)
+            .setTitle("إغلاق التطبيق")
+            .setMessage("سيتم إغلاق التطبيق وإنهاء الجلسة. عند فتحه مجدداً ستحتاج إلى تسجيل الدخول.")
+            .setNegativeButton("متابعة العمل", null)
+            .setPositiveButton("إغلاق التطبيق") { _, _ ->
+                clearSessionState()
+                finish()
+            }
+            .show()
+    }
+
+    private fun persistSessionState() {
+        val editor = sessionPrefs.edit()
+            .putString(SESSION_SCREEN, activeScreenKey)
+            .putString(SESSION_SCREEN_ARGUMENT, activeScreenArgument)
+            .putString(SESSION_CART, serializeCart())
+        if (!currentUserId.isNullOrBlank()) editor.putString(SESSION_USER_ID, currentUserId)
+        else editor.remove(SESSION_USER_ID)
+        if (pendingCheckoutDraftId != null) editor.putString(SESSION_CHECKOUT_DRAFT, pendingCheckoutDraftId)
+        else editor.remove(SESSION_CHECKOUT_DRAFT)
+        editor.apply()
+    }
+
+    private fun serializeCart(): String {
+        val array = JSONArray()
+        cart.values.forEach { line ->
+            array.put(JSONObject().put("product_id", line.product.id).put("quantity", line.quantity))
+        }
+        return array.toString()
+    }
+
+    private fun restoreSession(state: Bundle?): Boolean {
+        val userId = state?.getString(STATE_USER_ID) ?: sessionPrefs.getString(SESSION_USER_ID, null) ?: return false
+        val user = AuthRepository(this).restoreActiveSession(userId) ?: return false
+        currentUserId = user.id
+        currentUserRole = user.roleKey
+        activeScreenKey = state?.getString(STATE_SCREEN)
+            ?: sessionPrefs.getString(SESSION_SCREEN, "POS") ?: "POS"
+        activeScreenArgument = state?.getString(STATE_SCREEN_ARGUMENT)
+            ?: sessionPrefs.getString(SESSION_SCREEN_ARGUMENT, null)
+        pendingCheckoutDraftId = state?.getString(STATE_CHECKOUT_DRAFT)
+            ?: sessionPrefs.getString(SESSION_CHECKOUT_DRAFT, null)
+        restoreCart(state?.getString(STATE_CART) ?: sessionPrefs.getString(SESSION_CART, "[]"))
+        return true
+    }
+
+    private fun restoreCart(snapshot: String?) {
+        cart.clear()
+        loadCatalog()
+        val productsById = products.associateBy { it.id }
+        runCatching {
+            val array = JSONArray(snapshot ?: "[]")
+            for (index in 0 until array.length()) {
+                val item = array.getJSONObject(index)
+                val product = productsById[item.getString("product_id")] ?: continue
+                val quantity = item.getDouble("quantity")
+                if (quantity > 0.0) cart[product.id] = CartLine(product, quantity)
+            }
+        }
+    }
+
+    private fun restoreActiveScreen() {
+        when (activeScreenKey) {
+            "PRODUCTS" -> showProductManagement()
+            "PURCHASES" -> showPurchases()
+            "SUPPLIERS" -> showSuppliers()
+            "SUPPLIER_DETAILS" -> showSupplierDetails(activeScreenArgument ?: "")
+            "CUSTOMERS" -> showCustomers()
+            "CUSTOMER_ACCOUNT" -> showCustomerAccount(activeScreenArgument ?: "")
+            "CASH_ACCOUNTS" -> showCashAccounts()
+            "DAILY_REPORT" -> showDailyCashReport()
+            "SERVICE_TRANSFERS" -> showServiceTransfers()
+            "PURCHASE_EDITOR" -> showPurchaseInvoiceEditor()
+            else -> showPointOfSale(preserveCart = true)
+        }
+    }
+
+    private fun markScreen(key: String, argument: String? = null) {
+        activeScreenKey = key
+        activeScreenArgument = argument
+        sessionPrefs.edit().putString(SESSION_SCREEN, key)
+            .putString(SESSION_SCREEN_ARGUMENT, argument).apply()
+    }
+
+    private fun clearSessionState() {
+        currentUserId = null
+        currentUserRole = "CASHIER"
+        pendingCheckoutDraftId = null
+        activeScreenKey = "LOGIN"
+        activeScreenArgument = null
+        cart.clear()
+        sessionPrefs.edit().clear().apply()
     }
 
     private fun showLoginScreen() {
@@ -2658,6 +2794,17 @@ class MainActivity : Activity() {
         }
 
     companion object {
+        private const val SESSION_USER_ID = "user_id"
+        private const val SESSION_SCREEN = "screen_key"
+        private const val SESSION_SCREEN_ARGUMENT = "screen_argument"
+        private const val SESSION_CART = "pos_cart"
+        private const val SESSION_CHECKOUT_DRAFT = "checkout_draft_id"
+        private const val STATE_USER_ID = "daily_shop.user_id"
+        private const val STATE_SCREEN = "daily_shop.screen"
+        private const val STATE_SCREEN_ARGUMENT = "daily_shop.screen_argument"
+        private const val STATE_CART = "daily_shop.cart"
+        private const val STATE_CHECKOUT_DRAFT = "daily_shop.checkout_draft"
+        private const val STABLE_VIEW_ID_BASE = 0x7e000000
         // TEST ONLY. Replace with database-backed authentication before release.
         const val TEST_USERNAME = "admin"
         const val TEST_PASSWORD = "1234"
