@@ -91,7 +91,7 @@ class ServiceTransferRepositoryTest {
         assertEquals(0L, row.salesReceiptsMinor)
     }
 
-    @Test fun rechargeDeductsFromDedicatedCashBoxAndAppliesTwoPercentOnlyToSyriatel() {
+    @Test fun rechargeDeductsFromDedicatedCashBoxAndAppliesTwoPercentOnlyOnExternalRecharge() {
         val source = accounts.create("صندوق شراء رصيد " + UUID.randomUUID(), "CASH_BOX", "SYP", 100_000L)
         repo.setRechargeAccount(actor, source.id)
         val syriatelFee = repo.recharge(actor, ServiceTransferRepository.SYRIATEL_SHARED, source.id,
@@ -101,8 +101,8 @@ class ServiceTransferRepositoryTest {
         assertEquals(50_000L, repo.listWallets().single { it.serviceKey == ServiceTransferRepository.SYRIATEL_SHARED }.balanceMinor)
         val shamFee = repo.recharge(actor, ServiceTransferRepository.SHAM_CASH, source.id,
             20_000L, "recharge-sham-" + UUID.randomUUID())
-        assertEquals(0L, shamFee)
-        assertEquals(29_000L, accounts.balance(source.id))
+        assertEquals(400L, shamFee)
+        assertEquals(28_600L, accounts.balance(source.id))
         assertEquals(20_000L, repo.listWallets().single { it.serviceKey == ServiceTransferRepository.SHAM_CASH }.balanceMinor)
     }
 
