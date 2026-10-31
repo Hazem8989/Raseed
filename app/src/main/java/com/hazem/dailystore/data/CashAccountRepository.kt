@@ -43,13 +43,18 @@ class CashAccountRepository(context: Context) {
         val existingPrimary=db.rawQuery("SELECT primary_cash_account_id FROM daily_cash_sessions WHERE operating_date=?",arrayOf(date)).use {
             if(it.moveToFirst())it.getString(0)else null
         }
-        val dailyId=existingPrimary ?: ensureRoleAccount(db,"DAILY_DRAWER","system_cash_daily_drawer","درج البيع اليومي",
+        val existingPrimaryValid=existingPrimary?.let { id ->
+            db.rawQuery("SELECT 1 FROM cash_accounts WHERE id=? AND account_type='CASH_BOX' AND currency_code='SYP' AND is_active=1",arrayOf(id)).use{it.moveToFirst()}
+        } ?: false
+        if(!existingPrimaryValid) db.delete("system_cash_account_roles","role_key='DAILY_DRAWER'",null)
+        val dailyId=if(existingPrimaryValid) existingPrimary!! else ensureRoleAccount(db,"DAILY_DRAWER","system_cash_daily_drawer","درج البيع اليومي",
             listOf("درج البيع اليومي","صندوق البيع اليومي","الدرج الرئيسي","درج المبيعات","صندوق المبيعات اليومي"))
-        if(existingPrimary==null) {
+        if(!existingPrimaryValid) {
             val values=ContentValues().apply {
                 put("operating_date",date);put("primary_cash_account_id",dailyId);putNull("created_by");put("created_at",timestamp())
             }
-            db.insertOrThrow("daily_cash_sessions",null,values)
+            if(existingPrimary==null) db.insertOrThrow("daily_cash_sessions",null,values)
+            else db.update("daily_cash_sessions",values,"operating_date=?",arrayOf(date))
         }
         setSystemRole(db,"DAILY_DRAWER",dailyId)
 
@@ -76,10 +81,19 @@ class CashAccountRepository(context: Context) {
                 db.delete("system_cash_account_roles","role_key='SERVICE_RECHARGE'",null)
             }
         }
-        val rechargeId=if(validConfigured) configuredRecharge!! else ensureRoleAccount(db,"SERVICE_RECHARGE",
+        var rechargeId=if(validConfigured) configuredRecharge!! else ensureRoleAccount(db,"SERVICE_RECHARGE",
             "system_cash_service_recharge","صندوق شراء رصيد الخدمات",
             listOf("صندوق رصيد خدمات نقدي","صندوق شراء رصيد الخدمات","صندوق رصيد الخدمات","صندوق تعبئة رصيد الخدمات"))
-        if(!validConfigured) {
+        if(rechargeId==dailyId || rechargeId==supplierId) {
+            db.delete("system_cash_account_roles","role_key='SERVICE_RECHARGE'",null)
+            rechargeId=UUID.randomUUID().toString()
+            val values=ContentValues().apply {
+                put("id",rechargeId);put("name","صندوق شراء رصيد الخدمات");put("account_type","CASH_BOX")
+                put("currency_code","SYP");put("opening_balance_minor",0L);put("is_active",1);put("created_at",timestamp())
+            }
+            db.insertOrThrow("cash_accounts",null,values)
+        }
+        if(!validConfigured || configuredRecharge!=rechargeId) {
             val values=ContentValues().apply {
                 put("setting_key","service_recharge_cash_account_id");put("setting_value",rechargeId);put("updated_at",timestamp())
             }
