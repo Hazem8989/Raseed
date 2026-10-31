@@ -1234,7 +1234,11 @@ class MainActivity : Activity() {
                 13f, textColor, false, Gravity.RIGHT))
             card.addView(label("المطلوب حالياً: " + formatSypAmount(invoice.outstandingSypMinor) + " ل.س",
                 15f, green, true, Gravity.RIGHT))
-            if (invoice.outstandingUsdCents > 0L &&
+            if (invoice.originalRateMilli <= 0L && invoice.outstandingUsdCents > 0L) {
+                card.addView(label("تنبيه: فاتورة قديمة بلا سعر صرف موثوق؛ لا يمكن تقييم دينها أو تحصيله آلياً قبل مراجعتها.",
+                    11f, gold.toInt(), true, Gravity.RIGHT).apply { setPadding(0, dp(5), 0, dp(5)) })
+            }
+            if (invoice.originalRateMilli > 0L && invoice.outstandingUsdCents > 0L &&
                 (invoice.invoiceStatus == "POSTED" || invoice.invoiceStatus == "PARTIALLY_PAID")) {
                 val collect = Button(this).apply {
                     text = "تسجيل تحصيل على هذه الفاتورة"
