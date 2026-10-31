@@ -27,6 +27,7 @@ import android.widget.TextView
 import android.widget.Toast
 import android.content.ContentValues
 import com.hazem.dailystore.data.AppDatabase
+import com.hazem.dailystore.data.AuthRepository
 import com.hazem.dailystore.data.CurrencyConverter
 import com.hazem.dailystore.data.StoreRepository
 import com.hazem.dailystore.data.InvoiceRepository
@@ -60,6 +61,8 @@ class MainActivity : Activity() {
     private var exchangeRateMilli = 0L
     private var searchQuery = ""
     private var pendingCheckoutDraftId: String? = null
+    private var currentUserId: String? = null
+    private var currentUserRole: String = "CASHIER"
 
     private lateinit var productGrid: GridLayout
     private lateinit var cartContainer: LinearLayout
@@ -87,6 +90,7 @@ class MainActivity : Activity() {
         window.setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE)
         window.decorView.layoutDirection = View.LAYOUT_DIRECTION_RTL
         StoreRepository(this).ensureBaseSetup()
+        AuthRepository(this).ensureInitialAdmin()
         showLoginScreen()
     }
 
@@ -129,9 +133,14 @@ class MainActivity : Activity() {
             setBackgroundColor(green)
             isAllCaps = false
             setOnClickListener {
-                if (username.text.toString().trim().equals(TEST_USERNAME, true) &&
-                    password.text.toString() == TEST_PASSWORD
-                ) showPointOfSale() else Toast.makeText(
+                val authenticated = AuthRepository(this@MainActivity).authenticate(
+                    username.text.toString(), password.text.toString()
+                )
+                if (authenticated != null) {
+                    currentUserId = authenticated.id
+                    currentUserRole = authenticated.roleKey
+                    showPointOfSale()
+                } else Toast.makeText(
                     this@MainActivity, "اسم المستخدم أو كلمة المرور غير صحيحة", Toast.LENGTH_SHORT
                 ).show()
             }
@@ -281,7 +290,7 @@ class MainActivity : Activity() {
             gravity = Gravity.CENTER
         }
         val cashMode = RadioButton(this).apply { id = View.generateViewId(); text = "بيع نقدي"; isChecked = accounts.isNotEmpty(); isEnabled = accounts.isNotEmpty() }
-        val creditMode = RadioButton(this).apply { id = View.generateViewId(); text = "بيع آجل"; isEnabled = customers.isNotEmpty() }
+        val creditMode = RadioButton(this).apply { id = View.generateViewId(); text = "بيع آجل"; isEnabled = true }
         mode.addView(cashMode)
         mode.addView(creditMode)
         if (accounts.isEmpty() && customers.isNotEmpty()) creditMode.isChecked = true
@@ -294,6 +303,10 @@ class MainActivity : Activity() {
         customerSpinner.adapter = ArrayAdapter(this, android.R.layout.simple_spinner_dropdown_item,
             customers.map { it.name })
         customerBlock.addView(customerSpinner, fieldParams(dp(48), dp(8)))
+        if (customers.isEmpty()) customerBlock.addView(label(
+            "لا يوجد زبائن نشطون حالياً. أضف زبوناً من قسم العملاء والديون قبل اعتماد البيع الآجل.",
+            11f, gold.toInt(), true, Gravity.RIGHT
+        ).apply { setPadding(0, dp(4), 0, dp(6)) })
 
         val accountBlock = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
         accountBlock.addView(label("الصندوق أو المحفظة التي ستستلم قيمة البيع كاملة", 12f, mutedColor, false, Gravity.RIGHT))
@@ -331,6 +344,9 @@ class MainActivity : Activity() {
             dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener {
                 try {
                     val isCredit = mode.checkedRadioButtonId == creditMode.id
+                    if (isCredit) require(customers.isNotEmpty()) {
+                        "أضف زبوناً نشطاً من قسم العملاء والديون أولاً"
+                    }
                     val customerId = if (isCredit) customers.getOrNull(customerSpinner.selectedItemPosition)?.id
                         ?: error("اختر الزبون الذي ستسجل الفاتورة على حسابه") else null
                     val account = if (isCredit) null else accounts.getOrNull(accountSpinner.selectedItemPosition)
@@ -592,6 +608,8 @@ class MainActivity : Activity() {
             setBackgroundColor(green)
             setOnClickListener {
                 cart.clear()
+                currentUserId = null
+                currentUserRole = "CASHIER"
                 showLoginScreen()
             }
         }
