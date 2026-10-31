@@ -2883,6 +2883,10 @@ class MainActivity : Activity() {
                         }.show()
                 }
                 actions.addView(edit, LinearLayout.LayoutParams(0, dp(42), 1f))
+                if (isManager() && product.tracksInventory && product.stock <= 0.0000001) {
+                    val opening = smallButton("تسجيل رصيد الجرد") { showOpeningStockDialog(product) }
+                    actions.addView(opening, LinearLayout.LayoutParams(0, dp(42), 1f))
+                }
                 actions.addView(deactivate, LinearLayout.LayoutParams(0, dp(42), 1f))
                 card.addView(actions)
                 val params = matchWidth().apply { bottomMargin = dp(10) }
@@ -2895,6 +2899,70 @@ class MainActivity : Activity() {
             override fun afterTextChanged(s: Editable?) {}
         })
         refresh("")
+    }
+
+    private fun showOpeningStockDialog(product: StoreProduct) {
+        if (!isManager()) return
+        if (product.purchaseCostUsdCents <= 0L) {
+            AlertDialog.Builder(this)
+                .setTitle("تكلفة الشراء غير محددة")
+                .setMessage("حدّث تكلفة شراء المنتج أولاً؛ لا يمكن إدخال رصيد جرد في رأس المال بتكلفة مجهولة.")
+                .setPositiveButton("حسناً", null)
+                .show()
+            return
+        }
+        val form = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(18), dp(8), dp(18), dp(4))
+        }
+        val quantity = EditText(this).apply {
+            hint = "الكمية الفعلية بعد الجرد"
+            inputType = InputType.TYPE_CLASS_NUMBER or InputType.TYPE_NUMBER_FLAG_DECIMAL
+            setSingleLine(true)
+            textSize = 15f
+            setPadding(dp(12), 0, dp(12), 0)
+            background = inputBackground()
+        }
+        val note = EditText(this).apply {
+            hint = "ملاحظة الجرد (اختياري)"
+            setSingleLine(true)
+            textSize = 14f
+            setPadding(dp(12), 0, dp(12), 0)
+            background = inputBackground()
+        }
+        form.addView(label("الصنف: ${product.name}", 15f, green, true, Gravity.RIGHT))
+        form.addView(label(
+            "تكلفة الوحدة المعتمدة: ${formatDualMoney(product.purchaseCostUsdCents, StoreRepository(this).getCurrentExchangeRateMilli())}",
+            12f, mutedColor, false, Gravity.RIGHT
+        ).apply { setPadding(0, dp(5), 0, dp(8)) })
+        form.addView(quantity, fieldParams(dp(48), dp(8)))
+        form.addView(note, fieldParams(dp(48), dp(5)))
+        val dialog = AlertDialog.Builder(this)
+            .setTitle("تسجيل رصيد الجرد الافتتاحي")
+            .setMessage("سيُسجّل هذا الرصيد مرة واحدة فقط، وتُحفظ تكلفته الحالية كطبقة افتتاحية FIFO. لا تستخدمه لتعديل مخزون سبق أن تحرك.")
+            .setView(form)
+            .setNegativeButton("إلغاء", null)
+            .setPositiveButton("حفظ الرصيد", null)
+            .create()
+        dialog.setOnShowListener {
+            dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener {
+                try {
+                    val count = BigDecimal(quantity.text.toString().trim().replace(',', '.')).toDouble()
+                    StoreRepository(this).recordOpeningStock(
+                        product.id,
+                        count,
+                        currentUserId ?: error("جلسة المدير غير صالحة"),
+                        note.text.toString().trim().ifEmpty { null }
+                    )
+                    dialog.dismiss()
+                    Toast.makeText(this, "تم تسجيل رصيد الجرد وتكلفته الافتتاحية", Toast.LENGTH_LONG).show()
+                    showProductManagement()
+                } catch (e: Exception) {
+                    Toast.makeText(this, e.message ?: "تعذر تسجيل رصيد الجرد", Toast.LENGTH_LONG).show()
+                }
+            }
+        }
+        dialog.show()
     }
 
     private fun showProductEditor(existing: com.hazem.dailystore.data.StoreProduct?, onSaved: (() -> Unit)? = null) {
