@@ -117,8 +117,8 @@ class DailyBalanceRepository(context:Context) {
                 }
                 db.setTransactionSuccessful();return
             }
-            val old=db.rawQuery("SELECT account_id,amount_minor,transaction_type FROM cash_transactions WHERE operation_id=?",arrayOf(operationId)).use { if(it.moveToFirst())Triple(it.getString(0),it.getLong(1),it.getString(2))else null }
-            if(old!=null){require(old.first==walletId&&old.second==amount&&old.third=="WALLET_TOP_UP"){"معرّف العملية مستخدم لبيانات مختلفة"};db.setTransactionSuccessful();return}
+            val old=db.rawQuery("SELECT account_id,amount_minor,transaction_type,source_id FROM cash_transactions WHERE operation_id=?",arrayOf(operationId)).use { if(it.moveToFirst())arrayOf(it.getString(0),it.getLong(1).toString(),it.getString(2),it.getString(3))else null }
+            if(old!=null){require(old[0]==walletId&&old[1]==amount.toString()&&old[2]=="WALLET_TOP_UP"&&old[3]==cleanReference){"معرّف العملية مستخدم لبيانات مختلفة"};db.setTransactionSuccessful();return}
             val now=stamp();movement(db,walletId,"IN",amount,w.currency,"WALLET_TOP_UP","WALLET_TOP_UP",cleanReference,operationId,actor,note?:"تغذية رصيد محفظة",now)
             audit(db,actor,"WALLET_TOP_UP","CASH_ACCOUNT",walletId,null,"{\"amount_minor\":"+amount+",\"currency\":\""+w.currency+"\",\"reference\":\""+esc(cleanReference)+"\"}",now)
             db.setTransactionSuccessful()
