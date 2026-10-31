@@ -957,7 +957,6 @@ class MainActivity : Activity() {
         val repository = PurchasePaymentRepository(this)
         val supplier = repository.listSupplierSummaries().firstOrNull { it.id == supplierId }
             ?: run { showSuppliers(); return }
-        val rate = StoreRepository(this).getCurrentExchangeRateMilli()
         val page = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             setBackgroundColor(backgroundColor)
