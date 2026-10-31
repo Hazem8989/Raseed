@@ -16,7 +16,7 @@ data class DailyAccountSummary(
     val supplierPaymentsMinor:Long,val personalWithdrawalsMinor:Long,val transferInMinor:Long,val transferOutMinor:Long,
     val otherOutflowsMinor:Long,val closingMinor:Long
 ) { val electronicReceiptsMinor:Long get()=Math.addExact(salesReceiptsMinor,debtCollectionsMinor) }
-data class DailyCashReport(val operatingDate:String,val accounts:List<DailyAccountSummary>,val electronicReceiptsByCurrency:Map<String,Long>,val physicalCashReceiptsByCurrency:Map<String,Long>)
+data class DailyCashReport(val operatingDate:String,val accounts:List<DailyAccountSummary>,val electronicReceiptsByCurrency:Map<String,Long>,val physicalCashReceiptsByCurrency:Map<String,Long>,val supplierRollover:SupplierRolloverSummary?)
 data class SupplierRolloverSummary(
     val operatingDate:String,val accountId:String,val accountName:String,val allocatedMinor:Long,
     val supplierPaymentsMinor:Long,val personalWithdrawalsMinor:Long
@@ -153,7 +153,7 @@ class DailyBalanceRepository(context:Context) {
         }
         val electronic=rows.filter{it.accountType=="WALLET"}.groupBy{it.currencyCode}.mapValues { entry -> entry.value.sumOf { it.electronicReceiptsMinor } }
         val cash=rows.filter{it.accountType=="CASH_BOX"}.groupBy{it.currencyCode}.mapValues { entry -> entry.value.sumOf { Math.addExact(it.salesReceiptsMinor,it.debtCollectionsMinor) } }
-        return DailyCashReport(date,rows,electronic,cash)
+        return DailyCashReport(date,rows,electronic,cash,rolloverForDate(db,date))
     }
 
     fun todayTransactions():List<String>{
@@ -183,6 +183,14 @@ class DailyBalanceRepository(context:Context) {
         db.rawQuery("SELECT transaction_type,SUM(amount_minor) FROM cash_transactions WHERE account_id=? AND direction='OUT' AND COALESCE(operating_date,substr(created_at,1,10))=? AND transaction_type IN ('PURCHASE_PAYMENT','PERSONAL_WITHDRAWAL') GROUP BY transaction_type",arrayOf(id,date)).use{c->while(c.moveToNext())if(c.getString(0)=="PURCHASE_PAYMENT")p=c.getLong(1)else w=c.getLong(1)}
         return Pair(p,w)
     }
+    private fun rolloverForDate(db:SQLiteDatabase,date:String):SupplierRolloverSummary?{
+        val row=db.rawQuery("SELECT r.account_id,a.name,r.allocated_minor FROM daily_supplier_rollovers r JOIN cash_accounts a ON a.id=r.account_id WHERE r.operating_date=?",arrayOf(date)).use {
+            if(it.moveToFirst()) Triple(it.getString(0),it.getString(1),it.getLong(2)) else null
+        } ?: return null
+        val used=usage(db,date,row.first)
+        return SupplierRolloverSummary(date,row.first,row.second,row.third,used.first,used.second)
+    }
+
     private fun rollover(db:SQLiteDatabase,id:String):SupplierRolloverSummary?{
         val date=today();val a=db.rawQuery("SELECT a.name,r.allocated_minor FROM daily_supplier_rollovers r JOIN cash_accounts a ON a.id=r.account_id WHERE r.operating_date=? AND r.account_id=?",arrayOf(date,id)).use{if(it.moveToFirst())Pair(it.getString(0),it.getLong(1))else null}?:return null
         val u=usage(db,date,id);return SupplierRolloverSummary(date,id,a.first,a.second,u.first,u.second)
