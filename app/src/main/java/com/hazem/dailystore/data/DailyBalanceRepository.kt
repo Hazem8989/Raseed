@@ -91,7 +91,7 @@ class DailyBalanceRepository(context:Context) {
             val date=today()
             val old=db.rawQuery("SELECT opening_minor FROM wallet_daily_openings WHERE operating_date=? AND account_id=?",arrayOf(date,walletId)).use { if(it.moveToFirst())it.getLong(0) else null }
             val activity=db.rawQuery("SELECT COUNT(*) FROM cash_transactions WHERE account_id=? AND COALESCE(operating_date,substr(created_at,1,10))=? AND transaction_type<>'WALLET_DAILY_OPENING_ADJUSTMENT'",arrayOf(walletId,date)).use { it.moveToFirst();it.getInt(0) }
-            require(old!=null||activity==0){"يجب إدخال الرصيد الافتتاحي قبل تسجيل أي حركة على المحفظة اليوم"}
+            require(activity==0){"لا يمكن تعديل الرصيد الافتتاحي بعد بدء الحركات اليوم؛ استخدم عملية تسوية مستقلة موثقة"}
             val before=balance(db,walletId);val delta=Math.subtractExact(amount,before);val now=stamp()
             if(delta!=0L) movement(db,walletId,if(delta>0)"IN" else "OUT",kotlin.math.abs(delta),w.currency,
                 "WALLET_DAILY_OPENING_ADJUSTMENT","WALLET_DAILY_OPENING",date+":"+walletId,
