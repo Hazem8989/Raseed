@@ -1793,7 +1793,7 @@ class MainActivity : Activity() {
             destinationTitle.visibility = if (selected == 3 || selected == 4) View.VISIBLE else View.GONE
             destination.visibility = if (selected == 3 || selected == 4) View.VISIBLE else View.GONE
             destinationHint.visibility = if ((selected == 3 || selected == 4) && destinationOptions.isEmpty()) View.VISIBLE else View.GONE
-            destinationHint.text = if(selected==4) "اختر صندوقاً نقدياً وجهة؛ يمكن تمويل صندوق الموردين أو صندوق شراء رصيد الخدمات من الدرج الرئيسي." else "اختر صندوقاً نقدياً نشطاً بالليرة السورية، مع استبعاد صندوق الموردين وصندوق شراء رصيد الخدمات."
+            destinationHint.text = if(selected==4) "اختر صندوقاً نقدياً وجهة؛ يمكن تمويل صندوق الموردين أو صندوق شراء رصيد الخدمات من أي صندوق مصدر متاح." else "اختر صندوقاً نقدياً نشطاً بالليرة السورية، مع استبعاد صندوق الموردين وصندوق شراء رصيد الخدمات."
             if (previousDestinationId != null) {
                 val restored = destinationOptions.indexOfFirst { it.id == previousDestinationId }
                 if (restored >= 0) destination.setSelection(restored)
@@ -1802,6 +1802,23 @@ class MainActivity : Activity() {
         action.onItemSelectedListener = object : android.widget.AdapterView.OnItemSelectedListener {
             override fun onNothingSelected(parent: android.widget.AdapterView<*>?) { refreshAccounts() }
             override fun onItemSelected(parent: android.widget.AdapterView<*>?, view: View?, position: Int, id: Long) { refreshAccounts() }
+        }
+        account.onItemSelectedListener = object : android.widget.AdapterView.OnItemSelectedListener {
+            override fun onNothingSelected(parent: android.widget.AdapterView<*>?) {}
+            override fun onItemSelected(parent: android.widget.AdapterView<*>?, view: View?, position: Int, id: Long) {
+                if(action.selectedItemPosition!=4) return
+                val sourceId=availableAccounts.getOrNull(position)?.id
+                val previousDestinationId=availableDestinations.getOrNull(destination.selectedItemPosition)?.id
+                val options=all.filter { it.accountType=="CASH_BOX" && it.currencyCode=="SYP" && it.id!=sourceId }
+                availableDestinations=options
+                destination.adapter=ArrayAdapter(this@MainActivity,android.R.layout.simple_spinner_dropdown_item,
+                    if(options.isEmpty()) listOf("لا توجد وجهة نقدية متاحة")
+                    else options.map { it.name+" • "+formatSypAmount(it.balanceMinor)+" ل.س" })
+                if(previousDestinationId!=null) {
+                    val restored=options.indexOfFirst { it.id==previousDestinationId }
+                    if(restored>=0) destination.setSelection(restored)
+                }
+            }
         }
         val amount = fieldForDialog("المبلغ")
         amount.inputType = InputType.TYPE_CLASS_NUMBER or InputType.TYPE_NUMBER_FLAG_DECIMAL
