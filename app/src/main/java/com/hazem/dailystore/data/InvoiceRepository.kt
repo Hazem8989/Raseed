@@ -273,7 +273,7 @@ class InvoiceRepository(context: Context) {
                         else -> error("عملة حساب غير مدعومة")
                     }
                     if (totalUsdCents > 0L) require(amount > 0L) { "قيمة البيع أصغر من أصغر وحدة نقدية" }
-                    cashReceipt = CashSaleReceipt(selectedAccountId, account, amount, rate)
+                    cashReceipt = CashSaleReceipt(selectedAccountId, accountCurrency, amount, rate)
                 }
             }
             val warehouseId = invoiceWarehouse(db, table, invoiceId)
