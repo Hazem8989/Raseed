@@ -1614,7 +1614,9 @@ class MainActivity : Activity() {
             val channelLabel = if (a.accountType == "WALLET") "إلكتروني" else "نقدي"
             card.addView(label("مبيعات اليوم – قبض " + channelLabel + ": " + formatAccountBalance(a.salesReceiptsMinor, a.currencyCode), 12f, textColor, false, Gravity.RIGHT))
             card.addView(label("تحصيل ديون – قبض " + channelLabel + ": " + formatAccountBalance(a.debtCollectionsMinor, a.currencyCode), 12f, textColor, false, Gravity.RIGHT))
-            card.addView(label("إجمالي المقبوضات الإلكترونية القابلة للتصريف: " + formatAccountBalance(a.electronicReceiptsMinor, a.currencyCode), 13f, green, true, Gravity.RIGHT))
+            val receiptTotalLabel = if (a.accountType == "WALLET") "إجمالي المقبوضات الإلكترونية المتاحة للتصريف: "
+                else "إجمالي المقبوضات النقدية في الحساب: "
+            card.addView(label(receiptTotalLabel + formatAccountBalance(a.electronicReceiptsMinor, a.currencyCode), 13f, green, true, Gravity.RIGHT))
             card.addView(label("إضافات أخرى: " + formatAccountBalance(a.otherInflowsMinor, a.currencyCode), 12f, textColor, false, Gravity.RIGHT))
             card.addView(label("دفعات الموردين: " + formatAccountBalance(a.supplierPaymentsMinor, a.currencyCode), 12f, textColor, false, Gravity.RIGHT))
             card.addView(label("المسحوبات الشخصية: " + formatAccountBalance(a.personalWithdrawalsMinor, a.currencyCode), 12f, textColor, false, Gravity.RIGHT))
