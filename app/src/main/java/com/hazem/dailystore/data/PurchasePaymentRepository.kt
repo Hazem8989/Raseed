@@ -278,15 +278,28 @@ class PurchasePaymentRepository(context: Context) {
                 "لا يمكن تعديل دفعة فاتورة غير معتمدة أو ملغاة"
             }
             val target = db.rawQuery(
-                "SELECT name,currency_code,is_active,opening_balance_minor FROM cash_accounts WHERE id=?",
+                "SELECT name,account_type,currency_code,is_active,opening_balance_minor FROM cash_accounts WHERE id=?",
                 arrayOf(newCashAccountId)
             ).use {
                 require(it.moveToFirst()) { "الحساب المالي غير موجود" }
-                require(it.getInt(2) == 1) { "لا يمكن نقل الدفعة إلى حساب موقوف" }
-                SupplierPaymentAccount(it.getString(0),it.getString(1),it.getLong(3))
+                require(it.getInt(3) == 1) { "لا يمكن نقل الدفعة إلى حساب موقوف" }
+                SupplierPaymentAccount(it.getString(0),it.getString(1),it.getString(2),it.getLong(4))
             }
             require(target.currencyCode == old.currencyCode) {
                 "يجب اختيار حساب بنفس عملة الدفعة؛ لا يمكن تغيير العملة التاريخية أثناء التصحيح"
+            }
+            if(target.accountType=="CASH_BOX" && target.currencyCode=="SYP") {
+                val rollover=db.rawQuery(
+                    "SELECT allocated_minor FROM daily_supplier_rollovers WHERE operating_date=? AND account_id=?",
+                    arrayOf(SimpleDateFormat("yyyy-MM-dd",Locale.US).format(Date()),newCashAccountId)
+                ).use { if(it.moveToFirst())it.getLong(0)else null }
+                require(rollover!=null) { "تصحيح دفعة المورد بالليرة يجب أن يستخدم صندوق النقد المدور المحدد لهذا اليوم" }
+                val used=db.rawQuery(
+                    "SELECT COALESCE(SUM(amount_minor),0) FROM cash_transactions WHERE account_id=? AND direction='OUT' AND transaction_type IN ('PURCHASE_PAYMENT','PERSONAL_WITHDRAWAL') AND COALESCE(operating_date,substr(created_at,1,10))=?",
+                    arrayOf(newCashAccountId,SimpleDateFormat("yyyy-MM-dd",Locale.US).format(Date()))
+                ).use { it.moveToFirst();it.getLong(0) }
+                val usedWithoutThis=if(old.cashAccountId==newCashAccountId) (used-old.amountMinor).coerceAtLeast(0L) else used
+                require(rollover-usedWithoutThis>=newAmountMinor) { "المتاح من النقد المدور لا يكفي بعد تصحيح الدفعة" }
             }
             val invoiceRate=old.invoiceRateMilli
             require(invoiceRate>0L) { "فاتورة الشراء لا تحتوي سعر صرف محفوظاً؛ لا يمكن تصحيح المتبقي السوري بأمان" }
