@@ -66,6 +66,8 @@ class DailyBalanceRepository(context:Context) {
             }
             if(old==null)db.insertOrThrow("daily_supplier_rollovers",null,v)
             else require(db.update("daily_supplier_rollovers",v,"operating_date=?",arrayOf(date))==1)
+            val supplierRole=ContentValues().apply{put("role_key","SUPPLIER_ROLLOVER");put("account_id",accountId);put("linked_at",now)}
+            db.insertWithOnConflict("system_cash_account_roles",null,supplierRole,SQLiteDatabase.CONFLICT_REPLACE)
             audit(db,actor,if(old==null)"CREATE_DAILY_SUPPLIER_ROLLOVER" else "UPDATE_DAILY_SUPPLIER_ROLLOVER",
                 "DAILY_SUPPLIER_ROLLOVER",date,old?.let { "{\"account_id\":\""+esc(it.first)+"\",\"allocated_minor\":"+it.second+"}" },
                 "{\"account_id\":\""+esc(accountId)+"\",\"account_name\":\""+esc(name)+"\",\"allocated_minor\":"+amount+",\"note\":\""+esc(note.orEmpty())+"\"}",now)
@@ -124,6 +126,8 @@ class DailyBalanceRepository(context:Context) {
             require(sourceAccountId!=rechargeId) { "استخدم عملية شراء رصيد الخدمات المخصصة لتمويل محفظة الخدمة" }
             val supplierId=db.rawQuery("SELECT account_id FROM daily_supplier_rollovers WHERE operating_date=?",arrayOf(today())).use { if(it.moveToFirst())it.getString(0)else null }
             require(sourceAccountId!=supplierId) { "لا يمكن تمويل المحافظ من صندوق النقد المدور للموردين" }
+            val supplierRole=db.rawQuery("SELECT 1 FROM system_cash_account_roles WHERE role_key='SUPPLIER_ROLLOVER' AND account_id=?",arrayOf(sourceAccountId)).use{it.moveToFirst()}
+            require(!supplierRole) { "لا يمكن تمويل المحافظ من صندوق النقد المدور للبضاعة" }
             require(balance(db,sourceAccountId)>=amount) { "رصيد صندوق المصدر غير كافٍ" }
             val id=UUID.randomUUID().toString();val now=stamp()
             val v=ContentValues().apply {
@@ -173,6 +177,8 @@ class DailyBalanceRepository(context:Context) {
             require(destinationAccountId!=rechargeAccount){"لا يمكن تحويل المقبوضات إلى صندوق شراء رصيد الخدمات"}
             val supplierAccount=db.rawQuery("SELECT account_id FROM daily_supplier_rollovers WHERE operating_date=?",arrayOf(today())).use{if(it.moveToFirst())it.getString(0)else null}
             require(destinationAccountId!=supplierAccount){"لا يمكن تحويل المقبوضات إلى صندوق النقد المدور للموردين"}
+            val supplierRole=db.rawQuery("SELECT 1 FROM system_cash_account_roles WHERE role_key='SUPPLIER_ROLLOVER' AND account_id=?",arrayOf(destinationAccountId)).use{it.moveToFirst()}
+            require(!supplierRole){"لا يمكن تحويل المحفظة إلى صندوق النقد المدور للبضاعة"}
             require(balance(db,walletId)>=amount){"رصيد المحفظة غير كافٍ"}
             val id=UUID.randomUUID().toString();val now=stamp()
             val v=ContentValues().apply {put("id",id);put("operation_id",operationId);put("source_account_id",walletId);put("destination_account_id",destinationAccountId);put("amount_minor",amount);put("currency_code","SYP");put("reference",reference);put("note",note);put("payload_hash",payload);put("created_by",actor);put("created_at",now)}
