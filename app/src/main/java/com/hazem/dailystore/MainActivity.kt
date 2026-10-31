@@ -31,6 +31,7 @@ import com.hazem.dailystore.data.InvoiceRepository
 import com.hazem.dailystore.data.InvoiceLineInput
 import com.hazem.dailystore.data.SupplierRepository
 import com.hazem.dailystore.data.CustomerRepository
+import com.hazem.dailystore.data.CustomerPaymentRepository
 import com.hazem.dailystore.data.CashAccountRepository
 import com.hazem.dailystore.data.CashAccountSummary
 import com.hazem.dailystore.data.PurchasePaymentRepository
@@ -824,7 +825,9 @@ class MainActivity : Activity() {
 
     private fun showCustomers() {
         val repository = CustomerRepository(this)
+        val paymentRepository = CustomerPaymentRepository(this)
         val customers = repository.listActive()
+        val balances = paymentRepository.listCustomerSummaries().associateBy { it.id }
         val page = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             setBackgroundColor(backgroundColor)
@@ -850,7 +853,7 @@ class MainActivity : Activity() {
         }
         content.addView(label("ملفات العملاء", 22f, green, true, Gravity.RIGHT))
         content.addView(label(
-            "يمكنك إنشاء ملف لكل زبون وتحديث بياناته. ستظهر الفواتير والتحصيلات والرصيد بعد استكمال مرحلة الدفع.",
+            "يعرض هذا القسم فواتير البيع الآجل والتحصيلات المسجلة عليها فقط. البيع النقدي والأرصدة الافتتاحية غير المرتبطة بفواتير لا تدخل في هذا الرصيد.",
             12f, mutedColor, false, Gravity.RIGHT
         ).apply { setPadding(0, dp(5), 0, dp(12)) })
         val add = Button(this).apply {
@@ -864,16 +867,16 @@ class MainActivity : Activity() {
                 .apply { setPadding(0, dp(24), 0, dp(24)) })
         }
         customers.forEach { customer ->
+            val financial = balances[customer.id]
             val card = LinearLayout(this).apply {
                 orientation = LinearLayout.VERTICAL
                 setPadding(dp(14), dp(12), dp(14), dp(12))
                 background = cardBackground()
-                isClickable = true
-                setOnClickListener { showCustomerEditor(customer.id) { showCustomers() } }
+                setOnClickListener { showCustomerAccount(customer.id) }
                 setOnLongClickListener {
                     AlertDialog.Builder(this@MainActivity)
                         .setTitle("إيقاف ملف العميل")
-                        .setMessage("سيتم إخفاء ${customer.name} من القوائم الجديدة مع الاحتفاظ بسجلاته.")
+                        .setMessage("سيتم إخفاء " + customer.name + " من القوائم الجديدة مع الاحتفاظ بسجلاته.")
                         .setNegativeButton("إلغاء", null)
                         .setPositiveButton("إيقاف") { _, _ ->
                             try {
@@ -891,14 +894,202 @@ class MainActivity : Activity() {
                 customer.phone?.takeIf { it.isNotBlank() } ?: "لا يوجد رقم هاتف",
                 12f, mutedColor, false, Gravity.RIGHT
             ).apply { setPadding(0, dp(4), 0, dp(2)) })
-            card.addView(label("اضغط للتعديل • اضغط مطولاً لإيقاف الملف",
-                10f, mutedColor, false, Gravity.RIGHT))
+            val outstanding = financial?.outstandingUsdCents ?: 0L
+            val dueLine = if (outstanding > 0L)
+                "المتبقي على الفواتير الآجلة: " + moneyText(outstanding) + " USD"
+            else "لا توجد ديون آجلة متبقية"
+            card.addView(label(dueLine, 13f, if (outstanding > 0L) gold.toInt() else mutedColor,
+                true, Gravity.RIGHT).apply { setPadding(0, dp(5), 0, dp(8)) })
+            val actions = LinearLayout(this).apply {
+                orientation = LinearLayout.HORIZONTAL
+                gravity = Gravity.CENTER_VERTICAL
+            }
+            actions.addView(smallButton("الحساب والتحصيل") { showCustomerAccount(customer.id) },
+                LinearLayout.LayoutParams(0, dp(44), 1f).apply { marginEnd = dp(6) })
+            actions.addView(smallButton("تعديل البيانات") {
+                showCustomerEditor(customer.id) { showCustomers() }
+            }, LinearLayout.LayoutParams(0, dp(44), 1f))
+            card.addView(actions, matchWidth())
             content.addView(card, fieldParams(-2, dp(9)))
         }
         body.addView(content)
         page.addView(header, matchWidth())
         page.addView(body, LinearLayout.LayoutParams(-1, 0, 1f))
         setContentView(page)
+    }
+
+    private fun showCustomerAccount(customerId: String) {
+        val customer = CustomerRepository(this).get(customerId)
+        if (customer == null) {
+            Toast.makeText(this, "ملف العميل غير موجود", Toast.LENGTH_SHORT).show()
+            showCustomers()
+            return
+        }
+        val repository = CustomerPaymentRepository(this)
+        val invoices = repository.listInvoices(customerId)
+        val summary = repository.listCustomerSummaries().firstOrNull { it.id == customerId }
+        val page = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setBackgroundColor(backgroundColor)
+        }
+        val header = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(dp(14), dp(10), dp(14), dp(10))
+            setBackgroundColor(Color.WHITE)
+        }
+        val back = Button(this).apply {
+            text = "‹"; textSize = 25f; isAllCaps = false
+            setTextColor(green); setBackgroundColor(Color.TRANSPARENT)
+            setOnClickListener { showCustomers() }
+        }
+        header.addView(back, LinearLayout.LayoutParams(dp(48), dp(48)))
+        header.addView(label("كشف حساب الزبون", 19f, green, true, Gravity.CENTER),
+            LinearLayout.LayoutParams(0, -2, 1f))
+        val body = ScrollView(this).apply { isFillViewport = true }
+        val content = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(16), dp(16), dp(16), dp(24))
+        }
+        content.addView(label(customer.name, 22f, green, true, Gravity.RIGHT))
+        content.addView(label(customer.phone ?: "لا يوجد رقم هاتف", 12f, mutedColor, false, Gravity.RIGHT)
+            .apply { setPadding(0, dp(4), 0, dp(10)) })
+        val outstanding = summary?.outstandingUsdCents ?: 0L
+        val paid = summary?.paidUsdCents ?: 0L
+        val total = summary?.totalCreditUsdCents ?: 0L
+        val summaryCard = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            background = cardBackground()
+            setPadding(dp(14), dp(12), dp(14), dp(12))
+        }
+        summaryCard.addView(label("إجمالي فواتير البيع الآجل: " + moneyText(total) + " USD",
+            14f, textColor, false, Gravity.RIGHT))
+        summaryCard.addView(label("إجمالي التحصيلات: " + moneyText(paid) + " USD",
+            14f, textColor, false, Gravity.RIGHT).apply { setPadding(0, dp(5), 0, dp(5)) })
+        summaryCard.addView(label("الرصيد المتبقي: " + moneyText(outstanding) + " USD",
+            17f, green, true, Gravity.RIGHT))
+        content.addView(summaryCard, fieldParams(-2, dp(16)))
+        content.addView(sectionHeading("فواتير البيع الآجل"))
+        if (invoices.isEmpty()) {
+            content.addView(label("لا توجد فواتير بيع آجل لهذا الزبون حتى الآن.",
+                14f, mutedColor, false, Gravity.CENTER).apply {
+                setPadding(0, dp(22), 0, dp(22))
+            })
+        }
+        invoices.forEach { invoice ->
+            val card = LinearLayout(this).apply {
+                orientation = LinearLayout.VERTICAL
+                background = cardBackground()
+                setPadding(dp(14), dp(12), dp(14), dp(12))
+            }
+            val statusText = when (invoice.paymentStatus) {
+                "PAID" -> "مسددة بالكامل"
+                "PARTIALLY_PAID" -> "مسددة جزئياً"
+                "UNPAID" -> "غير مسددة"
+                "DRAFT" -> "مسودة غير معتمدة"
+                "CANCELLED" -> "ملغاة"
+                else -> invoice.paymentStatus
+            }
+            card.addView(label("فاتورة " + invoice.invoiceNumber, 15f, green, true, Gravity.RIGHT))
+            card.addView(label("التاريخ: " + invoice.date + " • " + statusText,
+                11f, mutedColor, false, Gravity.RIGHT).apply { setPadding(0, dp(4), 0, dp(6)) })
+            card.addView(label("الإجمالي: " + moneyText(invoice.totalUsdCents) + " USD",
+                13f, textColor, false, Gravity.RIGHT))
+            card.addView(label("المدفوع: " + moneyText(invoice.paidUsdCents) + " USD",
+                13f, textColor, false, Gravity.RIGHT).apply { setPadding(0, dp(3), 0, dp(3)) })
+            card.addView(label("المتبقي: " + moneyText(invoice.outstandingUsdCents) + " USD",
+                15f, green, true, Gravity.RIGHT))
+            if (invoice.outstandingUsdCents > 0L &&
+                (invoice.invoiceStatus == "POSTED" || invoice.invoiceStatus == "PARTIALLY_PAID")) {
+                val collect = Button(this).apply {
+                    text = "تسجيل تحصيل على هذه الفاتورة"
+                    isAllCaps = false
+                    setTextColor(Color.WHITE)
+                    setBackgroundColor(green)
+                    setOnClickListener { showCustomerPaymentDialog(customerId, invoice) }
+                }
+                card.addView(collect, fieldParams(dp(48), dp(8)))
+            }
+            val history = repository.listPayments(invoice.id)
+            if (history.isNotEmpty()) {
+                card.addView(label("سجل الدفعات", 12f, gold.toInt(), true, Gravity.RIGHT)
+                    .apply { setPadding(0, dp(8), 0, dp(3)) })
+                history.forEach { payment ->
+                    val amount = if (payment.currencyCode == "USD")
+                        "$" + moneyText(payment.amountMinor)
+                    else formatSypAmount(payment.amountMinor) + " ل.س"
+                    card.addView(label(
+                        amount + " • " + payment.accountName + " • " + payment.createdAt,
+                        11f, mutedColor, false, Gravity.RIGHT
+                    ).apply { setPadding(0, dp(2), 0, dp(2)) })
+                }
+            }
+            content.addView(card, fieldParams(-2, dp(10)))
+        }
+        body.addView(content)
+        page.addView(header, matchWidth())
+        page.addView(body, LinearLayout.LayoutParams(-1, 0, 1f))
+        setContentView(page)
+    }
+
+    private fun showCustomerPaymentDialog(
+        customerId: String, invoice: com.hazem.dailystore.data.CustomerInvoicePaymentSummary
+    ) {
+        val accounts = CashAccountRepository(this).listActive()
+        if (accounts.isEmpty()) {
+            AlertDialog.Builder(this).setTitle("لا يوجد حساب مالي نشط")
+                .setMessage("أنشئ صندوقاً أو محفظة نشطة من قسم الصناديق والمحافظ قبل تسجيل التحصيل.")
+                .setPositiveButton("حسناً", null).show()
+            return
+        }
+        val content = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(18), dp(8), dp(18), dp(4))
+        }
+        val amount = fieldForDialog("مبلغ التحصيل", "", InputType.TYPE_CLASS_NUMBER or InputType.TYPE_NUMBER_FLAG_DECIMAL)
+        val accountSpinner = Spinner(this)
+        accountSpinner.adapter = ArrayAdapter(
+            this, android.R.layout.simple_spinner_dropdown_item,
+            accounts.map { it.name + " • " + it.currencyCode + " • الرصيد " +
+                formatAccountBalance(it.balanceMinor, it.currencyCode) }
+        )
+        val note = fieldForDialog("ملاحظة اختيارية")
+        content.addView(label("الفاتورة: " + invoice.invoiceNumber, 15f, green, true, Gravity.RIGHT))
+        content.addView(label("المتبقي المرجعي: " + moneyText(invoice.outstandingUsdCents) + " USD",
+            12f, mutedColor, false, Gravity.RIGHT).apply { setPadding(0, dp(4), 0, dp(8)) })
+        content.addView(label("الحساب الذي سيستقبل المبلغ", 12f, mutedColor, false, Gravity.RIGHT))
+        content.addView(accountSpinner, fieldParams(dp(48), dp(8)))
+        content.addView(amount, fieldParams(dp(48), dp(8)))
+        content.addView(note, fieldParams(dp(48), dp(8)))
+        val dialog = AlertDialog.Builder(this).setTitle("تسجيل تحصيل")
+            .setView(content).setNegativeButton("إلغاء", null)
+            .setPositiveButton("تسجيل", null).create()
+        dialog.setOnShowListener {
+            dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener {
+                try {
+                    val account = accounts.getOrNull(accountSpinner.selectedItemPosition)
+                        ?: error("اختر الحساب المالي")
+                    val amountMinor = if (account.currencyCode == "USD")
+                        parseUsdCents(amount.text.toString()) else parseSypAmount(amount.text.toString())
+                    require(amountMinor > 0L) { "أدخل مبلغ تحصيل أكبر من صفر" }
+                    val result = CustomerPaymentRepository(this).addPayment(
+                        invoice.id, UUID.randomUUID().toString(), account.id, amountMinor,
+                        note.text.toString().trim().ifEmpty { null }
+                    )
+                    dialog.dismiss()
+                    Toast.makeText(
+                        this,
+                        if (result.outstandingUsdCents == 0L) "تم التحصيل وأصبحت الفاتورة مسددة بالكامل"
+                        else "تم تسجيل الدفعة الجزئية بنجاح",
+                        Toast.LENGTH_LONG
+                    ).show()
+                    showCustomerAccount(customerId)
+                } catch (e: Exception) {
+                    Toast.makeText(this, e.message ?: "تعذر تسجيل التحصيل", Toast.LENGTH_LONG).show()
+                }
+            }
+        }
+        dialog.show()
     }
 
     private fun showCustomerEditor(customerId: String?, onSaved: () -> Unit) {
