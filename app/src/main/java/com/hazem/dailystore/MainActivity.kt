@@ -181,9 +181,19 @@ class MainActivity : Activity() {
             ?: sessionPrefs.getString(SESSION_SCREEN_ARGUMENT, null)
         pendingCheckoutDraftId = state?.getString(STATE_CHECKOUT_DRAFT)
             ?: sessionPrefs.getString(SESSION_CHECKOUT_DRAFT, null)
+        if (pendingCheckoutDraftId != null && !isDraftSalesInvoice(pendingCheckoutDraftId!!)) {
+            pendingCheckoutDraftId = null
+            sessionPrefs.edit().remove(SESSION_CHECKOUT_DRAFT).putString(SESSION_CART, "[]").apply()
+        }
         restoreCart(state?.getString(STATE_CART) ?: sessionPrefs.getString(SESSION_CART, "[]"))
         return true
     }
+
+    private fun isDraftSalesInvoice(invoiceId: String): Boolean =
+        AppDatabase.getInstance(this).readableDatabase.rawQuery(
+            "SELECT 1 FROM sales_invoices WHERE id=? AND status='DRAFT' LIMIT 1",
+            arrayOf(invoiceId)
+        ).use { it.moveToFirst() }
 
     private fun restoreCart(snapshot: String?) {
         cart.clear()
@@ -304,6 +314,7 @@ class MainActivity : Activity() {
         markScreen("POS")
         if (!preserveCart) {
             cart.clear()
+            sessionPrefs.edit().putString(SESSION_CART, "[]").apply()
             loadCatalog()
         } else if (products.isEmpty()) loadCatalog()
         val page = LinearLayout(this).apply {
@@ -516,7 +527,8 @@ class MainActivity : Activity() {
                     require(posted) { "الفاتورة مسجلة مسبقاً؛ حدّث الشاشة لمراجعة حالتها" }
                     val invoiceNumber = saved.invoiceNumber
                     pendingCheckoutDraftId = null
-                    sessionPrefs.edit().remove(SESSION_CHECKOUT_DRAFT).apply()
+                    sessionPrefs.edit().remove(SESSION_CHECKOUT_DRAFT)
+                        .putString(SESSION_CART, "[]").apply()
                     cart.clear()
                     dialog.dismiss()
                     Toast.makeText(
