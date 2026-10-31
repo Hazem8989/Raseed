@@ -45,13 +45,18 @@ class ServiceTransferRepository(context:Context) {
                GROUP BY service_type ORDER BY service_type""".trimIndent(),arrayOf(date)
         ).use { c -> while(c.moveToNext()) {
             val type=c.getString(0); val delivered=c.getLong(2)
-            // Shared Syriatel float: show actual recharge fees once, not an estimate per transfer.
-            val rechargeFeePaid=if(type==SYRIATEL_BALANCE)
+            // Show actual fees paid on external recharge only; never add them to customer transfers.
+            val rechargeServiceKey=when(type) {
+                SYRIATEL_BALANCE -> SYRIATEL_SHARED
+                SHAM_CASH_TRANSFER -> SHAM_CASH
+                else -> null
+            }
+            val rechargeFeePaid=rechargeServiceKey?.let { key ->
                 database.readableDatabase.rawQuery(
                     "SELECT COALESCE(SUM(fee_minor),0) FROM service_wallet_transactions WHERE service_key=? AND transaction_type='RECHARGE' AND substr(created_at,1,10)=?",
-                    arrayOf(SYRIATEL_SHARED,date)
+                    arrayOf(key,date)
                 ).use { it.moveToFirst();it.getLong(0) }
-                else 0L
+            } ?: 0L
             out.add(ServiceDailySummary(type,serviceTypeName(type),c.getInt(1),delivered,c.getLong(3),c.getLong(4),c.getLong(5),rechargeFeePaid))
         } }
         return out
@@ -107,11 +112,11 @@ class ServiceTransferRepository(context:Context) {
             db.setTransactionSuccessful()
         } finally {db.endTransaction()}
     }
-    /** Syriatel recharge cost is 2% of float purchased; Sham Cash recharge has no surcharge. */
+    /** Both service floats incur 2% only on actual external recharge; customer transfers incur no recharge fee. */
     fun recharge(actor:String,serviceKey:String,sourceAccountId:String,floatAmount:Long,operationId:String,reference:String?=null,note:String?=null):Long {
         require(floatAmount>0L&&operationId.isNotBlank()){"أدخل مبلغ شحن ومعرّف عملية صحيحين"}
         require(serviceKey==SYRIATEL_SHARED||serviceKey==SHAM_CASH){"محفظة الخدمة غير معروفة"}
-        val fee=if(serviceKey==SYRIATEL_SHARED)percent(floatAmount,2) else 0L
+        val fee=percent(floatAmount,2) // 2% is charged only when either service float is recharged externally.
         val debit=Math.addExact(floatAmount,fee)
         val db=database.writableDatabase;db.beginTransaction()
         try {
