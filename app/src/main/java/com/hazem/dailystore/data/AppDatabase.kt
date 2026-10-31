@@ -398,6 +398,38 @@ class AppDatabase private constructor(context: Context) :
             """.trimIndent(),
 
             """
+            CREATE TABLE daily_cash_sessions (
+                operating_date TEXT PRIMARY KEY NOT NULL,
+                primary_cash_account_id TEXT NOT NULL,
+                created_by TEXT,
+                created_at TEXT NOT NULL,
+                FOREIGN KEY(primary_cash_account_id) REFERENCES cash_accounts(id)
+                    ON UPDATE RESTRICT ON DELETE RESTRICT,
+                FOREIGN KEY(created_by) REFERENCES users(id)
+                    ON UPDATE RESTRICT ON DELETE RESTRICT
+            )
+            """.trimIndent(),
+
+            """
+            CREATE TABLE customer_credit_revaluations (
+                id TEXT PRIMARY KEY NOT NULL,
+                invoice_id TEXT NOT NULL,
+                customer_id TEXT NOT NULL,
+                outstanding_usd_cents INTEGER NOT NULL CHECK(outstanding_usd_cents > 0),
+                previous_syp_minor INTEGER NOT NULL CHECK(previous_syp_minor >= 0),
+                new_syp_minor INTEGER NOT NULL CHECK(new_syp_minor >= 0),
+                applied_rate_syp_per_usd_milli INTEGER NOT NULL CHECK(applied_rate_syp_per_usd_milli > 0),
+                calculation_basis TEXT NOT NULL,
+                operation_id TEXT NOT NULL UNIQUE,
+                created_at TEXT NOT NULL,
+                FOREIGN KEY(invoice_id) REFERENCES sales_invoices(id)
+                    ON UPDATE RESTRICT ON DELETE RESTRICT,
+                FOREIGN KEY(customer_id) REFERENCES customers(id)
+                    ON UPDATE RESTRICT ON DELETE RESTRICT
+            )
+            """.trimIndent(),
+
+            """
             CREATE TABLE cash_transactions (
                 id TEXT PRIMARY KEY NOT NULL,
                 account_id TEXT NOT NULL,
@@ -579,6 +611,8 @@ class AppDatabase private constructor(context: Context) :
             "CREATE INDEX idx_sales_customer_date ON sales_invoices(customer_id, invoice_date)",
             "CREATE INDEX idx_purchase_date ON purchase_invoices(invoice_date)",
             "CREATE INDEX idx_cash_transactions_account_date ON cash_transactions(account_id, created_at)",
+            "CREATE INDEX idx_daily_cash_session_account ON daily_cash_sessions(primary_cash_account_id)",
+            "CREATE INDEX idx_customer_credit_revaluation_invoice ON customer_credit_revaluations(invoice_id, created_at)",
             "CREATE INDEX idx_debts_party ON debts(party_type, party_id, created_at)",
             "CREATE INDEX idx_sync_queue_status_date ON sync_queue(status, created_at)",
             "CREATE INDEX idx_audit_log_entity_date ON audit_log(entity_type, entity_id, created_at)"
