@@ -62,6 +62,13 @@ class CashAccountRepository(context: Context) {
             require(!isSupplierRolloverAccount) {
                 "هذا الصندوق مخصص للنقد المدور للموردين اليوم ولا يمكن تعيينه كدرج المبيعات والتحصيل"
             }
+            val isServiceRechargeAccount = db.rawQuery(
+                "SELECT 1 FROM app_settings WHERE setting_key='service_recharge_cash_account_id' AND setting_value=?",
+                arrayOf(accountId)
+            ).use { it.moveToFirst() }
+            require(!isServiceRechargeAccount) {
+                "هذا الصندوق مخصص لشراء رصيد الخدمات ولا يمكن تعيينه كدرج المبيعات والتحصيل"
+            }
             val before = db.rawQuery(
                 "SELECT primary_cash_account_id FROM daily_cash_sessions WHERE operating_date=?",
                 arrayOf(date)
