@@ -52,22 +52,29 @@ class DailyBalanceRepositoryTest {
     @Test fun walletToDrawerTransferIsAtomicIdempotentAndNotNewSales() {
         val drawer = accounts.create("درج تحويل " + UUID.randomUUID(), "CASH_BOX", "SYP", 0L)
         val wallet = accounts.create("محفظة تحويل " + UUID.randomUUID(), "WALLET", "SYP", 100_000L)
+        insertMovement(wallet.id, "SALE_RECEIPT", 40_000L, "sale-before-transfer")
+        insertMovement(wallet.id, "CUSTOMER_CREDIT_COLLECTION", 20_000L, "debt-before-transfer")
         accounts.setCurrentDayPrimaryDrawer("ADMIN", actorId, drawer.id)
         val first = daily.transferWalletToDrawer(actorId, wallet.id, 25_000L, "transfer-" + UUID.randomUUID())
         assertFalse(first.replayed)
-        assertEquals(75_000L, accounts.balance(wallet.id))
+        assertEquals(135_000L, accounts.balance(wallet.id))
         assertEquals(25_000L, accounts.balance(drawer.id))
         val replay = daily.transferWalletToDrawer(actorId, wallet.id, 25_000L,
             database.readableDatabase.rawQuery("SELECT operation_id FROM cash_account_transfers WHERE id=?", arrayOf(first.transferId)).use {
                 it.moveToFirst(); it.getString(0)
             })
         assertTrue(replay.replayed)
-        assertEquals(75_000L, accounts.balance(wallet.id))
+        assertEquals(135_000L, accounts.balance(wallet.id))
         assertEquals(25_000L, accounts.balance(drawer.id))
         val report = daily.dailyReport()
-        assertEquals(25_000L, report.accounts.single { it.accountId == wallet.id }.transferOutMinor)
+        val walletRow = report.accounts.single { it.accountId == wallet.id }
+        assertEquals(40_000L, walletRow.salesReceiptsMinor)
+        assertEquals(20_000L, walletRow.debtCollectionsMinor)
+        assertEquals(25_000L, walletRow.transferOutMinor)
+        assertEquals(35_000L, walletRow.liquidatableElectronicReceiptsMinor)
         assertEquals(25_000L, report.accounts.single { it.accountId == drawer.id }.transferInMinor)
         assertEquals(0L, report.accounts.single { it.accountId == drawer.id }.salesReceiptsMinor)
+        assertEquals(35_000L, report.liquidatableElectronicReceiptsByCurrency["SYP"])
     }
 
     @Test fun dailyWalletOpeningAndTopUpAreAuditedAndNotDoubleCounted() {
