@@ -352,16 +352,18 @@ class CustomerPaymentRepository(context: Context) {
     private fun paidSypMinor(db: SQLiteDatabase, invoiceId: String, originalRate: Long): Long {
         var total = 0L
         db.rawQuery(
-            "SELECT amount_minor,currency_code FROM invoice_payments WHERE invoice_type='SALE' AND invoice_id=?",
+            """SELECT amount_minor,currency_code,exchange_rate_syp_per_usd_milli
+               FROM invoice_payments WHERE invoice_type='SALE' AND invoice_id=?""".trimIndent(),
             arrayOf(invoiceId)
         ).use { c ->
             while (c.moveToNext()) {
                 val amount = c.getLong(0)
+                val paymentRate = if (c.isNull(2)) originalRate else c.getLong(2)
                 val syp = when (c.getString(1)) {
                     "SYP" -> amount
                     "USD" -> {
-                        require(originalRate > 0L) { "دفعة قديمة بلا سعر صرف موثوق" }
-                        CurrencyConverter.usdCentsToSyp(amount, originalRate)
+                        require(paymentRate > 0L) { "دفعة قديمة بلا سعر صرف موثوق" }
+                        CurrencyConverter.usdCentsToSyp(amount, paymentRate)
                     }
                     else -> error("عملة دفعة غير مدعومة")
                 }
