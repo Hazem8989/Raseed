@@ -181,11 +181,13 @@ class MainActivity : Activity() {
             ?: sessionPrefs.getString(SESSION_SCREEN_ARGUMENT, null)
         pendingCheckoutDraftId = state?.getString(STATE_CHECKOUT_DRAFT)
             ?: sessionPrefs.getString(SESSION_CHECKOUT_DRAFT, null)
+        var cartSnapshot = state?.getString(STATE_CART) ?: sessionPrefs.getString(SESSION_CART, "[]")
         if (pendingCheckoutDraftId != null && !isDraftSalesInvoice(pendingCheckoutDraftId!!)) {
             pendingCheckoutDraftId = null
+            cartSnapshot = "[]"
             sessionPrefs.edit().remove(SESSION_CHECKOUT_DRAFT).putString(SESSION_CART, "[]").apply()
         }
-        restoreCart(state?.getString(STATE_CART) ?: sessionPrefs.getString(SESSION_CART, "[]"))
+        restoreCart(cartSnapshot)
         return true
     }
 
