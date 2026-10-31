@@ -246,6 +246,13 @@ class InvoiceRepository(context: Context) {
                         c.getString(0)
                     }
                     require(account == "USD" || account == "SYP") { "عملة حساب القبض غير مدعومة" }
+                    val rolloverAccount = db.rawQuery(
+                        "SELECT 1 FROM daily_supplier_rollovers WHERE operating_date=? AND account_id=?",
+                        arrayOf(SimpleDateFormat("yyyy-MM-dd", Locale.US).format(Date()), selectedAccountId)
+                    ).use { it.moveToFirst() }
+                    require(!rolloverAccount) {
+                        "صندوق النقد المدور مخصص لدفع الموردين والمسحوبات الشخصية، ولا يستقبل مبيعات اليوم"
+                    }
                     val amount = when (account) {
                         "USD" -> totalUsdCents
                         "SYP" -> {
