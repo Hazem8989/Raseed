@@ -15,8 +15,8 @@ data class DailyAccountSummary(
     val openingMinor:Long,val salesReceiptsMinor:Long,val debtCollectionsMinor:Long,val otherInflowsMinor:Long,
     val supplierPaymentsMinor:Long,val personalWithdrawalsMinor:Long,val transferInMinor:Long,val transferOutMinor:Long,
     val otherOutflowsMinor:Long,val closingMinor:Long
-) { val electronicReceiptsMinor:Long get()=Math.addExact(salesReceiptsMinor,debtCollectionsMinor) }
-data class DailyCashReport(val operatingDate:String,val accounts:List<DailyAccountSummary>,val electronicReceiptsByCurrency:Map<String,Long>,val physicalCashReceiptsByCurrency:Map<String,Long>,val supplierRollover:SupplierRolloverSummary?)
+) { val electronicReceiptsMinor:Long get()=Math.addExact(salesReceiptsMinor,debtCollectionsMinor); val liquidatableElectronicReceiptsMinor:Long get()=(electronicReceiptsMinor-transferOutMinor).coerceAtLeast(0L) }
+data class DailyCashReport(val operatingDate:String,val accounts:List<DailyAccountSummary>,val electronicReceiptsByCurrency:Map<String,Long>,val liquidatableElectronicReceiptsByCurrency:Map<String,Long>,val physicalCashReceiptsByCurrency:Map<String,Long>,val supplierRollover:SupplierRolloverSummary?)
 data class SupplierRolloverSummary(
     val operatingDate:String,val accountId:String,val accountName:String,val allocatedMinor:Long,
     val supplierPaymentsMinor:Long,val personalWithdrawalsMinor:Long
@@ -171,9 +171,11 @@ class DailyBalanceRepository(context:Context) {
                 rows.add(DailyAccountSummary(id,c.getString(1),c.getString(2),c.getString(3),opening,s[0],s[1],s[2],s[3],s[4],s[5],s[6],s[7],Math.addExact(opening,s.sum())))
             }
         }
-        val electronic=rows.filter{it.accountType=="WALLET"}.groupBy{it.currencyCode}.mapValues { entry -> entry.value.sumOf { it.electronicReceiptsMinor } }
+        val walletRows=rows.filter{it.accountType=="WALLET"}
+        val electronic=walletRows.groupBy{it.currencyCode}.mapValues { entry -> entry.value.sumOf { it.electronicReceiptsMinor } }
+        val liquidatable=walletRows.groupBy{it.currencyCode}.mapValues { entry -> entry.value.sumOf { it.liquidatableElectronicReceiptsMinor } }
         val cash=rows.filter{it.accountType=="CASH_BOX"}.groupBy{it.currencyCode}.mapValues { entry -> entry.value.sumOf { Math.addExact(it.salesReceiptsMinor,it.debtCollectionsMinor) } }
-        return DailyCashReport(date,rows,electronic,cash,rolloverForDate(db,date))
+        return DailyCashReport(date,rows,electronic,liquidatable,cash,rolloverForDate(db,date))
     }
 
     fun todayTransactions():List<String>{
