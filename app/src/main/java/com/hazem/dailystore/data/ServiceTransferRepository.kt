@@ -284,6 +284,10 @@ class ServiceTransferRepository(context:Context) {
     private fun migrateLegacyWalletMovements(db:SQLiteDatabase,key:String) {
         val accountId=serviceAccountId(db,key)
         val accountOpening=db.rawQuery("SELECT opening_balance_minor FROM cash_accounts WHERE id=?",arrayOf(accountId)).use{it.moveToFirst();it.getLong(0)}
+        val hasManualDailyOpening=db.rawQuery(
+            "SELECT 1 FROM cash_transactions WHERE account_id=? AND transaction_type='WALLET_DAILY_OPENING_ADJUSTMENT' LIMIT 1",
+            arrayOf(accountId)
+        ).use{it.moveToFirst()}
         db.rawQuery(
             "SELECT id,direction,amount_minor,transaction_type,note,created_by,created_at FROM service_wallet_transactions WHERE service_key=? ORDER BY created_at,id",
             arrayOf(key)
@@ -293,7 +297,7 @@ class ServiceTransferRepository(context:Context) {
                 val already=db.rawQuery("SELECT 1 FROM cash_transactions WHERE source_type='SERVICE_WALLET_LEDGER' AND source_id=? LIMIT 1",arrayOf(movementId)).use{it.moveToFirst()}
                 if(already) continue
                 val legacyType=c.getString(3)
-                if(legacyType=="OPENING" && accountOpening>0L) continue
+                if(legacyType=="OPENING" && (accountOpening>0L || hasManualDailyOpening)) continue
                 val cashType=when(legacyType) {
                     "OPENING" -> "SERVICE_FLOAT_OPENING"
                     "RECHARGE" -> "SERVICE_RECHARGE_IN"
