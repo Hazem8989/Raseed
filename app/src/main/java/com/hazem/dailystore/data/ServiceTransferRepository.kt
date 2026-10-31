@@ -86,7 +86,7 @@ class ServiceTransferRepository(context:Context) {
             val now=stamp()
             insertCashMovement(db,sourceAccountId,"OUT",debit,"SERVICE_RECHARGE","SERVICE_RECHARGE",operationId,operationId+":SOURCE",actor,
                 "شراء رصيد ${serviceName(serviceKey)}"+if(fee>0L)" • عمولة شحن 2%: $fee ل.س" else "",now)
-            insertWalletMovement(db,serviceKey,"IN",floatAmount,"RECHARGE",sourceAccountId,operationId,fee,note?:reference,actor,now)
+            insertWalletMovement(db,serviceKey,"IN",floatAmount,"RECHARGE",sourceAccountId,operationId,fee,note?:reference,actor,now,payload)
             audit(db,actor,"SERVICE_WALLET_RECHARGE",serviceKey,null,
                 "{\"float_minor\":$floatAmount,\"recharge_fee_minor\":$fee,\"source_account_id\":\"${esc(sourceAccountId)}\",\"reference\":\"${esc(reference.orEmpty())}\"}",now)
             db.setTransactionSuccessful();return fee
@@ -172,8 +172,8 @@ class ServiceTransferRepository(context:Context) {
     }
     private fun walletBalance(db:SQLiteDatabase,key:String):Long =
         db.rawQuery("SELECT COALESCE(SUM(CASE WHEN direction='IN' THEN amount_minor ELSE -amount_minor END),0) FROM service_wallet_transactions WHERE service_key=?",arrayOf(key)).use{it.moveToFirst();it.getLong(0)}
-    private fun insertWalletMovement(db:SQLiteDatabase,key:String,direction:String,amount:Long,type:String,sourceId:String?,operationId:String,fee:Long,note:String?,actor:String,now:String) {
-        val v=ContentValues().apply{put("id",UUID.randomUUID().toString());put("service_key",key);put("direction",direction);put("amount_minor",amount);put("transaction_type",type);put("source_id",sourceId);put("operation_id",operationId);put("fee_minor",fee);put("note",note);put("created_by",actor);put("created_at",now)}
+    private fun insertWalletMovement(db:SQLiteDatabase,key:String,direction:String,amount:Long,type:String,sourceId:String?,operationId:String,fee:Long,note:String?,actor:String,now:String,payloadHash:String?=null) {
+        val v=ContentValues().apply{put("id",UUID.randomUUID().toString());put("service_key",key);put("direction",direction);put("amount_minor",amount);put("transaction_type",type);put("source_id",sourceId);put("operation_id",operationId);if(payloadHash!=null)put("payload_hash",payloadHash);put("fee_minor",fee);put("note",note);put("created_by",actor);put("created_at",now)}
         db.insertOrThrow("service_wallet_transactions",null,v)
     }
     private fun insertCashMovement(db:SQLiteDatabase,accountId:String,direction:String,amount:Long,type:String,sourceType:String,sourceId:String,operationId:String,actor:String,description:String,now:String) {
