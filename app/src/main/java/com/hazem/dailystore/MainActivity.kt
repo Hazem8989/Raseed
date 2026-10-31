@@ -302,8 +302,10 @@ class MainActivity : Activity() {
 
     private fun showPointOfSale(preserveCart: Boolean = false) {
         markScreen("POS")
-        if (!preserveCart) cart.clear()
-        loadCatalog()
+        if (!preserveCart) {
+            cart.clear()
+            loadCatalog()
+        } else if (products.isEmpty()) loadCatalog()
         val page = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             setBackgroundColor(backgroundColor)
