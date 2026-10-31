@@ -203,7 +203,7 @@ class PurchasePaymentRepository(context: Context) {
                 put("id", paymentId); put("invoice_type", "PURCHASE")
                 put("invoice_id", invoiceId); put("cash_transaction_id", cashTransactionId)
                 put("amount_minor", amountMinor); put("currency_code", account.currencyCode)
-                if (rate > 0L) put("exchange_rate_syp_per_usd_milli", rate)
+                if (paymentRate > 0L) put("exchange_rate_syp_per_usd_milli", paymentRate)
                 else putNull("exchange_rate_syp_per_usd_milli")
                 put("created_at", now)
             }
