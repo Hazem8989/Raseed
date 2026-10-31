@@ -34,6 +34,13 @@ class DailyBalanceRepository(context:Context) {
                 require(it.moveToFirst()){"اختر صندوقاً نقدياً نشطاً بالليرة السورية"};it.getString(0)
             }
             val date=today();val used=usage(db,date,accountId)
+            val unrelatedMovements=db.rawQuery(
+                "SELECT COUNT(*) FROM cash_transactions WHERE account_id=? AND COALESCE(operating_date,substr(created_at,1,10))=? AND transaction_type NOT IN ('PURCHASE_PAYMENT','PERSONAL_WITHDRAWAL')",
+                arrayOf(accountId,date)
+            ).use { it.moveToFirst();it.getInt(0) }
+            require(unrelatedMovements==0) {
+                "لا يمكن تخصيص هذا الصندوق للنقد المدور لأنه استقبل حركات أخرى اليوم؛ استخدم صندوقاً منفصلاً"
+            }
             require(amount>=used.first+used.second){"المبلغ الجديد أقل من دفعات الموردين والمسحوبات المسجلة اليوم"}
             val old=db.rawQuery("SELECT account_id,allocated_minor FROM daily_supplier_rollovers WHERE operating_date=?",arrayOf(date)).use {
                 if(it.moveToFirst()) Pair(it.getString(0),it.getLong(1)) else null
