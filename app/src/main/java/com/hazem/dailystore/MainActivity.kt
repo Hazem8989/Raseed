@@ -935,8 +935,13 @@ class MainActivity : Activity() {
             Toast.makeText(this, "تعديل دفعات الموردين متاح للمدير فقط", Toast.LENGTH_SHORT).show()
             return
         }
-        val accounts = CashAccountRepository(this).listActive()
-            .filter { it.currencyCode == payment.currencyCode }
+        val supplierRolloverId = DailyBalanceRepository(this).currentSupplierRollover()?.accountId
+        val accounts = CashAccountRepository(this).listActive().filter {
+            it.currencyCode == payment.currencyCode &&
+                (it.accountType == "WALLET" ||
+                    (it.accountType == "CASH_BOX" &&
+                        (payment.currencyCode == "USD" || it.id == supplierRolloverId || it.id == payment.cashAccountId)))
+        }
         if (accounts.isEmpty()) {
             Toast.makeText(this, "لا يوجد حساب نشط بعملة هذه الدفعة", Toast.LENGTH_LONG).show()
             return
@@ -996,7 +1001,12 @@ class MainActivity : Activity() {
         invoiceId: String, invoiceNumber: String, onSaved: () -> Unit
     ) {
         val payments = PurchasePaymentRepository(this)
-        val accounts = CashAccountRepository(this).listActive()
+        val supplierRolloverId = DailyBalanceRepository(this).currentSupplierRollover()?.accountId
+        val accounts = CashAccountRepository(this).listActive().filter {
+            it.accountType == "WALLET" ||
+                (it.accountType == "CASH_BOX" &&
+                    (it.currencyCode == "USD" || (it.currencyCode == "SYP" && it.id == supplierRolloverId)))
+        }
         if (accounts.isEmpty()) {
             AlertDialog.Builder(this).setTitle("لا توجد حسابات مالية")
                 .setMessage("أنشئ صندوقاً أو محفظة وأدخل رصيدها الافتتاحي قبل تسجيل دفعة.")
