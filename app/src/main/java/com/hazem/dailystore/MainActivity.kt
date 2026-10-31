@@ -2883,7 +2883,7 @@ class MainActivity : Activity() {
                         }.show()
                 }
                 actions.addView(edit, LinearLayout.LayoutParams(0, dp(42), 1f))
-                if (isManager() && product.tracksInventory && product.stock <= 0.0000001) {
+                if (isManager() && product.tracksInventory && product.stock <= 0.0000001 && repository.canRecordOpeningStock(product.id)) {
                     val opening = smallButton("تسجيل رصيد الجرد") { showOpeningStockDialog(product) }
                     actions.addView(opening, LinearLayout.LayoutParams(0, dp(42), 1f))
                 }
