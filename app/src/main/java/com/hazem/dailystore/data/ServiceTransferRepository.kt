@@ -37,12 +37,18 @@ class ServiceTransferRepository(context:Context) {
         require(date.matches(Regex("\\d{4}-\\d{2}-\\d{2}"))){"تاريخ الكشف غير صالح"}
         val out=mutableListOf<ServiceDailySummary>()
         database.readableDatabase.rawQuery(
-            """SELECT service_type,COUNT(*),COALESCE(SUM(amount_delivered_minor),0),
-                      COALESCE(SUM(customer_charge_minor),0),COALESCE(SUM(profit_minor),0),
-                      COALESCE(SUM(provider_fee_minor),0)
-               FROM service_transfers
-               WHERE substr(created_at,1,10)=? AND status='POSTED'
-               GROUP BY service_type ORDER BY service_type""".trimIndent(),arrayOf(date)
+            """SELECT service_type,SUM(operation_count),SUM(delivered_minor),SUM(customer_receipts_minor),SUM(profit_minor),SUM(provider_fee_minor)
+               FROM (
+                 SELECT service_type,COUNT(*) operation_count,COALESCE(SUM(amount_delivered_minor),0) delivered_minor,
+                        COALESCE(SUM(customer_charge_minor),0) customer_receipts_minor,COALESCE(SUM(profit_minor),0) profit_minor,
+                        COALESCE(SUM(provider_fee_minor),0) provider_fee_minor
+                 FROM service_transfers WHERE substr(created_at,1,10)=? AND status='POSTED' GROUP BY service_type
+                 UNION ALL
+                 SELECT CASE service_key WHEN 'SYRIATEL_SHARED' THEN 'SYRIATEL_BALANCE' ELSE 'SHAM_CASH' END,
+                        0,0,0,0,0 FROM service_wallet_transactions
+                 WHERE transaction_type='RECHARGE' AND substr(created_at,1,10)=?
+                 GROUP BY service_key
+               ) GROUP BY service_type ORDER BY service_type""".trimIndent(),arrayOf(date,date)
         ).use { c -> while(c.moveToNext()) {
             val type=c.getString(0); val delivered=c.getLong(2)
             // Show actual fees paid on external recharge only; never add them to customer transfers.
