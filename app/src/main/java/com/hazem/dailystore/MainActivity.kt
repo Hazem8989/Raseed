@@ -1714,17 +1714,20 @@ class MainActivity : Activity() {
         action.adapter = ArrayAdapter(this, android.R.layout.simple_spinner_dropdown_item, actions)
         val account = Spinner(this)
         val accountHint = label("", 11f, mutedColor, false, Gravity.RIGHT)
+        val destination = Spinner(this)
+        val destinationHint = label("", 11f, mutedColor, false, Gravity.RIGHT)
         var dailyOperationsDialog: AlertDialog? = null
         var availableAccounts: List<CashAccountSummary> = emptyList()
+        var availableDestinations: List<CashAccountSummary> = emptyList()
         fun refreshAccounts() {
             val selected = action.selectedItemPosition.coerceAtLeast(0)
+            val previousId = availableAccounts.getOrNull(account.selectedItemPosition)?.id
             val options = when (selected) {
                 0 -> all.filter { it.accountType == "CASH_BOX" && it.currencyCode == "SYP" && it.id != CashAccountRepository(this).currentDayPrimaryDrawer()?.id }
                 1 -> all.filter { it.accountType == "CASH_BOX" && it.currencyCode == "SYP" && it.id == repo.currentSupplierRollover()?.accountId }
                 2, 3 -> all.filter { it.accountType == "WALLET" }
                 else -> all.filter { it.accountType == "WALLET" && it.currencyCode == "SYP" }
             }
-            val previousId = availableAccounts.getOrNull(account.selectedItemPosition)?.id
             availableAccounts = options
             account.tag = options
             val labels = if (options.isEmpty()) listOf("لا يوجد حساب مالي مناسب لهذه العملية")
@@ -1743,6 +1746,25 @@ class MainActivity : Activity() {
                 val restored = options.indexOfFirst { it.id == previousId }
                 if (restored >= 0) account.setSelection(restored)
             }
+            val previousDestinationId = availableDestinations.getOrNull(destination.selectedItemPosition)?.id
+            val rechargeId = ServiceTransferRepository(this).rechargeAccountId()
+            val supplierId = repo.currentSupplierRollover()?.accountId
+            val destinationOptions = if (selected == 4) all.filter {
+                it.accountType == "CASH_BOX" && it.currencyCode == "SYP" &&
+                    it.id != rechargeId && it.id != supplierId
+            } else emptyList()
+            availableDestinations = destinationOptions
+            destination.adapter = ArrayAdapter(this, android.R.layout.simple_spinner_dropdown_item,
+                if (destinationOptions.isEmpty()) listOf("لا توجد وجهة نقدية متاحة")
+                else destinationOptions.map { it.name + " • " + formatAccountBalance(it.balanceMinor, it.currencyCode) })
+            destination.isEnabled = destinationOptions.isNotEmpty()
+            destination.visibility = if (selected == 4) View.VISIBLE else View.GONE
+            destinationHint.visibility = if (selected == 4 && destinationOptions.isEmpty()) View.VISIBLE else View.GONE
+            destinationHint.text = "أنشئ صندوقاً نقدياً نشطاً بالليرة السورية، مع استبعاد صندوق الموردين وصندوق شراء رصيد الخدمات."
+            if (previousDestinationId != null) {
+                val restored = destinationOptions.indexOfFirst { it.id == previousDestinationId }
+                if (restored >= 0) destination.setSelection(restored)
+            }
         }
         action.onItemSelectedListener = object : android.widget.AdapterView.OnItemSelectedListener {
             override fun onNothingSelected(parent: android.widget.AdapterView<*>?) { refreshAccounts() }
@@ -1756,6 +1778,9 @@ class MainActivity : Activity() {
         content.addView(label("الحساب المالي", 12f, mutedColor, false, Gravity.RIGHT))
         content.addView(account, fieldParams(dp(48), dp(8)))
         content.addView(accountHint, fieldParams(-2, dp(2)))
+        content.addView(label("وجهة التحويل النقدية", 12f, mutedColor, false, Gravity.RIGHT))
+        content.addView(destination, fieldParams(dp(48), dp(8)))
+        content.addView(destinationHint, fieldParams(-2, dp(2)))
         content.addView(smallButton("إضافة صندوق أو محفظة") {
             dailyOperationsDialog?.dismiss()
             showCreateCashAccountDialog()
@@ -1787,7 +1812,12 @@ class MainActivity : Activity() {
                         1 -> repo.addPersonalWithdrawal(actor, selected.id, value, operationId, note)
                         2 -> repo.setWalletOpening(actor, selected.id, value, note)
                         3 -> repo.addWalletTopUp(actor, selected.id, value, operationId, note, note)
-                        4 -> repo.transferWalletToDrawer(actor, selected.id, value, operationId, note, note)
+                        4 -> {
+                            val target = availableDestinations.getOrNull(destination.selectedItemPosition)
+                                ?: error("اختر صندوقاً نقدياً كوجهة للتحويل")
+                            require(target.id != selected.id) { "لا يمكن التحويل إلى الحساب نفسه" }
+                            repo.transferWalletToDrawer(actor, selected.id, target.id, value, operationId, note, note)
+                        }
                     }
                     dialog.dismiss()
                     Toast.makeText(this, "تم تسجيل العملية في السجل المالي", Toast.LENGTH_LONG).show()
