@@ -848,7 +848,14 @@ class MainActivity : Activity() {
         val historyText = if (history.isEmpty()) "لا توجد دفعات سابقة." else history.joinToString("\n") {
             "${formatAccountBalance(it.amountMinor, it.currencyCode)} • ${it.accountName} • ${it.createdAt.take(10)}"
         }
+        val invoiceBalance = payments.listPurchaseInvoices().firstOrNull { it.id == invoiceId }
         content.addView(label("الفاتورة: $invoiceNumber", 15f, green, true, Gravity.RIGHT))
+        if (invoiceBalance != null && invoiceBalance.invoiceRateMilli > 0L) {
+            content.addView(label(
+                "المتبقي الثابت: ${formatSypAmount(invoiceBalance.outstandingSypMinor)} ل.س • بسعر صرف يوم الشراء",
+                13f, green, true, Gravity.RIGHT
+            ).apply { setPadding(0, dp(5), 0, dp(5)) })
+        }
         content.addView(label("اختر الصندوق أو المحفظة", 12f, mutedColor, false, Gravity.RIGHT)
             .apply { setPadding(0, dp(10), 0, dp(4)) })
         content.addView(accountSpinner, fieldParams(dp(48), dp(8)))
