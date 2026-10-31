@@ -579,6 +579,7 @@ class MainActivity : Activity() {
             "الصناديق والمحافظ" to "الحركة النقدية والحسابات",
             "التقارير" to "المبيعات والأرباح والمخزون"
         )
+        lateinit var popup: PopupWindow
         entries.forEach { (title, description) ->
             val item = LinearLayout(this).apply {
                 orientation = LinearLayout.VERTICAL
@@ -586,6 +587,7 @@ class MainActivity : Activity() {
                 addView(label(title, 15f, textColor, true, Gravity.RIGHT))
                 addView(label(description, 11f, mutedColor, false, Gravity.RIGHT))
                 setOnClickListener {
+                    popup.dismiss()
                     when (title) {
                         "نقطة البيع" -> showPointOfSale()
                         "المنتجات والمخزون" -> showProductManagement()
@@ -604,6 +606,7 @@ class MainActivity : Activity() {
             setTextColor(Color.WHITE)
             setBackgroundColor(green)
             setOnClickListener {
+                popup.dismiss()
                 cart.clear()
                 currentUserId = null
                 currentUserRole = "CASHIER"
@@ -611,7 +614,7 @@ class MainActivity : Activity() {
             }
         }
         menu.addView(logout, fieldParams(dp(50), 0))
-        val popup = PopupWindow(menu, dp(285), -1, true).apply {
+        popup = PopupWindow(menu, dp(285), -1, true).apply {
             elevation = dp(12).toFloat()
             setBackgroundDrawable(cardBackground())
         }
