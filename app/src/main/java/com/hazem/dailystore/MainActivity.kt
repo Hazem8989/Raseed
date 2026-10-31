@@ -1475,6 +1475,8 @@ class MainActivity : Activity() {
             setOnClickListener { showCreateCashAccountDialog() }
         }
         content.addView(add, fieldParams(dp(50), dp(12)))
+        content.addView(smallButton("إدارة الأرصدة والتحويلات اليومية") { showDailyOperationsDialog() }, fieldParams(dp(46), dp(6)))
+        content.addView(smallButton("كشف المقبوضات والحركات اليومية") { showDailyCashReport() }, fieldParams(dp(46), dp(10)))
         repository.listAll().forEach { account ->
             val card = LinearLayout(this).apply {
                 orientation = LinearLayout.VERTICAL
@@ -1514,6 +1516,111 @@ class MainActivity : Activity() {
         page.addView(header, matchWidth())
         page.addView(body, LinearLayout.LayoutParams(-1, 0, 1f))
         setContentView(page)
+    }
+
+
+    private fun showDailyOperationsDialog() {
+        if (!isManager()) {
+            Toast.makeText(this, "إدارة الأرصدة اليومية متاحة للمدير فقط", Toast.LENGTH_SHORT).show()
+            return
+        }
+        val repo = DailyBalanceRepository(this)
+        val all = CashAccountRepository(this).listActive()
+        val actions = listOf("تحديد النقد المدور للموردين", "تسجيل مسحوبات شخصية", "تحديد الرصيد الافتتاحي لمحفظة", "تغذية / شراء رصيد محفظة", "تحويل محفظة إلى درج الكاش")
+        val content = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(dp(18), dp(8), dp(18), dp(4)) }
+        val action = Spinner(this)
+        action.adapter = ArrayAdapter(this, android.R.layout.simple_spinner_dropdown_item, actions)
+        val account = Spinner(this)
+        fun refreshAccounts() {
+            val selected = action.selectedItemPosition
+            val options = when (selected) {
+                0 -> all.filter { it.accountType == "CASH_BOX" && it.currencyCode == "SYP" }
+                1 -> all.filter { it.accountType == "CASH_BOX" && it.currencyCode == "SYP" }
+                else -> all.filter { it.accountType == "WALLET" }
+            }
+            account.tag = options
+            account.adapter = ArrayAdapter(this, android.R.layout.simple_spinner_dropdown_item,
+                options.map { it.name + " • " + it.currencyCode + " • " + formatAccountBalance(it.balanceMinor, it.currencyCode) })
+        }
+        action.onItemSelectedListener = object : android.widget.AdapterView.OnItemSelectedListener {
+            override fun onNothingSelected(parent: android.widget.AdapterView<*>?) {}
+            override fun onItemSelected(parent: android.widget.AdapterView<*>?, view: View?, position: Int, id: Long) { refreshAccounts() }
+        }
+        val amount = fieldForDialog("المبلغ")
+        amount.inputType = InputType.TYPE_CLASS_NUMBER or InputType.TYPE_NUMBER_FLAG_DECIMAL
+        val reference = fieldForDialog("مرجع / ملاحظة")
+        content.addView(label("نوع العملية", 12f, mutedColor, false, Gravity.RIGHT))
+        content.addView(action, fieldParams(dp(48), dp(8)))
+        content.addView(label("الحساب المالي", 12f, mutedColor, false, Gravity.RIGHT))
+        content.addView(account, fieldParams(dp(48), dp(8)))
+        content.addView(amount, fieldParams(dp(48), dp(8)))
+        content.addView(reference, fieldParams(dp(48), dp(8)))
+        refreshAccounts()
+        val dialog = AlertDialog.Builder(this).setTitle("إدارة الأرصدة اليومية").setView(content)
+            .setNegativeButton("إلغاء", null).setPositiveButton("تنفيذ", null).create()
+        dialog.setOnShowListener {
+            dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener {
+                try {
+                    @Suppress("UNCHECKED_CAST")
+                    val options = account.tag as List<CashAccountSummary>
+                    val selected = options.getOrNull(account.selectedItemPosition) ?: error("اختر الحساب المالي")
+                    val entered = amount.text.toString().trim()
+                    val note = reference.text.toString().trim().ifEmpty { null }
+                    val operation = action.selectedItemPosition
+                    val value = if (selected.currencyCode == "USD") parseUsdCents(entered) else parseSypAmount(entered)
+                    val actor = currentUserId ?: error("جلسة المدير غير صالحة")
+                    when (operation) {
+                        0 -> {
+                            val result = repo.setSupplierRollover(actor, selected.id, value, note)
+                            Toast.makeText(this, "تم تحديد النقد المدور. المتاح: " + formatSypAmount(result.availableMinor) + " ل.س", Toast.LENGTH_LONG).show()
+                        }
+                        1 -> repo.addPersonalWithdrawal(actor, selected.id, value, UUID.randomUUID().toString(), note)
+                        2 -> repo.setWalletOpening(actor, selected.id, value, note)
+                        3 -> repo.addWalletTopUp(actor, selected.id, value, UUID.randomUUID().toString(), note, note)
+                        4 -> repo.transferWalletToDrawer(actor, selected.id, value, UUID.randomUUID().toString(), note, note)
+                    }
+                    dialog.dismiss()
+                    Toast.makeText(this, "تم تسجيل العملية في السجل المالي", Toast.LENGTH_LONG).show()
+                    showCashAccounts()
+                } catch (e: Exception) {
+                    Toast.makeText(this, e.message ?: "تعذر تنفيذ العملية", Toast.LENGTH_LONG).show()
+                }
+            }
+        }
+        dialog.show()
+    }
+
+    private fun showDailyCashReport() {
+        val report = DailyBalanceRepository(this).dailyReport()
+        val page = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setBackgroundColor(backgroundColor) }
+        val header = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL; setPadding(dp(14), dp(10), dp(14), dp(10)); setBackgroundColor(Color.WHITE) }
+        val back = Button(this).apply { text = "‹"; textSize = 25f; isAllCaps = false; setTextColor(green); setBackgroundColor(Color.TRANSPARENT); setOnClickListener { showCashAccounts() } }
+        header.addView(back, LinearLayout.LayoutParams(dp(48), dp(48)))
+        header.addView(label("الكشف المالي اليومي", 19f, green, true, Gravity.CENTER), LinearLayout.LayoutParams(0, -2, 1f))
+        val body = ScrollView(this).apply { isFillViewport = true }
+        val list = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(dp(16), dp(14), dp(16), dp(24)) }
+        list.addView(label("التاريخ: " + report.operatingDate, 13f, mutedColor, false, Gravity.RIGHT))
+        list.addView(label("إجمالي المقبوضات الإلكترونية القابلة للتصريف: " + formatSypAmount(report.electronicReceiptsMinor) + " ل.س", 17f, green, true, Gravity.RIGHT).apply { setPadding(0, dp(8), 0, dp(4)) })
+        list.addView(label("إجمالي المقبوضات النقدية الفعلية: " + formatSypAmount(report.physicalCashReceiptsMinor) + " ل.س", 15f, textColor, true, Gravity.RIGHT).apply { setPadding(0, dp(2), 0, dp(12)) })
+        report.accounts.forEach { a ->
+            val card = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(dp(12), dp(10), dp(12), dp(10)); background = cardBackground() }
+            card.addView(label(a.accountName + " • " + a.currencyCode, 15f, green, true, Gravity.RIGHT))
+            card.addView(label("رصيد أول اليوم: " + formatAccountBalance(a.openingMinor, a.currencyCode), 12f, textColor, false, Gravity.RIGHT))
+            card.addView(label("مبيعات اليوم – قبض إلكتروني: " + formatAccountBalance(a.salesReceiptsMinor, a.currencyCode), 12f, textColor, false, Gravity.RIGHT))
+            card.addView(label("تحصيل ديون – قبض إلكتروني: " + formatAccountBalance(a.debtCollectionsMinor, a.currencyCode), 12f, textColor, false, Gravity.RIGHT))
+            card.addView(label("إجمالي المقبوضات الإلكترونية القابلة للتصريف: " + formatAccountBalance(a.electronicReceiptsMinor, a.currencyCode), 13f, green, true, Gravity.RIGHT))
+            card.addView(label("إضافات أخرى: " + formatAccountBalance(a.otherInflowsMinor, a.currencyCode), 12f, textColor, false, Gravity.RIGHT))
+            card.addView(label("دفعات الموردين: " + formatAccountBalance(a.supplierPaymentsMinor, a.currencyCode), 12f, textColor, false, Gravity.RIGHT))
+            card.addView(label("المسحوبات الشخصية: " + formatAccountBalance(a.personalWithdrawalsMinor, a.currencyCode), 12f, textColor, false, Gravity.RIGHT))
+            card.addView(label("تحويلات واردة: " + formatAccountBalance(a.transferInMinor, a.currencyCode) + " • صادرة: " + formatAccountBalance(a.transferOutMinor, a.currencyCode), 12f, textColor, false, Gravity.RIGHT))
+            card.addView(label("رصيد آخر اليوم: " + formatAccountBalance(a.closingMinor, a.currencyCode), 15f, green, true, Gravity.RIGHT))
+            list.addView(card, fieldParams(-2, dp(9)))
+        }
+        list.addView(sectionHeading("حركات اليوم"))
+        val transactions = DailyBalanceRepository(this).todayTransactions()
+        if (transactions.isEmpty()) list.addView(label("لا توجد حركات مسجلة اليوم.", 12f, mutedColor, false, Gravity.CENTER))
+        else transactions.forEach { list.addView(label(it, 11f, textColor, false, Gravity.RIGHT).apply { setPadding(0, dp(4), 0, dp(4)) }) }
+        body.addView(list); page.addView(header, matchWidth()); page.addView(body, LinearLayout.LayoutParams(-1, 0, 1f)); setContentView(page)
     }
 
     private fun showEditCashAccountDialog(
