@@ -76,7 +76,7 @@ class InventoryValuationRepository(context: Context) {
             """SELECT m.product_id,m.warehouse_id,m.quantity_delta,m.unit_cost_usd_cents
                FROM inventory_movements m JOIN products p ON p.id=m.product_id
                WHERE p.track_inventory=1 AND m.created_at<=?
-               ORDER BY m.created_at ASC,m.id ASC""".trimIndent(),
+               ORDER BY m.created_at ASC,m.rowid ASC""".trimIndent(),
             arrayOf(cutoffText)
         ).use { cursor ->
             while (cursor.moveToNext()) {
