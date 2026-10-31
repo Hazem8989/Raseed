@@ -36,6 +36,14 @@ class PurchasePaymentRepositoryTest {
         val auth = AuthRepository(context)
         auth.ensureInitialAdmin()
         adminId = auth.authenticate("admin", "1234")!!.id
+        val invoiceFx = ContentValues().apply {
+            put("id", UUID.randomUUID().toString())
+            put("currency_code", "USD")
+            put("rate_syp_per_usd_milli", 10_000_000L)
+            put("effective_at", "2026-10-31T10:00:00.000Z")
+            put("created_at", "2026-10-31T10:00:00.000Z")
+        }
+        database.writableDatabase.insertOrThrow("exchange_rates", null, invoiceFx)
 
         supplierId = SupplierRepository(context).create("مورد دفع ${UUID.randomUUID()}").id
         val unit = store.getUnits().first()
@@ -151,6 +159,38 @@ class PurchasePaymentRepositoryTest {
             assertTrue(it.moveToFirst())
             assertEquals(rate, it.getLong(0))
         }
+    }
+
+    @Test
+    fun supplierBalanceStaysAtPurchaseRateAfterExchangeRateChanges() {
+        val syp = cashAccounts.create("محفظة ليرة ثابتة ${UUID.randomUUID()}",
+            "WALLET", "SYP", 500000L)
+        val first = payments.addPayment(invoiceId, "fixed-syp-first-${UUID.randomUUID()}",
+            syp.id, 100000L)
+        assertEquals(100000L, first.paidSypMinor)
+        assertEquals(900000L, first.outstandingSypMinor)
+
+        val changedRate = ContentValues().apply {
+            put("id", UUID.randomUUID().toString())
+            put("currency_code", "USD")
+            put("rate_syp_per_usd_milli", 20_000_000L)
+            put("effective_at", "2026-11-02T10:00:00.000Z")
+            put("created_at", "2026-11-02T10:00:00.000Z")
+        }
+        database.writableDatabase.insertOrThrow("exchange_rates", null, changedRate)
+
+        val afterRateChange = payments.listPurchaseInvoices().first { it.id == invoiceId }
+        assertEquals(1000000L, afterRateChange.totalSypMinor)
+        assertEquals(100000L, afterRateChange.paidSypMinor)
+        assertEquals(900000L, afterRateChange.outstandingSypMinor)
+
+        val usdPayment = payments.addPayment(invoiceId, "fixed-usd-after-change-${UUID.randomUUID()}",
+            accountId, 1000L)
+        assertEquals(200000L, usdPayment.paidSypMinor)
+        assertEquals(800000L, usdPayment.outstandingSypMinor)
+        val final = payments.listPurchaseInvoices().first { it.id == invoiceId }
+        assertEquals(200000L, final.paidSypMinor)
+        assertEquals(800000L, final.outstandingSypMinor)
     }
 
     @Test
