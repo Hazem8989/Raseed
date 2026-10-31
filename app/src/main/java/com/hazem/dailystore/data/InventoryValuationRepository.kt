@@ -117,7 +117,7 @@ class InventoryValuationRepository(context: Context) {
             var lotQuantity = lots.sumOf { it.quantity }
             if (reconcileWithCurrentBalances) {
                 val actual = balances[id] ?: 0.0
-                val ledgerNet = lotQuantity - (deficits[id] ?: 0.0) - (unvalued[id] ?: 0.0)
+                val ledgerNet = lotQuantity + (unvalued[id] ?: 0.0) - (deficits[id] ?: 0.0)
                 val mismatch = actual - ledgerNet
                 if (mismatch > 0.0000001) {
                     // Physical balance exceeds the supported cost ledger: keep it visible as unvalued.
