@@ -95,13 +95,32 @@ class DailyBalanceRepository(context:Context) {
 
     fun addWalletTopUp(actor:String,walletId:String,amount:Long,operationId:String,reference:String?=null,note:String?=null) {
         require(amount>0L&&operationId.isNotBlank()){"أدخل مبلغاً ومعرّف عملية صحيحين"}
+        val cleanReference=reference?.trim()?.takeIf { it.isNotEmpty() }
+            ?: throw IllegalArgumentException("مرجع عملية التغذية مطلوب لمنع تكرار تسجيل الرصيد")
         val db=database.writableDatabase;manager(db,actor);db.beginTransaction()
         try {
             val w=account(db,walletId);require(w.type=="WALLET"&&w.active){"اختر محفظة إلكترونية نشطة"}
+            val openingAlreadyContainsReference=db.rawQuery(
+                "SELECT 1 FROM wallet_daily_openings WHERE operating_date=? AND account_id=? AND note=?",
+                arrayOf(today(),walletId,cleanReference)
+            ).use { it.moveToFirst() }
+            require(!openingAlreadyContainsReference) {
+                "هذا المرجع مسجل ضمن الرصيد الافتتاحي اليدوي اليوم؛ لن نضيفه مرة ثانية"
+            }
+            val sameReference=db.rawQuery(
+                "SELECT account_id,amount_minor FROM cash_transactions WHERE transaction_type='WALLET_TOP_UP' AND source_type='WALLET_TOP_UP' AND source_id=?",
+                arrayOf(cleanReference)
+            ).use { if(it.moveToFirst()) Pair(it.getString(0),it.getLong(1)) else null }
+            if(sameReference!=null) {
+                require(sameReference.first==walletId&&sameReference.second==amount) {
+                    "مرجع التغذية مستخدم مسبقاً بمبلغ أو محفظة مختلفة"
+                }
+                db.setTransactionSuccessful();return
+            }
             val old=db.rawQuery("SELECT account_id,amount_minor,transaction_type FROM cash_transactions WHERE operation_id=?",arrayOf(operationId)).use { if(it.moveToFirst())Triple(it.getString(0),it.getLong(1),it.getString(2))else null }
             if(old!=null){require(old.first==walletId&&old.second==amount&&old.third=="WALLET_TOP_UP"){"معرّف العملية مستخدم لبيانات مختلفة"};db.setTransactionSuccessful();return}
-            val now=stamp();movement(db,walletId,"IN",amount,w.currency,"WALLET_TOP_UP","WALLET_TOP_UP",reference?:operationId,operationId,actor,note?:"تغذية رصيد محفظة",now)
-            audit(db,actor,"WALLET_TOP_UP","CASH_ACCOUNT",walletId,null,"{\"amount_minor\":"+amount+",\"currency\":\""+w.currency+"\",\"reference\":\""+esc(reference.orEmpty())+"\"}",now)
+            val now=stamp();movement(db,walletId,"IN",amount,w.currency,"WALLET_TOP_UP","WALLET_TOP_UP",cleanReference,operationId,actor,note?:"تغذية رصيد محفظة",now)
+            audit(db,actor,"WALLET_TOP_UP","CASH_ACCOUNT",walletId,null,"{\"amount_minor\":"+amount+",\"currency\":\""+w.currency+"\",\"reference\":\""+esc(cleanReference)+"\"}",now)
             db.setTransactionSuccessful()
         } finally {db.endTransaction()}
     }
