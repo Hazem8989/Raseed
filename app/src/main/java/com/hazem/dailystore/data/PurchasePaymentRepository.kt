@@ -22,7 +22,8 @@ data class SupplierFinancialSummary(
 )
 data class PurchasePaymentRecord(
     val id: String, val amountMinor: Long, val currencyCode: String, val accountName: String,
-    val accountType: String, val createdAt: String, val note: String?
+    val accountType: String, val createdAt: String, val note: String?,
+    val cashTransactionId: String, val cashAccountId: String
 )
 data class PurchasePaymentResult(
     val paymentId: String, val paidUsdCents: Long, val outstandingUsdCents: Long,
@@ -92,7 +93,7 @@ class PurchasePaymentRepository(context: Context) {
         val result = mutableListOf<PurchasePaymentRecord>()
         database.readableDatabase.rawQuery(
             """SELECT p.id,p.amount_minor,p.currency_code,a.name,a.account_type,
-                      p.created_at,t.description
+                      p.created_at,t.description,t.id,t.account_id
                FROM invoice_payments p
                JOIN cash_transactions t ON t.id=p.cash_transaction_id
                JOIN cash_accounts a ON a.id=t.account_id
@@ -101,7 +102,8 @@ class PurchasePaymentRepository(context: Context) {
         ).use { c ->
             while (c.moveToNext()) result.add(PurchasePaymentRecord(
                 c.getString(0), c.getLong(1), c.getString(2), c.getString(3),
-                c.getString(4), c.getString(5), if (c.isNull(6)) null else c.getString(6)
+                c.getString(4), c.getString(5), if (c.isNull(6)) null else c.getString(6),
+                c.getString(7), c.getString(8)
             ))
         }
         return result
@@ -218,6 +220,146 @@ class PurchasePaymentRepository(context: Context) {
             db.endTransaction()
         }
     }
+
+    /**
+     * Corrects an existing supplier payment in place, with the cash ledger and invoice state
+     * updated atomically. Currency and its original FX snapshot are immutable.
+     */
+    fun editPayment(
+        actorRole: String, actorUserId: String, paymentId: String,
+        newCashAccountId: String, newAmountMinor: Long, newNote: String?
+    ): PurchasePaymentResult {
+        require(actorRole == "ADMIN") { "تعديل دفعات الموردين متاح للمدير فقط" }
+        require(actorUserId.isNotBlank()) { "جلسة المدير غير صالحة" }
+        require(paymentId.isNotBlank() && newCashAccountId.isNotBlank()) { "بيانات تعديل الدفعة غير مكتملة" }
+        require(newAmountMinor > 0L) { "مبلغ الدفعة يجب أن يكون أكبر من صفر" }
+        val cleanNote = newNote?.trim()?.takeIf { it.isNotEmpty() }
+        val db = database.writableDatabase
+        db.beginTransaction()
+        try {
+            val old = db.rawQuery(
+                """SELECT p.invoice_id,p.amount_minor,p.currency_code,p.exchange_rate_syp_per_usd_milli,
+                          p.cash_transaction_id,t.account_id,t.description,i.total_usd_cents,i.status,i.invoice_number
+                   FROM invoice_payments p
+                   JOIN cash_transactions t ON t.id=p.cash_transaction_id
+                   JOIN purchase_invoices i ON i.id=p.invoice_id
+                   WHERE p.id=? AND p.invoice_type='PURCHASE'""".trimIndent(),
+                arrayOf(paymentId)
+            ).use {
+                require(it.moveToFirst()) { "دفعة المورد غير موجودة" }
+                ExistingSupplierPayment(
+                    it.getString(0),it.getLong(1),it.getString(2),if(it.isNull(3)) null else it.getLong(3),
+                    it.getString(4),it.getString(5),if(it.isNull(6)) null else it.getString(6),
+                    it.getLong(7),it.getString(8),it.getString(9)
+                )
+            }
+            require(old.invoiceStatus in setOf("POSTED","PARTIALLY_PAID","PAID")) {
+                "لا يمكن تعديل دفعة فاتورة غير معتمدة أو ملغاة"
+            }
+            val target = db.rawQuery(
+                "SELECT name,currency_code,is_active,opening_balance_minor FROM cash_accounts WHERE id=?",
+                arrayOf(newCashAccountId)
+            ).use {
+                require(it.moveToFirst()) { "الحساب المالي غير موجود" }
+                require(it.getInt(2) == 1) { "لا يمكن نقل الدفعة إلى حساب موقوف" }
+                SupplierPaymentAccount(it.getString(0),it.getString(1),it.getLong(3))
+            }
+            require(target.currencyCode == old.currencyCode) {
+                "يجب اختيار حساب بنفس عملة الدفعة؛ لا يمكن تغيير العملة التاريخية أثناء التصحيح"
+            }
+            val rate = old.exchangeRateMilli ?: 0L
+            val newUsdEquivalent = when (old.currencyCode) {
+                "USD" -> newAmountMinor
+                "SYP" -> {
+                    require(rate > 0L) { "دفعة الليرة لا تحتوي سعر صرف محفوظاً ولا يمكن تعديلها آلياً" }
+                    CurrencyConverter.sypToUsdCents(newAmountMinor, rate)
+                }
+                else -> error("عملة دفعة غير مدعومة")
+            }
+            require(newUsdEquivalent > 0L) { "المبلغ الجديد صغير جداً" }
+
+            val paidBefore = paidUsdCents(db, old.invoiceId)
+            val oldUsdEquivalent = when (old.currencyCode) {
+                "USD" -> old.amountMinor
+                "SYP" -> {
+                    require(rate > 0L) { "دفعة الليرة لا تحتوي سعر صرف محفوظاً" }
+                    CurrencyConverter.sypToUsdCents(old.amountMinor, rate)
+                }
+                else -> error("عملة دفعة غير مدعومة")
+            }
+            val paidWithoutThis = (paidBefore - oldUsdEquivalent).coerceAtLeast(0L)
+            require(newUsdEquivalent <= (old.invoiceTotalUsdCents - paidWithoutThis).coerceAtLeast(0L)) {
+                "المبلغ المعدل يتجاوز قيمة الفاتورة بعد احتساب الدفعات الأخرى"
+            }
+
+            val oldBalance = accountBalance(db, old.cashAccountId)
+            if (old.cashAccountId == newCashAccountId) {
+                require(Math.addExact(oldBalance, old.amountMinor) >= newAmountMinor) {
+                    "الرصيد غير كافٍ بعد تعديل مبلغ الدفعة"
+                }
+            } else {
+                require(accountBalance(db, newCashAccountId) >= newAmountMinor) {
+                    "رصيد الحساب الجديد غير كافٍ لتسجيل الدفعة المصححة"
+                }
+            }
+
+            val beforeJson = "{\"amount_minor\":${old.amountMinor},\"currency\":${jsonString(old.currencyCode)}," +
+                "\"account_id\":${jsonString(old.cashAccountId)},\"note\":${jsonString(old.note.orEmpty())}}"
+            val afterJson = "{\"amount_minor\":$newAmountMinor,\"currency\":${jsonString(old.currencyCode)}," +
+                "\"account_id\":${jsonString(newCashAccountId)},\"note\":${jsonString(cleanNote.orEmpty())}}"
+            val now = timestamp()
+            val description = cleanNote ?: "دفعة مصححة للمورد عن الفاتورة ${old.invoiceNumber}"
+            val transactionValues = ContentValues().apply {
+                put("account_id",newCashAccountId); put("amount_minor",newAmountMinor)
+                put("description",description)
+            }
+            require(db.update("cash_transactions",transactionValues,"id=?",arrayOf(old.cashTransactionId)) == 1) {
+                "تعذر تعديل حركة الصندوق المرتبطة بالدفعة"
+            }
+            val paymentValues = ContentValues().apply { put("amount_minor",newAmountMinor) }
+            require(db.update("invoice_payments",paymentValues,"id=?",arrayOf(paymentId)) == 1) {
+                "تعذر تعديل سجل دفعة الفاتورة"
+            }
+            val paidAfter = Math.addExact(paidWithoutThis,newUsdEquivalent)
+            val outstanding = (old.invoiceTotalUsdCents-paidAfter).coerceAtLeast(0L)
+            val status = if (outstanding == 0L) "PAID" else if (paidAfter > 0L) "PARTIALLY_PAID" else "POSTED"
+            db.execSQL("UPDATE purchase_invoices SET status=?,updated_at=? WHERE id=?",
+                arrayOf(status,now,old.invoiceId))
+            val audit = ContentValues().apply {
+                put("id",UUID.randomUUID().toString()); put("user_id",actorUserId)
+                put("action","CORRECT"); put("entity_type","PURCHASE_PAYMENT"); put("entity_id",paymentId)
+                put("before_json",beforeJson); put("after_json",afterJson); put("created_at",now)
+            }
+            db.insertOrThrow("audit_log",null,audit)
+            db.setTransactionSuccessful()
+            return PurchasePaymentResult(paymentId,paidAfter,outstanding,
+                if(outstanding==0L) "PAID" else "PARTIALLY_PAID",false)
+        } finally { db.endTransaction() }
+    }
+
+    private data class ExistingSupplierPayment(
+        val invoiceId:String,val amountMinor:Long,val currencyCode:String,val exchangeRateMilli:Long?,
+        val cashTransactionId:String,val cashAccountId:String,val note:String?,val invoiceTotalUsdCents:Long,
+        val invoiceStatus:String,val invoiceNumber:String
+    )
+    private data class SupplierPaymentAccount(
+        val name:String,val currencyCode:String,val openingBalanceMinor:Long
+    )
+
+    private fun accountBalance(db: SQLiteDatabase, accountId: String): Long {
+        val opening = db.rawQuery("SELECT opening_balance_minor FROM cash_accounts WHERE id=?",
+            arrayOf(accountId)).use { require(it.moveToFirst()); it.getLong(0) }
+        val movement = db.rawQuery(
+            """SELECT COALESCE(SUM(CASE WHEN direction='IN' THEN amount_minor
+                       WHEN direction='OUT' THEN -amount_minor ELSE 0 END),0)
+               FROM cash_transactions WHERE account_id=?""".trimIndent(),arrayOf(accountId)
+        ).use { if(it.moveToFirst()) it.getLong(0) else 0L }
+        return Math.addExact(opening,movement)
+    }
+
+    private fun jsonString(value: String): String =
+        "\"" + value.replace("\\\\", "\\\\\\\\").replace("\"", "\\\\"")
+            .replace("\\n", "\\\\n").replace("\\r", "\\\\r") + "\""
 
     private fun paidUsdCents(db: SQLiteDatabase, invoiceId: String): Long {
         var total = 0L
