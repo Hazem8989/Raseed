@@ -235,6 +235,24 @@ class AppDatabase private constructor(context: Context) :
                 db.endTransaction()
             }
         }
+        if (version < 7) {
+            db.beginTransaction()
+            try {
+                db.execSQL("""
+                    CREATE TABLE system_cash_account_roles (
+                        role_key TEXT PRIMARY KEY NOT NULL,
+                        account_id TEXT NOT NULL,
+                        linked_at TEXT NOT NULL,
+                        FOREIGN KEY(account_id) REFERENCES cash_accounts(id)
+                            ON UPDATE RESTRICT ON DELETE RESTRICT
+                    )
+                """.trimIndent())
+                db.setTransactionSuccessful()
+                version = 7
+            } finally {
+                db.endTransaction()
+            }
+        }
         if (version != newVersion) {
             throw IllegalStateException("Missing database migration from version $version to $newVersion")
         }
@@ -242,7 +260,7 @@ class AppDatabase private constructor(context: Context) :
 
     companion object {
         const val DATABASE_NAME = "the_daily_shop.db"
-        const val DATABASE_VERSION = 6
+        const val DATABASE_VERSION = 7
 
         @Volatile
         private var INSTANCE: AppDatabase? = null
@@ -535,6 +553,16 @@ class AppDatabase private constructor(context: Context) :
                 opening_balance_minor INTEGER NOT NULL DEFAULT 0,
                 is_active INTEGER NOT NULL DEFAULT 1 CHECK(is_active IN (0,1)),
                 created_at TEXT NOT NULL
+            )
+            """.trimIndent(),
+
+            """
+            CREATE TABLE system_cash_account_roles (
+                role_key TEXT PRIMARY KEY NOT NULL,
+                account_id TEXT NOT NULL,
+                linked_at TEXT NOT NULL,
+                FOREIGN KEY(account_id) REFERENCES cash_accounts(id)
+                    ON UPDATE RESTRICT ON DELETE RESTRICT
             )
             """.trimIndent(),
 
