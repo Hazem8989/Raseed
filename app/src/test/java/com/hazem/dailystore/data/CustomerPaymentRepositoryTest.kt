@@ -104,7 +104,7 @@ class CustomerPaymentRepositoryTest {
         )
         invoices.postCashSale(draft.invoiceId, "customer-cash-post-" + UUID.randomUUID(), accountId)
         try {
-            payments.addPayment(draft.invoiceId, "customer-cash-payment", accountId, 100L)
+            payments.addPayment(draft.invoiceId, "customer-cash-payment-" + UUID.randomUUID(), accountId, 100L)
             throw AssertionError("Cash sale must not be collected as customer credit")
         } catch (_: IllegalArgumentException) { }
         assertEquals(0, payments.listPayments(draft.invoiceId).size)
