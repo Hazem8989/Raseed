@@ -152,6 +152,68 @@ class AppDatabase private constructor(context: Context) :
                 db.endTransaction()
             }
         }
+        if (version < 5) {
+            db.beginTransaction()
+            try {
+                db.execSQL("""
+                    CREATE TABLE service_wallets (
+                        service_key TEXT PRIMARY KEY NOT NULL,
+                        name TEXT NOT NULL,
+                        created_at TEXT NOT NULL
+                    )
+                """.trimIndent())
+                db.execSQL("""
+                    CREATE TABLE service_wallet_transactions (
+                        id TEXT PRIMARY KEY NOT NULL,
+                        service_key TEXT NOT NULL,
+                        direction TEXT NOT NULL CHECK(direction IN ('IN','OUT')),
+                        amount_minor INTEGER NOT NULL CHECK(amount_minor > 0),
+                        transaction_type TEXT NOT NULL,
+                        source_id TEXT,
+                        operation_id TEXT NOT NULL UNIQUE,
+                        fee_minor INTEGER NOT NULL DEFAULT 0 CHECK(fee_minor >= 0),
+                        note TEXT,
+                        created_by TEXT NOT NULL,
+                        created_at TEXT NOT NULL,
+                        FOREIGN KEY(service_key) REFERENCES service_wallets(service_key) ON UPDATE RESTRICT ON DELETE RESTRICT,
+                        FOREIGN KEY(created_by) REFERENCES users(id) ON UPDATE RESTRICT ON DELETE RESTRICT
+                    )
+                """.trimIndent())
+                db.execSQL("""
+                    CREATE TABLE service_transfers (
+                        id TEXT PRIMARY KEY NOT NULL,
+                        operation_id TEXT NOT NULL UNIQUE,
+                        service_type TEXT NOT NULL CHECK(service_type IN ('SYRIATEL_BALANCE','SYRIATEL_CASH','SHAM_CASH')),
+                        service_key TEXT NOT NULL,
+                        amount_delivered_minor INTEGER NOT NULL CHECK(amount_delivered_minor > 0),
+                        profit_minor INTEGER NOT NULL CHECK(profit_minor >= 0),
+                        provider_fee_minor INTEGER NOT NULL CHECK(provider_fee_minor >= 0),
+                        customer_charge_minor INTEGER NOT NULL CHECK(customer_charge_minor > 0),
+                        receipt_account_id TEXT NOT NULL,
+                        receipt_channel TEXT NOT NULL CHECK(receipt_channel IN ('CASH','ELECTRONIC')),
+                        reference TEXT,
+                        note TEXT,
+                        payload_hash TEXT NOT NULL,
+                        created_by TEXT NOT NULL,
+                        created_at TEXT NOT NULL,
+                        status TEXT NOT NULL DEFAULT 'POSTED' CHECK(status IN ('POSTED','REVERSED')),
+                        reversed_at TEXT,
+                        reversed_by TEXT,
+                        reversal_reason TEXT,
+                        FOREIGN KEY(service_key) REFERENCES service_wallets(service_key) ON UPDATE RESTRICT ON DELETE RESTRICT,
+                        FOREIGN KEY(receipt_account_id) REFERENCES cash_accounts(id) ON UPDATE RESTRICT ON DELETE RESTRICT,
+                        FOREIGN KEY(created_by) REFERENCES users(id) ON UPDATE RESTRICT ON DELETE RESTRICT,
+                        FOREIGN KEY(reversed_by) REFERENCES users(id) ON UPDATE RESTRICT ON DELETE RESTRICT
+                    )
+                """.trimIndent())
+                db.execSQL("CREATE INDEX idx_service_wallet_transactions_key_date ON service_wallet_transactions(service_key, created_at)")
+                db.execSQL("CREATE INDEX idx_service_transfers_date ON service_transfers(created_at, service_type)")
+                db.setTransactionSuccessful()
+                version = 5
+            } finally {
+                db.endTransaction()
+            }
+        }
         if (version != newVersion) {
             throw IllegalStateException("Missing database migration from version $version to $newVersion")
         }
@@ -159,7 +221,7 @@ class AppDatabase private constructor(context: Context) :
 
     companion object {
         const val DATABASE_NAME = "the_daily_shop.db"
-        const val DATABASE_VERSION = 4
+        const val DATABASE_VERSION = 5
 
         @Volatile
         private var INSTANCE: AppDatabase? = null
@@ -517,6 +579,60 @@ class AppDatabase private constructor(context: Context) :
             """.trimIndent(),
 
             """
+            CREATE TABLE service_wallets (
+                service_key TEXT PRIMARY KEY NOT NULL,
+                name TEXT NOT NULL,
+                created_at TEXT NOT NULL
+            )
+            """.trimIndent(),
+
+            """
+            CREATE TABLE service_wallet_transactions (
+                id TEXT PRIMARY KEY NOT NULL,
+                service_key TEXT NOT NULL,
+                direction TEXT NOT NULL CHECK(direction IN ('IN','OUT')),
+                amount_minor INTEGER NOT NULL CHECK(amount_minor > 0),
+                transaction_type TEXT NOT NULL,
+                source_id TEXT,
+                operation_id TEXT NOT NULL UNIQUE,
+                fee_minor INTEGER NOT NULL DEFAULT 0 CHECK(fee_minor >= 0),
+                note TEXT,
+                created_by TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                FOREIGN KEY(service_key) REFERENCES service_wallets(service_key) ON UPDATE RESTRICT ON DELETE RESTRICT,
+                FOREIGN KEY(created_by) REFERENCES users(id) ON UPDATE RESTRICT ON DELETE RESTRICT
+            )
+            """.trimIndent(),
+
+            """
+            CREATE TABLE service_transfers (
+                id TEXT PRIMARY KEY NOT NULL,
+                operation_id TEXT NOT NULL UNIQUE,
+                service_type TEXT NOT NULL CHECK(service_type IN ('SYRIATEL_BALANCE','SYRIATEL_CASH','SHAM_CASH')),
+                service_key TEXT NOT NULL,
+                amount_delivered_minor INTEGER NOT NULL CHECK(amount_delivered_minor > 0),
+                profit_minor INTEGER NOT NULL CHECK(profit_minor >= 0),
+                provider_fee_minor INTEGER NOT NULL CHECK(provider_fee_minor >= 0),
+                customer_charge_minor INTEGER NOT NULL CHECK(customer_charge_minor > 0),
+                receipt_account_id TEXT NOT NULL,
+                receipt_channel TEXT NOT NULL CHECK(receipt_channel IN ('CASH','ELECTRONIC')),
+                reference TEXT,
+                note TEXT,
+                payload_hash TEXT NOT NULL,
+                created_by TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                status TEXT NOT NULL DEFAULT 'POSTED' CHECK(status IN ('POSTED','REVERSED')),
+                reversed_at TEXT,
+                reversed_by TEXT,
+                reversal_reason TEXT,
+                FOREIGN KEY(service_key) REFERENCES service_wallets(service_key) ON UPDATE RESTRICT ON DELETE RESTRICT,
+                FOREIGN KEY(receipt_account_id) REFERENCES cash_accounts(id) ON UPDATE RESTRICT ON DELETE RESTRICT,
+                FOREIGN KEY(created_by) REFERENCES users(id) ON UPDATE RESTRICT ON DELETE RESTRICT,
+                FOREIGN KEY(reversed_by) REFERENCES users(id) ON UPDATE RESTRICT ON DELETE RESTRICT
+            )
+            """.trimIndent(),
+
+            """
             CREATE TABLE customer_credit_revaluations (
                 id TEXT PRIMARY KEY NOT NULL,
                 invoice_id TEXT NOT NULL,
@@ -720,6 +836,8 @@ class AppDatabase private constructor(context: Context) :
             "CREATE INDEX idx_cash_transactions_account_date ON cash_transactions(account_id, created_at)",
             "CREATE INDEX idx_daily_cash_session_account ON daily_cash_sessions(primary_cash_account_id)",
             "CREATE INDEX idx_customer_credit_revaluation_invoice ON customer_credit_revaluations(invoice_id, created_at)",
+            "CREATE INDEX idx_service_wallet_transactions_key_date ON service_wallet_transactions(service_key, created_at)",
+            "CREATE INDEX idx_service_transfers_date ON service_transfers(created_at, service_type)",
             "CREATE INDEX idx_debts_party ON debts(party_type, party_id, created_at)",
             "CREATE INDEX idx_sync_queue_status_date ON sync_queue(status, created_at)",
             "CREATE INDEX idx_audit_log_entity_date ON audit_log(entity_type, entity_id, created_at)"
