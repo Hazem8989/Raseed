@@ -20,7 +20,8 @@ data class SupplierFinancialSummary(
     val id: String, val name: String, val phone: String?, val address: String?,
     val totalPurchaseUsdCents: Long, val paidUsdCents: Long,
     val outstandingUsdCents: Long, val unpaidInvoiceCount: Int,
-    val totalPurchaseSypMinor: Long, val paidSypMinor: Long, val outstandingSypMinor: Long
+    val totalPurchaseSypMinor: Long, val paidSypMinor: Long, val outstandingSypMinor: Long,
+    val unpricedInvoiceCount: Int
 )
 data class PurchasePaymentRecord(
     val id: String, val amountMinor: Long, val currencyCode: String, val accountName: String,
@@ -59,7 +60,7 @@ class PurchasePaymentRepository(context: Context) {
                 val paymentStatus=when {
                     invoiceStatus=="CANCELLED" -> "CANCELLED"
                     invoiceStatus=="DRAFT" -> "DRAFT"
-                    rate<=0L -> if(paidUsd>0L) "PARTIALLY_PAID" else "UNPAID"
+                    rate<=0L -> when { paidUsd>=totalUsd -> "PAID"; paidUsd>0L -> "PARTIALLY_PAID"; else -> "UNPAID" }
                     outstandingSyp==0L -> "PAID"
                     paidSyp>0L -> "PARTIALLY_PAID"
                     else -> "UNPAID"
@@ -84,9 +85,10 @@ class PurchasePaymentRepository(context: Context) {
                     id,c.getString(1),if(c.isNull(2)) null else c.getString(2),if(c.isNull(3)) null else c.getString(3),
                     invoices.sumOf { it.totalUsdCents },invoices.sumOf { it.paidUsdCents },
                     invoices.sumOf { it.outstandingUsdCents },
-                    invoices.count { it.outstandingSypMinor>0L || it.invoiceRateMilli<=0L },
+                    invoices.count { it.paymentStatus=="UNPAID" || it.paymentStatus=="PARTIALLY_PAID" },
                     invoices.sumOf { it.totalSypMinor },invoices.sumOf { it.paidSypMinor },
-                    invoices.sumOf { it.outstandingSypMinor }
+                    invoices.sumOf { it.outstandingSypMinor },
+                    invoices.count { it.invoiceRateMilli<=0L && it.paymentStatus!="PAID" }
                 ))
             }
         }
