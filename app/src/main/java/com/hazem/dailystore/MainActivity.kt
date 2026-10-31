@@ -925,6 +925,11 @@ class MainActivity : Activity() {
             14f, textColor, false, Gravity.RIGHT))
         list.addView(label("إجمالي المستحق الثابت: ${formatSypAmount(totalDueSyp)} ل.س",
             16f, green, true, Gravity.RIGHT).apply { setPadding(0, dp(4), 0, dp(14)) })
+        val unpricedCount = suppliers.sumOf { it.unpricedInvoiceCount }
+        if (unpricedCount > 0) list.addView(label(
+            "تنبيه: توجد $unpricedCount فاتورة قديمة بلا سعر صرف محفوظ. لم نُدخلها في إجمالي الليرة ولم نُعد تقييمها تلقائياً.",
+            12f, gold.toInt(), true, Gravity.RIGHT
+        ).apply { setPadding(0, dp(4), 0, dp(12)) })
         if (suppliers.isEmpty()) {
             list.addView(label("لا يوجد موردون مسجلون بعد.", 14f, mutedColor, false, Gravity.CENTER))
         }
@@ -1016,6 +1021,9 @@ class MainActivity : Activity() {
                     12f, textColor, false, Gravity.RIGHT))
                 card.addView(label("المتبقي الثابت: ${formatSypAmount(invoice.outstandingSypMinor)} ل.س",
                     13f, green, true, Gravity.RIGHT))
+                if (invoice.invoiceRateMilli <= 0L) card.addView(label(
+                    "فاتورة قديمة بلا سعر صرف محفوظ؛ يلزم مراجعتها يدوياً قبل الدفع.",
+                    11f, gold.toInt(), true, Gravity.RIGHT))
                 if (invoice.outstandingSypMinor > 0L && invoice.invoiceRateMilli > 0L &&
                     (invoice.invoiceStatus == "POSTED" || invoice.invoiceStatus == "PARTIALLY_PAID")) {
                     card.addView(smallButton("تسجيل دفعة") {
