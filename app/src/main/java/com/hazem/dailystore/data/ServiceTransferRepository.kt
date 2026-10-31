@@ -28,6 +28,7 @@ class ServiceTransferRepository(context:Context) {
     }
 
     fun ensureSystemAccounts() {
+        CashAccountRepository(appContext).ensureSystemCashAccounts()
         val db=database.writableDatabase
         db.beginTransaction()
         try {
@@ -119,11 +120,15 @@ class ServiceTransferRepository(context:Context) {
             require(primary!=accountId){"لا يمكن استخدام درج اليوم الرئيسي لشراء رصيد الخدمات"}
             val rollover=db.rawQuery("SELECT account_id FROM daily_supplier_rollovers WHERE operating_date=?",arrayOf(today())).use{if(it.moveToFirst())it.getString(0)else null}
             require(rollover!=accountId){"لا يمكن استخدام صندوق النقد المدور للموردين لشراء رصيد الخدمات"}
+            val supplierRole=db.rawQuery("SELECT 1 FROM system_cash_account_roles WHERE role_key='SUPPLIER_ROLLOVER' AND account_id=?",arrayOf(accountId)).use{it.moveToFirst()}
+            require(!supplierRole){"هذا الصندوق مخصص للنقد المدور للبضاعة"}
             val old=rechargeAccountId()
             val now=stamp()
             val values=ContentValues().apply{put("setting_key","service_recharge_cash_account_id");put("setting_value",accountId);put("updated_at",now)}
             if(old==null)db.insertOrThrow("app_settings",null,values) else db.update("app_settings",values,"setting_key='service_recharge_cash_account_id'",null)
             audit(db,actor,"SET_SERVICE_RECHARGE_CASH_ACCOUNT",accountId,old?.let{"{\"account_id\":\"$it\"}" },"{\"account_id\":\"$accountId\"}",now)
+            val role=ContentValues().apply{put("role_key","SERVICE_RECHARGE");put("account_id",accountId);put("linked_at",now)}
+            db.insertWithOnConflict("system_cash_account_roles",null,role,SQLiteDatabase.CONFLICT_REPLACE)
             db.setTransactionSuccessful()
         } finally {db.endTransaction()}
     }
