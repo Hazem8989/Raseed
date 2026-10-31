@@ -1557,6 +1557,7 @@ class MainActivity : Activity() {
         content.addView(amount, fieldParams(dp(48), dp(8)))
         content.addView(reference, fieldParams(dp(48), dp(8)))
         refreshAccounts()
+        val operationId = UUID.randomUUID().toString()
         val dialog = AlertDialog.Builder(this).setTitle("إدارة الأرصدة اليومية").setView(content)
             .setNegativeButton("إلغاء", null).setPositiveButton("تنفيذ", null).create()
         dialog.setOnShowListener {
@@ -1575,10 +1576,10 @@ class MainActivity : Activity() {
                             val result = repo.setSupplierRollover(actor, selected.id, value, note)
                             Toast.makeText(this, "تم تحديد النقد المدور. المتاح: " + formatSypAmount(result.availableMinor) + " ل.س", Toast.LENGTH_LONG).show()
                         }
-                        1 -> repo.addPersonalWithdrawal(actor, selected.id, value, UUID.randomUUID().toString(), note)
+                        1 -> repo.addPersonalWithdrawal(actor, selected.id, value, operationId, note)
                         2 -> repo.setWalletOpening(actor, selected.id, value, note)
-                        3 -> repo.addWalletTopUp(actor, selected.id, value, UUID.randomUUID().toString(), note, note)
-                        4 -> repo.transferWalletToDrawer(actor, selected.id, value, UUID.randomUUID().toString(), note, note)
+                        3 -> repo.addWalletTopUp(actor, selected.id, value, operationId, note, note)
+                        4 -> repo.transferWalletToDrawer(actor, selected.id, value, operationId, note, note)
                     }
                     dialog.dismiss()
                     Toast.makeText(this, "تم تسجيل العملية في السجل المالي", Toast.LENGTH_LONG).show()
