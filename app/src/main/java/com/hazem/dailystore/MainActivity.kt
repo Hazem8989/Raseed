@@ -1797,6 +1797,15 @@ class MainActivity : Activity() {
         val body = ScrollView(this).apply { isFillViewport = true }
         val list = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(dp(16), dp(14), dp(16), dp(24)) }
         list.addView(label("التاريخ: " + report.operatingDate, 13f, mutedColor, false, Gravity.RIGHT))
+        val serviceDaily = ServiceTransferRepository(this).dailySummary(report.operatingDate)
+        if (serviceDaily.isNotEmpty()) {
+            list.addView(sectionHeading("تحويلات الرصيد – تفصيل اليوم"))
+            serviceDaily.forEach { d ->
+                list.addView(label(d.serviceName+": المقبوض "+formatSypAmount(d.customerReceiptsMinor)+" ل.س • الربح "+formatSypAmount(d.profitMinor)+" ل.س • رسوم الشركة "+formatSypAmount(d.providerFeeMinor)+" ل.س",12f,textColor,false,Gravity.RIGHT).apply{setPadding(0,dp(3),0,dp(3))})
+                list.addView(label("الرصيد المستهلك "+formatSypAmount(d.deliveredMinor)+" ل.س • يخصص لإعادة التعبئة تقريباً "+formatSypAmount(d.rechargeReserveMinor)+" ل.س",12f,green,true,Gravity.RIGHT).apply{setPadding(0,dp(2),0,dp(5))})
+            }
+            list.addView(label("مبلغ إعادة التعبئة تقديري ولا يُخصم تلقائياً. يشمل 2% كلفة تعبئة سيرياتيل، ولا تضاف هذه الكلفة لشام كاش.",11f,mutedColor,false,Gravity.RIGHT).apply{setPadding(0,dp(2),0,dp(8))})
+        }
         val electronicText = if (report.electronicReceiptsByCurrency.isEmpty()) "لا توجد مقبوضات إلكترونية" else
             report.electronicReceiptsByCurrency.entries.joinToString(" • ") { formatAccountBalance(it.value, it.key) }
         val liquidatableText = if (report.liquidatableElectronicReceiptsByCurrency.isEmpty()) "لا يوجد مبلغ إلكتروني متبقٍ" else
