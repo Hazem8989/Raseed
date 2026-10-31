@@ -1659,8 +1659,22 @@ class MainActivity : Activity() {
             card.addView(label(if (account.isActive) "نشط" else "موقوف", 11f,
                 if (account.isActive) green else mutedColor, false, Gravity.RIGHT))
             val primaryDrawer = repository.currentDayPrimaryDrawer()
+            val rechargeAccountId = ServiceTransferRepository(this).rechargeAccountId()
             if (primaryDrawer?.id == account.id) card.addView(label("الدرج النقدي الرئيسي لليوم", 12f, green, true, Gravity.RIGHT)
                 .apply { setPadding(0, dp(4), 0, dp(2)) })
+            if (rechargeAccountId == account.id) card.addView(label("صندوق شراء رصيد الخدمات الموحد", 12f, green, true, Gravity.RIGHT)
+                .apply { setPadding(0, dp(4), 0, dp(2)) })
+            if (isManager() && account.isActive && account.accountType == "CASH_BOX" && account.currencyCode == "SYP") {
+                card.addView(smallButton("تعيين كصندوق شراء رصيد الخدمات") {
+                    try {
+                        ServiceTransferRepository(this).setRechargeAccount(currentUserId ?: error("جلسة المدير غير صالحة"), account.id)
+                        Toast.makeText(this, "تم تعيين صندوق شراء رصيد الخدمات", Toast.LENGTH_LONG).show()
+                        showCashAccounts()
+                    } catch (e: Exception) {
+                        Toast.makeText(this, e.message ?: "تعذر تعيين صندوق شراء الرصيد", Toast.LENGTH_LONG).show()
+                    }
+                }, fieldParams(dp(42), dp(4)))
+            }
             if (isManager() && account.isActive && account.accountType == "CASH_BOX" && account.currencyCode == "SYP") {
                 card.addView(smallButton("تعيين كدرج اليوم الرئيسي") {
                     try {
@@ -1925,7 +1939,8 @@ class MainActivity : Activity() {
     private fun showServiceRechargeDialog() {
         if(!isManager())return
         val repo=ServiceTransferRepository(this)
-        val sources=CashAccountRepository(this).listActive().filter{it.accountType=="CASH_BOX"&&it.currencyCode=="SYP"}
+        val designated=repo.rechargeAccountId()
+        val sources=CashAccountRepository(this).listActive().filter{it.id==designated&&it.accountType=="CASH_BOX"&&it.currencyCode=="SYP"}
         if(sources.isEmpty()){AlertDialog.Builder(this).setMessage("أنشئ صندوقاً نقدياً مستقلاً بالليرة السورية مخصصاً لشراء رصيد الخدمات أولاً.").setPositiveButton("فتح الصناديق والمحافظ"){_,_->showCashAccounts()}.show();return}
         val form=LinearLayout(this).apply{orientation=LinearLayout.VERTICAL;setPadding(dp(18),dp(8),dp(18),dp(4))}
         val service=Spinner(this).apply{adapter=ArrayAdapter(this@MainActivity,android.R.layout.simple_spinner_dropdown_item,listOf("رصيد سيرياتيل المشترك","رصيد شام كاش"))}
