@@ -133,6 +133,7 @@ class DailyBalanceRepository(context:Context) {
             val old=db.rawQuery("SELECT account_id,amount_minor,transaction_type FROM cash_transactions WHERE operation_id=?",arrayOf(operationId)).use { if(it.moveToFirst())Triple(it.getString(0),it.getLong(1),it.getString(2))else null }
             if(old!=null){require(old.first==accountId&&old.second==amount&&old.third=="PERSONAL_WITHDRAWAL"){"معرّف العملية مستخدم لبيانات مختلفة"};db.setTransactionSuccessful();return}
             require(r.availableMinor>=amount){"المتاح من النقد المدور لا يكفي. المتاح: "+r.availableMinor+" ل.س"}
+            require(balance(db,accountId)>=amount){"الرصيد الفعلي في صندوق الموردين لا يكفي للمسحوب الشخصي"}
             val now=stamp();movement(db,accountId,"OUT",amount,"SYP","PERSONAL_WITHDRAWAL","PERSONAL_WITHDRAWAL",operationId,operationId,actor,note?:"مسحوبات شخصية",now)
             audit(db,actor,"PERSONAL_WITHDRAWAL","CASH_ACCOUNT",accountId,null,"{\"amount_minor\":"+amount+",\"note\":\""+esc(note.orEmpty())+"\"}",now)
             db.setTransactionSuccessful()
