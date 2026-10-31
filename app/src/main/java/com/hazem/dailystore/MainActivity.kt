@@ -1537,6 +1537,7 @@ class MainActivity : Activity() {
         action.adapter = ArrayAdapter(this, android.R.layout.simple_spinner_dropdown_item, actions)
         val account = Spinner(this)
         val accountHint = label("", 11f, mutedColor, false, Gravity.RIGHT)
+        var dailyOperationsDialog: AlertDialog? = null
         var availableAccounts: List<CashAccountSummary> = emptyList()
         fun refreshAccounts() {
             val selected = action.selectedItemPosition.coerceAtLeast(0)
@@ -1579,7 +1580,7 @@ class MainActivity : Activity() {
         content.addView(account, fieldParams(dp(48), dp(8)))
         content.addView(accountHint, fieldParams(-2, dp(2)))
         content.addView(smallButton("إضافة صندوق أو محفظة") {
-            dialog.dismiss()
+            dailyOperationsDialog?.dismiss()
             showCreateCashAccountDialog()
         }, fieldParams(dp(42), dp(4)))
         content.addView(amount, fieldParams(dp(48), dp(8)))
@@ -1588,6 +1589,7 @@ class MainActivity : Activity() {
         val operationId = UUID.randomUUID().toString()
         val dialog = AlertDialog.Builder(this).setTitle("إدارة الأرصدة اليومية").setView(content)
             .setNegativeButton("إلغاء", null).setPositiveButton("تنفيذ", null).create()
+        dailyOperationsDialog = dialog
         dialog.setOnShowListener {
             action.post { refreshAccounts() }
             dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener {
