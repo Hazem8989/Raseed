@@ -1534,9 +1534,10 @@ class MainActivity : Activity() {
         fun refreshAccounts() {
             val selected = action.selectedItemPosition
             val options = when (selected) {
-                0 -> all.filter { it.accountType == "CASH_BOX" && it.currencyCode == "SYP" }
-                1 -> all.filter { it.accountType == "CASH_BOX" && it.currencyCode == "SYP" }
-                else -> all.filter { it.accountType == "WALLET" }
+                0 -> all.filter { it.accountType == "CASH_BOX" && it.currencyCode == "SYP" && it.id != CashAccountRepository(this).currentDayPrimaryDrawer()?.id }
+                1 -> all.filter { it.accountType == "CASH_BOX" && it.currencyCode == "SYP" && it.id == repo.currentSupplierRollover()?.accountId }
+                2, 3 -> all.filter { it.accountType == "WALLET" }
+                else -> all.filter { it.accountType == "WALLET" && it.currencyCode == "SYP" }
             }
             account.tag = options
             account.adapter = ArrayAdapter(this, android.R.layout.simple_spinner_dropdown_item,
@@ -1610,8 +1611,9 @@ class MainActivity : Activity() {
             val card = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(dp(12), dp(10), dp(12), dp(10)); background = cardBackground() }
             card.addView(label(a.accountName + " • " + a.currencyCode, 15f, green, true, Gravity.RIGHT))
             card.addView(label("رصيد أول اليوم: " + formatAccountBalance(a.openingMinor, a.currencyCode), 12f, textColor, false, Gravity.RIGHT))
-            card.addView(label("مبيعات اليوم – قبض إلكتروني: " + formatAccountBalance(a.salesReceiptsMinor, a.currencyCode), 12f, textColor, false, Gravity.RIGHT))
-            card.addView(label("تحصيل ديون – قبض إلكتروني: " + formatAccountBalance(a.debtCollectionsMinor, a.currencyCode), 12f, textColor, false, Gravity.RIGHT))
+            val channelLabel = if (a.accountType == "WALLET") "إلكتروني" else "نقدي"
+            card.addView(label("مبيعات اليوم – قبض " + channelLabel + ": " + formatAccountBalance(a.salesReceiptsMinor, a.currencyCode), 12f, textColor, false, Gravity.RIGHT))
+            card.addView(label("تحصيل ديون – قبض " + channelLabel + ": " + formatAccountBalance(a.debtCollectionsMinor, a.currencyCode), 12f, textColor, false, Gravity.RIGHT))
             card.addView(label("إجمالي المقبوضات الإلكترونية القابلة للتصريف: " + formatAccountBalance(a.electronicReceiptsMinor, a.currencyCode), 13f, green, true, Gravity.RIGHT))
             card.addView(label("إضافات أخرى: " + formatAccountBalance(a.otherInflowsMinor, a.currencyCode), 12f, textColor, false, Gravity.RIGHT))
             card.addView(label("دفعات الموردين: " + formatAccountBalance(a.supplierPaymentsMinor, a.currencyCode), 12f, textColor, false, Gravity.RIGHT))
