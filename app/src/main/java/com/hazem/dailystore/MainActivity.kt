@@ -811,7 +811,8 @@ class MainActivity : Activity() {
                         "العملاء والديون" -> showCustomers()
                         "الصناديق والمحافظ" -> showCashAccounts()
                         "تحويل رصيد" -> showServiceTransfers()
-                        "التقارير" -> showDailyCashReport()\n                        else -> Toast.makeText(this@MainActivity, "قسم $title سيُفعّل في مرحلته", Toast.LENGTH_SHORT).show()
+                        "التقارير" -> showDailyCashReport()
+                        else -> Toast.makeText(this@MainActivity, "قسم $title سيُفعّل في مرحلته", Toast.LENGTH_SHORT).show()
                     }
                 }
             }
