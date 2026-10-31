@@ -167,6 +167,13 @@ class PurchasePaymentRepository(context: Context) {
             require(account.currencyCode == "USD" || account.currencyCode == "SYP") {
                 "عملة الحساب غير مدعومة"
             }
+            if (account.accountType == "CASH_BOX" && account.currencyCode == "SYP") {
+                val date = SimpleDateFormat("yyyy-MM-dd", Locale.US).format(Date())
+                val rollover = db.rawQuery("SELECT allocated_minor FROM daily_supplier_rollovers WHERE operating_date=? AND account_id=?", arrayOf(date, cashAccountId)).use { if (it.moveToFirst()) it.getLong(0) else null }
+                require(rollover != null) { "يجب على المدير تحديد مبلغ النقد المدور لهذا الصندوق اليوم قبل دفع الموردين منه" }
+                val used = db.rawQuery("SELECT COALESCE(SUM(amount_minor),0) FROM cash_transactions WHERE account_id=? AND direction='OUT' AND transaction_type IN ('PURCHASE_PAYMENT','PERSONAL_WITHDRAWAL') AND COALESCE(operating_date,substr(created_at,1,10))=?", arrayOf(cashAccountId, date)).use { if (it.moveToFirst()) it.getLong(0) else 0L }
+                require(rollover - used >= amountMinor) { "المبلغ المتاح من النقد المدور لا يكفي لهذه الدفعة. المتاح: " + (rollover - used).coerceAtLeast(0L) + " ل.س" }
+            }
             val paymentRate=currentRate(db); val invoiceRate=invoice.exchangeRateMilli
             require(invoiceRate>0L) { "فاتورة الشراء لا تحتوي سعر صرف محفوظاً؛ لا يمكن تثبيت المتبقي السوري بأمان" }
             val amountSypEquivalent=when(account.currencyCode) {
@@ -195,6 +202,7 @@ class PurchasePaymentRepository(context: Context) {
                 put("source_type", "PURCHASE_INVOICE"); put("source_id", invoiceId)
                 put("operation_id", operationId)
                 put("description", cleanNote ?: "دفعة للمورد عن الفاتورة ${invoice.invoiceNumber}")
+                put("operating_date", SimpleDateFormat("yyyy-MM-dd", Locale.US).format(Date()))
                 put("created_at", now)
             }
             db.insertOrThrow("cash_transactions", null, cash)
