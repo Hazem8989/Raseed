@@ -273,7 +273,8 @@ class MainActivity : Activity() {
             return
         }
         val customers = CustomerRepository(this).listActive()
-        val accounts = CashAccountRepository(this).listActive()
+        val supplierRolloverAccountId = DailyBalanceRepository(this).currentSupplierRollover()?.accountId
+        val accounts = CashAccountRepository(this).listActive().filter { it.id != supplierRolloverAccountId }
         val totalUsd = cartTotalUsdCents()
         val content = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
