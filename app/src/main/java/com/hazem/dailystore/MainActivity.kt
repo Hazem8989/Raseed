@@ -811,7 +811,7 @@ class MainActivity : Activity() {
                         "العملاء والديون" -> showCustomers()
                         "الصناديق والمحافظ" -> showCashAccounts()
                         "تحويل رصيد" -> showServiceTransfers()
-                        "التقارير" -> showDailyCashReport()
+                        "التقارير" -> showGeneralReports()
                         else -> Toast.makeText(this@MainActivity, "قسم $title سيُفعّل في مرحلته", Toast.LENGTH_SHORT).show()
                     }
                 }
@@ -2037,6 +2037,89 @@ class MainActivity : Activity() {
         body.addView(list); page.addView(header, matchWidth()); page.addView(body, LinearLayout.LayoutParams(-1, 0, 1f)); setContentView(page)
     }
 
+
+    private fun showGeneralReports() {
+        markScreen("GENERAL_REPORTS")
+        val capital = InventoryValuationRepository(this).dailyCapital()
+        val rate = StoreRepository(this).getCurrentExchangeRateMilli()
+        val products = StoreRepository(this).listProducts().filter { it.tracksInventory }
+        val stockedProducts = products.count { it.stock > 0.0000001 }
+        val page = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setBackgroundColor(backgroundColor)
+        }
+        val header = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(dp(14), dp(10), dp(14), dp(10))
+            setBackgroundColor(Color.WHITE)
+        }
+        val back = Button(this).apply {
+            text = "‹"
+            textSize = 25f
+            isAllCaps = false
+            setTextColor(green)
+            setBackgroundColor(Color.TRANSPARENT)
+            setOnClickListener { showPointOfSale() }
+        }
+        header.addView(back, LinearLayout.LayoutParams(dp(48), dp(48)))
+        header.addView(label("الكشوفات العامة", 19f, green, true, Gravity.CENTER),
+            LinearLayout.LayoutParams(0, -2, 1f))
+        val body = ScrollView(this).apply { isFillViewport = true }
+        val content = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(16), dp(14), dp(16), dp(24))
+        }
+        content.addView(label("رأس المال الكلي للمخزون", 22f, green, true, Gravity.RIGHT))
+        content.addView(label(
+            "التقييم المحاسبي للمخزون المتبقي وفق طريقة FIFO، على أساس تكلفة الشراء بالدولار المرجعي الثابت، وليس سعر البيع.",
+            12f, mutedColor, false, Gravity.RIGHT
+        ).apply { setPadding(0, dp(4), 0, dp(12)) })
+        val capitalCard = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(14), dp(14), dp(14), dp(14))
+            background = cardBackground()
+        }
+        capitalCard.addView(label("قيمة المخزون المقيم حالياً", 13f, mutedColor, false, Gravity.RIGHT))
+        capitalCard.addView(label(
+            formatDualMoney(capital.current.totalCostUsdCents, rate),
+            21f, green, true, Gravity.RIGHT
+        ).apply { setPadding(0, dp(5), 0, dp(8)) })
+        val sign = if (capital.changeUsdCents >= 0L) "+" else "−"
+        val absoluteChange = if (capital.changeUsdCents == Long.MIN_VALUE) Long.MAX_VALUE
+            else kotlin.math.abs(capital.changeUsdCents)
+        capitalCard.addView(label(
+            "التغير عن إغلاق اليوم السابق: $sign${formatDualMoney(absoluteChange, rate)}",
+            14f, if (capital.changeUsdCents >= 0L) green else textColor, true, Gravity.RIGHT
+        ))
+        capitalCard.addView(label("آخر احتساب: ${capital.current.asOfLabel}", 10f, mutedColor, false, Gravity.RIGHT)
+            .apply { setPadding(0, dp(5), 0, 0) })
+        content.addView(capitalCard, fieldParams(-2, dp(10)))
+        if (!capital.current.isComplete) {
+            content.addView(label(
+                "تنبيه: لم نحتسب قيمة الأصناف التي تحتوي على كميات بلا تكلفة مسجلة أو فروقات بين سجل الحركات ورصيد المخزون. عدد الأصناف المتأثرة: ${capital.current.unvaluedProductCount}. الرقم أعلاه هو رأس المال المؤكد فقط، ولا يخفي أي نقص في البيانات.",
+                12f, Color.rgb(170, 80, 45), true, Gravity.RIGHT
+            ).apply { setPadding(0, dp(2), 0, dp(12)) })
+        } else {
+            content.addView(label(
+                "حالة التقييم: مكتمل؛ الكميات مطابقة لسجل الحركات، وتم احتساب الطبقات المتبقية وفق FIFO.",
+                12f, green, true, Gravity.RIGHT
+            ).apply { setPadding(0, dp(2), 0, dp(12)) })
+        }
+        content.addView(sectionHeading("ملخص المخزون"))
+        content.addView(label("عدد الأصناف التي تتبع المخزون: ${products.size}", 15f, textColor, true, Gravity.RIGHT)
+            .apply { setPadding(0, dp(5), 0, dp(3)) })
+        content.addView(label("عدد الأصناف ذات رصيد موجب: $stockedProducts", 14f, textColor, false, Gravity.RIGHT))
+        content.addView(label(
+            "ملاحظة: لا نجمع كميات القطعة والكيلوغرام والطرد في رقم واحد لاختلاف وحدات القياس. رأس المال محسوب بالقيمة المالية الموحدة بالدولار المرجعي.",
+            11f, mutedColor, false, Gravity.RIGHT
+        ).apply { setPadding(0, dp(10), 0, dp(4)) })
+        content.addView(smallButton("فتح الكشف المالي اليومي") { showDailyCashReport() }, fieldParams(dp(46), dp(12)))
+        body.addView(content)
+        page.addView(header, matchWidth())
+        page.addView(body, LinearLayout.LayoutParams(-1, 0, 1f))
+        setContentView(page)
+    }
 
     private fun showServiceTransfers() {
         markScreen("SERVICE_TRANSFERS")
