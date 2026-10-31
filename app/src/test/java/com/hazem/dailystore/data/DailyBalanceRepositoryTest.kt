@@ -54,12 +54,11 @@ class DailyBalanceRepositoryTest {
         val wallet = accounts.create("محفظة تحويل " + UUID.randomUUID(), "WALLET", "SYP", 100_000L)
         insertMovement(wallet.id, "SALE_RECEIPT", 40_000L, "sale-before-transfer")
         insertMovement(wallet.id, "CUSTOMER_CREDIT_COLLECTION", 20_000L, "debt-before-transfer")
-        accounts.setCurrentDayPrimaryDrawer("ADMIN", actorId, drawer.id)
-        val first = daily.transferWalletToDrawer(actorId, wallet.id, 25_000L, "transfer-" + UUID.randomUUID())
+        val first = daily.transferWalletToDrawer(actorId, wallet.id, drawer.id, 25_000L, "transfer-" + UUID.randomUUID())
         assertFalse(first.replayed)
         assertEquals(135_000L, accounts.balance(wallet.id))
         assertEquals(25_000L, accounts.balance(drawer.id))
-        val replay = daily.transferWalletToDrawer(actorId, wallet.id, 25_000L,
+        val replay = daily.transferWalletToDrawer(actorId, wallet.id, drawer.id, 25_000L,
             database.readableDatabase.rawQuery("SELECT operation_id FROM cash_account_transfers WHERE id=?", arrayOf(first.transferId)).use {
                 it.moveToFirst(); it.getString(0)
             })
