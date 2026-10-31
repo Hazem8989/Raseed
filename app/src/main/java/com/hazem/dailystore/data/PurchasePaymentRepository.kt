@@ -362,8 +362,8 @@ class PurchasePaymentRepository(context: Context) {
     }
 
     private fun jsonString(value: String): String =
-        "\"" + value.replace("\\\\", "\\\\\\\\").replace("\"", "\\\\"")
-            .replace("\\n", "\\\\n").replace("\\r", "\\\\r") + "\""
+        "\"" + value.replace("\\", "\\\\").replace("\"", "\\\"")
+            .replace("\n", "\\n").replace("\r", "\\r") + "\""
 
     private fun paidUsdCents(db: SQLiteDatabase, invoiceId: String): Long {
         var total = 0L
