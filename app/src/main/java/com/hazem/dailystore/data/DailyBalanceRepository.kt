@@ -165,6 +165,8 @@ class DailyBalanceRepository(context:Context) {
             require(source.type=="CASH_BOX"&&source.currency=="SYP"&&source.active) { "مصدر التمويل يجب أن يكون صندوقاً نقدياً نشطاً بالليرة السورية" }
             val target=account(db,walletId)
             require(target.type=="WALLET"&&target.currency=="SYP"&&target.active) { "وجهة التحويل يجب أن تكون محفظة نشطة بالليرة السورية" }
+            val isServiceWallet=db.rawQuery("SELECT 1 FROM service_wallet_account_links WHERE account_id=?",arrayOf(walletId)).use{it.moveToFirst()}
+            require(!isServiceWallet) { "محافظ تشغيل سيرياتيل وشام كاش تُغذى حصراً من صندوق شراء رصيد الخدمات عبر عملية التعبئة المخصصة" }
             val rechargeId=db.rawQuery("SELECT setting_value FROM app_settings WHERE setting_key='service_recharge_cash_account_id'",null).use { if(it.moveToFirst())it.getString(0)else null }
             require(sourceAccountId!=rechargeId) { "استخدم عملية شراء رصيد الخدمات المخصصة لتمويل محفظة الخدمة" }
             val supplierId=db.rawQuery("SELECT account_id FROM daily_supplier_rollovers WHERE operating_date=?",arrayOf(today())).use { if(it.moveToFirst())it.getString(0)else null }
