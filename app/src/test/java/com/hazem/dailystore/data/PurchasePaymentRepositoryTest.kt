@@ -204,6 +204,8 @@ class PurchasePaymentRepositoryTest {
 
         assertEquals(3500L, corrected.paidUsdCents)
         assertEquals(6500L, corrected.outstandingUsdCents)
+        assertEquals(350000L, corrected.paidSypMinor)
+        assertEquals(650000L, corrected.outstandingSypMinor)
         assertEquals("PARTIALLY_PAID", corrected.paymentStatus)
         assertEquals(50000L, cashAccounts.balance(accountId))
         assertEquals(6500L, cashAccounts.balance(replacement.id))
