@@ -84,8 +84,8 @@ class ServiceTransferRepositoryTest {
 
     @Test fun rechargeDeductsFromElectronicProceedsAndAppliesTwoPercentOnlyToSyriatel() {
         val source = accounts.create("محفظة تمويل " + UUID.randomUUID(), "WALLET", "SYP", 100_000L)
-        val syriatelFee = try { repo.recharge(actor, ServiceTransferRepository.SYRIATEL_SHARED, source.id,
-            50_000L, "recharge-syr-" + UUID.randomUUID()) } catch (e: Exception) { System.err.println(e.stackTraceToString()); throw e }
+        val syriatelFee = repo.recharge(actor, ServiceTransferRepository.SYRIATEL_SHARED, source.id,
+            50_000L, "recharge-syr-" + UUID.randomUUID())
         assertEquals(1_000L, syriatelFee)
         assertEquals(49_000L, accounts.balance(source.id))
         assertEquals(50_000L, repo.listWallets().single { it.serviceKey == ServiceTransferRepository.SYRIATEL_SHARED }.balanceMinor)
