@@ -104,6 +104,49 @@ class DailyBalanceRepository(context:Context) {
         } finally {db.endTransaction()}
     }
 
+    fun transferCashBetweenBoxes(actor:String,sourceAccountId:String,destinationAccountId:String,amount:Long,operationId:String,reference:String?=null,note:String?=null):AccountTransferResult {
+        require(amount>0L&&operationId.isNotBlank()) { "بيانات التحويل غير مكتملة" }
+        require(sourceAccountId.isNotBlank()&&destinationAccountId.isNotBlank()&&sourceAccountId!=destinationAccountId) { "اختر صندوقين مختلفين" }
+        val db=database.writableDatabase;manager(db,actor);db.beginTransaction()
+        try {
+            val payload=hash(sourceAccountId+"|"+destinationAccountId+"|"+amount+"|"+reference.orEmpty()+"|"+note.orEmpty())
+            val old=db.rawQuery("SELECT id,source_account_id,destination_account_id,amount_minor,payload_hash FROM cash_account_transfers WHERE operation_id=?",arrayOf(operationId)).use {
+                if(it.moveToFirst())arrayOf(it.getString(0),it.getString(1),it.getString(2),it.getLong(3).toString(),it.getString(4))else null
+            }
+            if(old!=null) {
+                require(old[1]==sourceAccountId&&old[2]==destinationAccountId&&old[3]==amount.toString()&&old[4]==payload) { "معرّف التحويل مستخدم لبيانات مختلفة" }
+                db.setTransactionSuccessful()
+                return AccountTransferResult(old[0]!!,true)
+            }
+            val source=account(db,sourceAccountId)
+            require(source.type=="CASH_BOX"&&source.currency=="SYP"&&source.active) { "مصدر التحويل يجب أن يكون صندوقاً نقدياً نشطاً بالليرة السورية" }
+            val target=account(db,destinationAccountId)
+            require(target.type=="CASH_BOX"&&target.currency=="SYP"&&target.active) { "وجهة التحويل يجب أن تكون صندوقاً نقدياً نشطاً بالليرة السورية" }
+            val rechargeId=db.rawQuery("SELECT setting_value FROM app_settings WHERE setting_key='service_recharge_cash_account_id'",null).use { if(it.moveToFirst())it.getString(0)else null }
+            require(sourceAccountId!=rechargeId) { "صندوق شراء رصيد الخدمات مخصص لتعبئة رصيد الخدمات فقط" }
+            val supplierId=db.rawQuery("SELECT account_id FROM daily_supplier_rollovers WHERE operating_date=?",arrayOf(today())).use { if(it.moveToFirst())it.getString(0)else null }
+            require(sourceAccountId!=supplierId) { "صندوق النقد المدور للموردين مخصص لدفعات الموردين والمسحوبات الشخصية فقط" }
+            val supplierRole=db.rawQuery("SELECT 1 FROM system_cash_account_roles WHERE role_key='SUPPLIER_ROLLOVER' AND account_id=?",arrayOf(sourceAccountId)).use{it.moveToFirst()}
+            require(!supplierRole) { "صندوق النقد المدور للبضاعة مخصص لدفعات الموردين والمسحوبات الشخصية فقط" }
+            require(balance(db,sourceAccountId)>=amount) { "رصيد صندوق المصدر غير كافٍ" }
+            val id=UUID.randomUUID().toString();val now=stamp()
+            val v=ContentValues().apply {
+                put("id",id);put("operation_id",operationId);put("source_account_id",sourceAccountId);put("destination_account_id",destinationAccountId)
+                put("amount_minor",amount);put("currency_code","SYP");put("reference",reference);put("note",note)
+                put("payload_hash",payload);put("created_by",actor);put("created_at",now)
+            }
+            db.insertOrThrow("cash_account_transfers",null,v)
+            movement(db,sourceAccountId,"OUT",amount,"SYP","ACCOUNT_TRANSFER_OUT","ACCOUNT_TRANSFER",id,operationId+":OUT",actor,
+                "تحويل نقدية إلى "+target.name,now)
+            movement(db,destinationAccountId,"IN",amount,"SYP","ACCOUNT_TRANSFER_IN","ACCOUNT_TRANSFER",id,operationId+":IN",actor,
+                "تحويل نقدية من "+source.name,now)
+            audit(db,actor,"CASH_BOX_TO_CASH_BOX_TRANSFER","CASH_ACCOUNT_TRANSFER",id,null,
+                "{\"source_account_id\":\""+esc(sourceAccountId)+"\",\"destination_account_id\":\""+esc(destinationAccountId)+"\",\"amount_minor\":"+amount+"}",now)
+            db.setTransactionSuccessful()
+            return AccountTransferResult(id,false)
+        } finally { db.endTransaction() }
+    }
+
     fun transferCashToWallet(actor:String,sourceAccountId:String,walletId:String,amount:Long,operationId:String,reference:String?=null,note:String?=null):AccountTransferResult {
         require(amount>0L&&operationId.isNotBlank()) { "بيانات التحويل غير مكتملة" }
         require(sourceAccountId.isNotBlank()&&walletId.isNotBlank()&&sourceAccountId!=walletId) { "اختر صندوقاً ومحفظة مختلفين" }
