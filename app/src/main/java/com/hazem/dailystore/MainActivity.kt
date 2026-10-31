@@ -1449,7 +1449,7 @@ class MainActivity : Activity() {
             setPadding(dp(16), dp(16), dp(16), dp(24))
         }
         content.addView(label("الحسابات المالية", 22f, green, true, Gravity.RIGHT))
-        content.addView(label("كل حساب يحتفظ بعملة مستقلة، ويُحسب رصيده من الرصيد الافتتاحي والحركات المسجلة.",
+        content.addView(label("كل حساب يحتفظ بعملة مستقلة. عيّن درجاً نقدياً رئيسياً لليوم؛ تحصيلات الديون النقدية تذهب إليه حصراً، وتبقى صناديق الموردين المدورة منفصلة.",
             13f, mutedColor, false, Gravity.RIGHT).apply { setPadding(0, dp(5), 0, dp(12)) })
         val add = Button(this).apply {
             text = "+ إضافة صندوق أو محفظة"; isAllCaps = false
@@ -1470,6 +1470,23 @@ class MainActivity : Activity() {
                 15f, textColor, true, Gravity.RIGHT))
             card.addView(label(if (account.isActive) "نشط" else "موقوف", 11f,
                 if (account.isActive) green else mutedColor, false, Gravity.RIGHT))
+            val primaryDrawer = repository.currentDayPrimaryDrawer()
+            if (primaryDrawer?.id == account.id) card.addView(label("الدرج النقدي الرئيسي لليوم", 12f, green, true, Gravity.RIGHT)
+                .apply { setPadding(0, dp(4), 0, dp(2)) })
+            if (isManager() && account.isActive && account.accountType == "CASH_BOX" && account.currencyCode == "SYP") {
+                card.addView(smallButton("تعيين كدرج اليوم الرئيسي") {
+                    try {
+                        repository.setCurrentDayPrimaryDrawer(
+                            currentUserRole, currentUserId ?: error("جلسة المدير غير صالحة"), account.id
+                        )
+                        Toast.makeText(this, "تم تعيين " + account.name +
+                            " كدرج اليوم الرئيسي. صندوق الموردين المدور لم يتغير.", Toast.LENGTH_LONG).show()
+                        showCashAccounts()
+                    } catch (e: Exception) {
+                        Toast.makeText(this, e.message ?: "تعذر تعيين الدرج اليومي", Toast.LENGTH_LONG).show()
+                    }
+                }, fieldParams(dp(42), dp(4)))
+            }
             if (isManager()) card.addView(smallButton("تعديل الحساب") {
                 showEditCashAccountDialog(account) { showCashAccounts() }
             }, fieldParams(dp(42), dp(4)))
