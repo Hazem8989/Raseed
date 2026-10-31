@@ -348,7 +348,7 @@ class PurchasePaymentRepository(context: Context) {
     private data class ExistingSupplierPayment(
         val invoiceId:String,val amountMinor:Long,val currencyCode:String,val exchangeRateMilli:Long?,
         val cashTransactionId:String,val cashAccountId:String,val note:String?,val invoiceTotalUsdCents:Long,
-        val invoiceStatus:String,val invoiceNumber:String
+        val invoiceStatus:String,val invoiceNumber:String,val invoiceRateMilli:Long
     )
     private data class SupplierPaymentAccount(
         val name:String,val currencyCode:String,val openingBalanceMinor:Long
