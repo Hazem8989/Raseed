@@ -38,6 +38,7 @@ import com.hazem.dailystore.data.CustomerPaymentRepository
 import com.hazem.dailystore.data.CashAccountRepository
 import com.hazem.dailystore.data.CashAccountSummary
 import com.hazem.dailystore.data.DailyBalanceRepository
+import com.hazem.dailystore.data.ServiceTransferRepository
 import com.hazem.dailystore.data.PurchasePaymentRepository
 import com.hazem.dailystore.data.PurchasePaymentRecord
 import com.hazem.dailystore.data.PurchaseInvoicePaymentSummary
@@ -579,6 +580,7 @@ class MainActivity : Activity() {
             "المشتريات" to "فواتير الشراء والموردون",
             "العملاء والديون" to "ملفات العملاء والأرصدة",
             "الصناديق والمحافظ" to "الحركة النقدية والحسابات",
+            "تحويل رصيد" to "سيرياتيل العادي وكاش وشام كاش",
             "التقارير" to "المبيعات والأرباح والمخزون"
         )
         lateinit var popup: PopupWindow
@@ -596,6 +598,7 @@ class MainActivity : Activity() {
                         "المشتريات" -> showPurchases()
                         "العملاء والديون" -> showCustomers()
                         "الصناديق والمحافظ" -> showCashAccounts()
+                        "تحويل رصيد" -> showServiceTransfers()
                         else -> Toast.makeText(this@MainActivity, "قسم $title سيُفعّل في مرحلته", Toast.LENGTH_SHORT).show()
                     }
                 }
@@ -1646,6 +1649,150 @@ class MainActivity : Activity() {
         if (transactions.isEmpty()) list.addView(label("لا توجد حركات مسجلة اليوم.", 12f, mutedColor, false, Gravity.CENTER))
         else transactions.forEach { list.addView(label(it, 11f, textColor, false, Gravity.RIGHT).apply { setPadding(0, dp(4), 0, dp(4)) }) }
         body.addView(list); page.addView(header, matchWidth()); page.addView(body, LinearLayout.LayoutParams(-1, 0, 1f)); setContentView(page)
+    }
+
+
+    private fun showServiceTransfers() {
+        val repo = ServiceTransferRepository(this)
+        val page = LinearLayout(this).apply { orientation=LinearLayout.VERTICAL; setBackgroundColor(backgroundColor) }
+        val header = LinearLayout(this).apply { orientation=LinearLayout.HORIZONTAL; gravity=Gravity.CENTER_VERTICAL; setPadding(dp(14),dp(10),dp(14),dp(10)); setBackgroundColor(Color.WHITE) }
+        val back = Button(this).apply { text="‹"; textSize=25f; isAllCaps=false; setTextColor(green); setBackgroundColor(Color.TRANSPARENT); setOnClickListener { showPointOfSale() } }
+        header.addView(back,LinearLayout.LayoutParams(dp(48),dp(48)))
+        header.addView(label("تحويل رصيد",19f,green,true,Gravity.CENTER),LinearLayout.LayoutParams(0,-2,1f))
+        val body=ScrollView(this).apply{isFillViewport=true}
+        val content=LinearLayout(this).apply{orientation=LinearLayout.VERTICAL;setPadding(dp(16),dp(14),dp(16),dp(24))}
+        content.addView(label("أرصدة تشغيل خدمات التحويل",21f,green,true,Gravity.RIGHT))
+        content.addView(label("رصيد سيرياتيل مشترك للتحويل العادي وسيرياتيل كاش، ورصيد شام كاش مستقل. هذه الأرصدة منفصلة عن محافظ قبض أموال الزبائن.",13f,mutedColor,false,Gravity.RIGHT).apply{setPadding(0,dp(5),0,dp(12))})
+        repo.listWallets().forEach { w ->
+            val card=LinearLayout(this).apply{orientation=LinearLayout.VERTICAL;setPadding(dp(14),dp(12),dp(14),dp(12));background=cardBackground()}
+            card.addView(label(w.name,16f,green,true,Gravity.RIGHT))
+            card.addView(label("الرصيد المتاح: "+formatSypAmount(w.balanceMinor)+" ل.س",17f,textColor,true,Gravity.RIGHT).apply{setPadding(0,dp(5),0,dp(2))})
+            content.addView(card,fieldParams(-2,dp(8)))
+        }
+        if(isManager()) {
+            content.addView(smallButton("تسجيل الرصيد الافتتاحي للخدمة"){showServiceOpeningDialog()},fieldParams(dp(46),dp(7)))
+            content.addView(smallButton("شراء / شحن رصيد الخدمة"){showServiceRechargeDialog()},fieldParams(dp(46),dp(12)))
+        }
+        content.addView(Button(this).apply{text="＋ تنفيذ تحويل للزبون";isAllCaps=false;setTextColor(Color.WHITE);setBackgroundColor(green);setOnClickListener{showServiceTransferDialog()}},fieldParams(dp(52),dp(12)))
+        content.addView(sectionHeading("سجل تحويلات الرصيد"))
+        val rows=repo.listTransfers(80)
+        if(rows.isEmpty()) content.addView(label("لا توجد تحويلات مسجلة حتى الآن.",13f,mutedColor,false,Gravity.CENTER).apply{setPadding(0,dp(18),0,dp(18))})
+        rows.forEach { r ->
+            val card=LinearLayout(this).apply{orientation=LinearLayout.VERTICAL;setPadding(dp(12),dp(10),dp(12),dp(10));background=cardBackground()}
+            card.addView(label(r.serviceName+" • "+if(r.status=="REVERSED")"معكوسة" else "منفذة",15f,green,true,Gravity.RIGHT))
+            card.addView(label("الواصل للزبون: "+formatSypAmount(r.deliveredMinor)+" ل.س",13f,textColor,false,Gravity.RIGHT))
+            card.addView(label("ربح المتجر: "+formatSypAmount(r.profitMinor)+" • رسوم الشركة: "+formatSypAmount(r.providerFeeMinor)+" ل.س",12f,mutedColor,false,Gravity.RIGHT))
+            card.addView(label("المقبوض: "+formatSypAmount(r.customerChargeMinor)+" ل.س • "+r.receiptAccountName+(if(r.receiptChannel=="ELECTRONIC")" (إلكتروني)" else " (نقدي)"),13f,green,true,Gravity.RIGHT))
+            card.addView(label(r.createdAt.replace('T',' ').replace("Z",""),10f,mutedColor,false,Gravity.RIGHT))
+            content.addView(card,fieldParams(-2,dp(8)))
+        }
+        body.addView(content);page.addView(header,matchWidth());page.addView(body,LinearLayout.LayoutParams(-1,0,1f));setContentView(page)
+    }
+
+    private fun showServiceOpeningDialog() {
+        if(!isManager())return
+        val repo=ServiceTransferRepository(this)
+        val form=LinearLayout(this).apply{orientation=LinearLayout.VERTICAL;setPadding(dp(18),dp(8),dp(18),dp(4))}
+        val service=Spinner(this).apply{adapter=ArrayAdapter(this@MainActivity,android.R.layout.simple_spinner_dropdown_item,listOf("رصيد سيرياتيل المشترك","رصيد شام كاش"))}
+        val amount=fieldForDialog("الرصيد الافتتاحي بالليرة السورية").apply{inputType=InputType.TYPE_CLASS_NUMBER or InputType.TYPE_NUMBER_FLAG_DECIMAL}
+        val note=fieldForDialog("ملاحظة / مرجع")
+        form.addView(label("الخدمة",12f,mutedColor,false,Gravity.RIGHT));form.addView(service,fieldParams(dp(48),dp(8)));form.addView(amount,fieldParams(dp(48),dp(8)));form.addView(note,fieldParams(dp(48),dp(8)))
+        val dialog=AlertDialog.Builder(this).setTitle("الرصيد الافتتاحي للخدمة").setView(form).setNegativeButton("إلغاء",null).setPositiveButton("حفظ",null).create()
+        dialog.setOnShowListener{dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener{
+            try{
+                val key=if(service.selectedItemPosition==0)ServiceTransferRepository.SYRIATEL_SHARED else ServiceTransferRepository.SHAM_CASH
+                repo.setOpeningBalance(currentUserId?:error("جلسة المدير غير صالحة"),key,parseSypAmount(amount.text.toString()),note.text.toString().trim().ifEmpty{null})
+                dialog.dismiss();Toast.makeText(this,"تم تسجيل الرصيد الافتتاحي",Toast.LENGTH_LONG).show();showServiceTransfers()
+            }catch(e:Exception){Toast.makeText(this,e.message?:"تعذر حفظ الرصيد",Toast.LENGTH_LONG).show()}
+        }}
+        dialog.show()
+    }
+
+    private fun showServiceRechargeDialog() {
+        if(!isManager())return
+        val repo=ServiceTransferRepository(this)
+        val sources=CashAccountRepository(this).listActive().filter{it.accountType=="WALLET"&&it.currencyCode=="SYP"}
+        if(sources.isEmpty()){AlertDialog.Builder(this).setMessage("أنشئ محفظة قبض إلكترونية بالليرة السورية أولاً لتمويل شراء رصيد الخدمة.").setPositiveButton("فتح الصناديق والمحافظ"){_,_->showCashAccounts()}.show();return}
+        val form=LinearLayout(this).apply{orientation=LinearLayout.VERTICAL;setPadding(dp(18),dp(8),dp(18),dp(4))}
+        val service=Spinner(this).apply{adapter=ArrayAdapter(this@MainActivity,android.R.layout.simple_spinner_dropdown_item,listOf("رصيد سيرياتيل المشترك","رصيد شام كاش"))}
+        val source=Spinner(this).apply{adapter=ArrayAdapter(this@MainActivity,android.R.layout.simple_spinner_dropdown_item,sources.map{it.name+" • المتاح "+formatSypAmount(it.balanceMinor)+" ل.س"})}
+        val amount=fieldForDialog("قيمة الرصيد المراد شراؤه").apply{inputType=InputType.TYPE_CLASS_NUMBER or InputType.TYPE_NUMBER_FLAG_DECIMAL}
+        val fee=label("عمولة شحن سيرياتيل 2% عند الشحن فقط؛ شام كاش بلا عمولة شحن.",12f,green,false,Gravity.RIGHT)
+        service.onItemSelectedListener=object:android.widget.AdapterView.OnItemSelectedListener{
+            override fun onNothingSelected(parent:android.widget.AdapterView<*>?){}
+            override fun onItemSelected(parent:android.widget.AdapterView<*>?,view:View?,position:Int,id:Long){fee.text=if(position==0)"عمولة شحن سيرياتيل: 2% من قيمة الرصيد المشتَرى" else "لا توجد عمولة شحن على رصيد شام كاش"}
+        }
+        val ref=fieldForDialog("مرجع عملية الشراء / ملاحظة")
+        form.addView(label("محفظة الخدمة",12f,mutedColor,false,Gravity.RIGHT));form.addView(service,fieldParams(dp(48),dp(8)))
+        form.addView(label("التمويل من محفظة القبض الإلكترونية",12f,mutedColor,false,Gravity.RIGHT));form.addView(source,fieldParams(dp(48),dp(8)))
+        form.addView(amount,fieldParams(dp(48),dp(6)));form.addView(fee);form.addView(ref,fieldParams(dp(48),dp(8)))
+        val op=UUID.randomUUID().toString()
+        val dialog=AlertDialog.Builder(this).setTitle("شراء / شحن رصيد الخدمة").setView(form).setNegativeButton("إلغاء",null).setPositiveButton("شراء الرصيد",null).create()
+        dialog.setOnShowListener{dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener{
+            try{
+                val key=if(service.selectedItemPosition==0)ServiceTransferRepository.SYRIATEL_SHARED else ServiceTransferRepository.SHAM_CASH
+                val selected=sources.getOrNull(source.selectedItemPosition)?:error("اختر محفظة التمويل")
+                val note=ref.text.toString().trim().ifEmpty{null}
+                val feeAmount=repo.recharge(currentUserId?:error("جلسة المدير غير صالحة"),key,selected.id,parseSypAmount(amount.text.toString()),op,note,note)
+                dialog.dismiss();Toast.makeText(this,"تم شراء الرصيد. عمولة الشحن: "+formatSypAmount(feeAmount)+" ل.س",Toast.LENGTH_LONG).show();showServiceTransfers()
+            }catch(e:Exception){Toast.makeText(this,e.message?:"تعذر شراء الرصيد",Toast.LENGTH_LONG).show()}
+        }}
+        dialog.show()
+    }
+
+    private fun showServiceTransferDialog() {
+        val repo=ServiceTransferRepository(this)
+        val accountRepo=CashAccountRepository(this)
+        val drawer=accountRepo.currentDayPrimaryDrawer()
+        val receiptOptions=accountRepo.listActive().filter{it.currencyCode=="SYP"&&(it.accountType=="WALLET"||(it.accountType=="CASH_BOX"&&it.id==drawer?.id))}
+        if(receiptOptions.isEmpty()){AlertDialog.Builder(this).setMessage("عيّن درج اليوم الرئيسي أو أنشئ محفظة قبض إلكترونية بالليرة السورية قبل تنفيذ التحويل.").setPositiveButton("فتح الصناديق والمحافظ"){_,_->showCashAccounts()}.show();return}
+        val form=LinearLayout(this).apply{orientation=LinearLayout.VERTICAL;setPadding(dp(18),dp(8),dp(18),dp(4))}
+        val service=Spinner(this).apply{adapter=ArrayAdapter(this@MainActivity,android.R.layout.simple_spinner_dropdown_item,listOf("سيرياتيل العادي • ربح 20%","سيرياتيل كاش • ربح 10%","شام كاش • ربح 5%"))}
+        val amount=fieldForDialog("المبلغ الواصل للزبون").apply{inputType=InputType.TYPE_CLASS_NUMBER or InputType.TYPE_NUMBER_FLAG_DECIMAL}
+        val companyFee=fieldForDialog("رسوم الشركة (أدخلها يدوياً إن وجدت)").apply{inputType=InputType.TYPE_CLASS_NUMBER or InputType.TYPE_NUMBER_FLAG_DECIMAL;setText("0")}
+        val receipt=Spinner(this).apply{adapter=ArrayAdapter(this@MainActivity,android.R.layout.simple_spinner_dropdown_item,receiptOptions.map{it.name+if(it.accountType=="WALLET")" • قبض إلكتروني" else " • قبض نقدي"})}
+        val ref=fieldForDialog("رقم الزبون / مرجع التحويل / ملاحظة")
+        val preview=label("أدخل مبلغ التحويل لاحتساب ربح المتجر وإجمالي المقبوض.",13f,green,true,Gravity.RIGHT)
+        fun updatePreview(){
+            val rate=when(service.selectedItemPosition){0->20L;1->10L;else->5L}
+            companyFee.isEnabled=service.selectedItemPosition!=2
+            if(!companyFee.isEnabled&&companyFee.text.toString()!="0")companyFee.setText("0")
+            val delivered=runCatching{parseSypAmount(amount.text.toString())}.getOrNull()
+            val fee=runCatching{parseSypAmount(companyFee.text.toString())}.getOrNull()
+            preview.text=if(delivered==null||delivered<=0L||fee==null)"أدخل مبلغاً صحيحاً." else{
+                val profit=BigDecimal.valueOf(delivered).multiply(BigDecimal.valueOf(rate)).divide(BigDecimal.valueOf(100),0,RoundingMode.HALF_UP).longValueExact()
+                "ربح المتجر ($rate%): "+formatSypAmount(profit)+" ل.س\nرسوم الشركة: "+formatSypAmount(fee)+" ل.س\nالمبلغ المطلوب من الزبون: "+formatSypAmount(Math.addExact(Math.addExact(delivered,profit),fee))+" ل.س"
+            }
+        }
+        service.onItemSelectedListener=object:android.widget.AdapterView.OnItemSelectedListener{
+            override fun onNothingSelected(parent:android.widget.AdapterView<*>?){}
+            override fun onItemSelected(parent:android.widget.AdapterView<*>?,view:View?,position:Int,id:Long){updatePreview()}
+        }
+        val watcher=object:TextWatcher{
+            override fun beforeTextChanged(s:CharSequence?,start:Int,count:Int,after:Int){}
+            override fun onTextChanged(s:CharSequence?,start:Int,before:Int,count:Int){updatePreview()}
+            override fun afterTextChanged(s:Editable?){}
+        }
+        amount.addTextChangedListener(watcher);companyFee.addTextChangedListener(watcher)
+        form.addView(label("نوع الخدمة",12f,mutedColor,false,Gravity.RIGHT));form.addView(service,fieldParams(dp(48),dp(8)))
+        form.addView(amount,fieldParams(dp(48),dp(8)));form.addView(companyFee,fieldParams(dp(48),dp(8)))
+        form.addView(preview,fieldParams(-2,dp(10)));form.addView(label("استلام المبلغ من الزبون في",12f,mutedColor,false,Gravity.RIGHT))
+        form.addView(receipt,fieldParams(dp(48),dp(8)));form.addView(ref,fieldParams(dp(48),dp(8)));updatePreview()
+        val op=UUID.randomUUID().toString()
+        val dialog=AlertDialog.Builder(this).setTitle("تنفيذ تحويل رصيد").setView(ScrollView(this).apply{addView(form)}).setNegativeButton("إلغاء",null).setPositiveButton("تنفيذ التحويل",null).create()
+        dialog.setOnShowListener{dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener{
+            try{
+                val type=when(service.selectedItemPosition){0->ServiceTransferRepository.SYRIATEL_BALANCE;1->ServiceTransferRepository.SYRIATEL_CASH;else->ServiceTransferRepository.SHAM_CASH_TRANSFER}
+                val selected=receiptOptions.getOrNull(receipt.selectedItemPosition)?:error("اختر حساب استلام المبلغ")
+                val note=ref.text.toString().trim().ifEmpty{null}
+                val result=repo.executeTransfer(currentUserId?:error("جلسة المستخدم غير صالحة"),type,parseSypAmount(amount.text.toString()),parseSypAmount(companyFee.text.toString()),selected.id,op,note,note)
+                dialog.dismiss()
+                AlertDialog.Builder(this).setTitle("تم تسجيل التحويل")
+                    .setMessage("الواصل للزبون: "+formatSypAmount(result.deliveredMinor)+" ل.س\nربح المتجر: "+formatSypAmount(result.profitMinor)+" ل.س\nرسوم الشركة: "+formatSypAmount(result.providerFeeMinor)+" ل.س\nالمقبوض من الزبون: "+formatSypAmount(result.customerChargeMinor)+" ل.س")
+                    .setPositiveButton("حسناً"){_,_->showServiceTransfers()}.show()
+            }catch(e:Exception){Toast.makeText(this,e.message?:"تعذر تنفيذ التحويل",Toast.LENGTH_LONG).show()}
+        }}
+        dialog.show()
     }
 
     private fun showEditCashAccountDialog(
