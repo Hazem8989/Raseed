@@ -727,21 +727,6 @@ class MainActivity : Activity() {
                     showPurchasePaymentDialog(invoice.id, invoice.invoiceNumber) { showPurchases() }
                 }, fieldParams(dp(44), dp(4)))
             }
-            val revaluations = repository.listRevaluations(invoice.id)
-            if (revaluations.isNotEmpty()) {
-                card.addView(label("تعديلات تقييم الدين حسب سعر الصرف", 11f, gold.toInt(), true, Gravity.RIGHT)
-                    .apply { setPadding(0, dp(6), 0, dp(3)) })
-                revaluations.forEach { adjustment ->
-                    val rateText = BigDecimal.valueOf(adjustment.appliedRateMilli, 3)
-                        .stripTrailingZeros().toPlainString()
-                    card.addView(label(
-                        formatSypAmount(adjustment.previousSypMinor) + " ← " +
-                            formatSypAmount(adjustment.newSypMinor) + " ل.س • " +
-                            rateText + " ل.س/دولار • " + adjustment.createdAt,
-                        10f, mutedColor, false, Gravity.RIGHT
-                    ).apply { setPadding(0, dp(2), 0, dp(2)) })
-                }
-            }
             val history = repository.listPayments(invoice.id)
             if (history.isNotEmpty()) {
                 card.addView(label("سجل الدفعات:", 12f, mutedColor, true, Gravity.RIGHT)
@@ -1259,6 +1244,21 @@ class MainActivity : Activity() {
                     setOnClickListener { showCustomerPaymentDialog(customerId, invoice) }
                 }
                 card.addView(collect, fieldParams(dp(48), dp(8)))
+            }
+            val revaluations = repository.listRevaluations(invoice.id)
+            if (revaluations.isNotEmpty()) {
+                card.addView(label("تعديلات تقييم الدين حسب سعر الصرف", 11f, gold.toInt(), true, Gravity.RIGHT)
+                    .apply { setPadding(0, dp(6), 0, dp(3)) })
+                revaluations.forEach { adjustment ->
+                    val rateText = BigDecimal.valueOf(adjustment.appliedRateMilli, 3)
+                        .stripTrailingZeros().toPlainString()
+                    card.addView(label(
+                        formatSypAmount(adjustment.previousSypMinor) + " ← " +
+                            formatSypAmount(adjustment.newSypMinor) + " ل.س • " +
+                            rateText + " ل.س/دولار • " + adjustment.createdAt,
+                        10f, mutedColor, false, Gravity.RIGHT
+                    ).apply { setPadding(0, dp(2), 0, dp(2)) })
+                }
             }
             val history = repository.listPayments(invoice.id)
             if (history.isNotEmpty()) {
