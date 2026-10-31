@@ -197,9 +197,9 @@ class DailyBalanceRepository(context:Context) {
         db.rawQuery("SELECT transaction_type,direction,SUM(amount_minor) FROM cash_transactions WHERE account_id=? AND COALESCE(operating_date,substr(created_at,1,10))=? AND transaction_type<>'WALLET_DAILY_OPENING_ADJUSTMENT' GROUP BY transaction_type,direction",arrayOf(id,date)).use { c->
             while(c.moveToNext()){val t=c.getString(0);val d=c.getString(1);val n=c.getLong(2)
                 when{t=="SALE_RECEIPT"&&d=="IN"->s[0]+=n;t=="CUSTOMER_CREDIT_COLLECTION"&&d=="IN"->s[1]+=n
-                    t=="ACCOUNT_TRANSFER_IN"&&d=="IN"->s[6]+=n;t=="PURCHASE_PAYMENT"&&d=="OUT"->s[3]+=n
-                    t=="PERSONAL_WITHDRAWAL"&&d=="OUT"->s[4]+=n;t=="ACCOUNT_TRANSFER_OUT"&&d=="OUT"->s[7]+=n
-                    d=="IN"->s[2]+=n;d=="OUT"->s[5]+=n}
+                    t=="ACCOUNT_TRANSFER_IN"&&d=="IN"->s[5]+=n;t=="PURCHASE_PAYMENT"&&d=="OUT"->s[3]+=n
+                    t=="PERSONAL_WITHDRAWAL"&&d=="OUT"->s[4]+=n;t=="ACCOUNT_TRANSFER_OUT"&&d=="OUT"->s[6]+=n
+                    d=="IN"->s[2]+=n;d=="OUT"->s[7]+=n}
             }
         };return s
     }

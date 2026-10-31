@@ -201,6 +201,8 @@ class PurchasePaymentRepositoryTest {
         cashAccounts.setCurrentDayPrimaryDrawer("ADMIN", adminId, drawer.id)
         val supplierCash = cashAccounts.create("نقد موردين مدور " + UUID.randomUUID(), "CASH_BOX", "SYP", 500000L)
         val daily = DailyBalanceRepository(RuntimeEnvironment.getApplication())
+        // This test uses the current operating date; remove only the prior test allocation.
+        database.writableDatabase.delete("daily_supplier_rollovers", null, null)
         daily.setSupplierRollover(adminId, supplierCash.id, 100000L, "اختبار تخصيص يومي")
         val paid = payments.addPayment(invoiceId, "rollover-payment-" + UUID.randomUUID(), supplierCash.id, 100000L)
         assertEquals(100000L, paid.paidSypMinor)
