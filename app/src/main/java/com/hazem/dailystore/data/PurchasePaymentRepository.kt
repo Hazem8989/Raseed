@@ -260,7 +260,7 @@ class PurchasePaymentRepository(context: Context) {
         try {
             val old = db.rawQuery(
                 """SELECT p.invoice_id,p.amount_minor,p.currency_code,p.exchange_rate_syp_per_usd_milli,
-                          p.cash_transaction_id,t.account_id,t.description,i.total_usd_cents,i.status,i.invoice_number,i.exchange_rate_syp_per_usd_milli
+                          p.cash_transaction_id,t.account_id,t.description,i.total_usd_cents,i.status,i.invoice_number,i.exchange_rate_syp_per_usd_milli,COALESCE(t.operating_date,substr(t.created_at,1,10))
                    FROM invoice_payments p
                    JOIN cash_transactions t ON t.id=p.cash_transaction_id
                    JOIN purchase_invoices i ON i.id=p.invoice_id
@@ -271,7 +271,7 @@ class PurchasePaymentRepository(context: Context) {
                 ExistingSupplierPayment(
                     it.getString(0),it.getLong(1),it.getString(2),if(it.isNull(3)) null else it.getLong(3),
                     it.getString(4),it.getString(5),if(it.isNull(6)) null else it.getString(6),
-                    it.getLong(7),it.getString(8),it.getString(9),it.getLong(10)
+                    it.getLong(7),it.getString(8),it.getString(9),it.getLong(10),it.getString(11)
                 )
             }
             require(old.invoiceStatus in setOf("POSTED","PARTIALLY_PAID","PAID")) {
@@ -291,15 +291,20 @@ class PurchasePaymentRepository(context: Context) {
             if(target.accountType=="CASH_BOX" && target.currencyCode=="SYP") {
                 val rollover=db.rawQuery(
                     "SELECT allocated_minor FROM daily_supplier_rollovers WHERE operating_date=? AND account_id=?",
-                    arrayOf(SimpleDateFormat("yyyy-MM-dd",Locale.US).format(Date()),newCashAccountId)
+                    arrayOf(old.paymentDate,newCashAccountId)
                 ).use { if(it.moveToFirst())it.getLong(0)else null }
-                require(rollover!=null) { "تصحيح دفعة المورد بالليرة يجب أن يستخدم صندوق النقد المدور المحدد لهذا اليوم" }
-                val used=db.rawQuery(
-                    "SELECT COALESCE(SUM(amount_minor),0) FROM cash_transactions WHERE account_id=? AND direction='OUT' AND transaction_type IN ('PURCHASE_PAYMENT','PERSONAL_WITHDRAWAL') AND COALESCE(operating_date,substr(created_at,1,10))=?",
-                    arrayOf(newCashAccountId,SimpleDateFormat("yyyy-MM-dd",Locale.US).format(Date()))
-                ).use { it.moveToFirst();it.getLong(0) }
-                val usedWithoutThis=if(old.cashAccountId==newCashAccountId) (used-old.amountMinor).coerceAtLeast(0L) else used
-                require(rollover-usedWithoutThis>=newAmountMinor) { "المتاح من النقد المدور لا يكفي بعد تصحيح الدفعة" }
+                if(rollover==null) {
+                    require(old.cashAccountId==newCashAccountId) {
+                        "تغيير حساب دفعة المورد بالليرة يتطلب صندوق النقد المدور المحدد في يوم تسجيل الدفعة"
+                    }
+                } else {
+                    val used=db.rawQuery(
+                        "SELECT COALESCE(SUM(amount_minor),0) FROM cash_transactions WHERE account_id=? AND direction='OUT' AND transaction_type IN ('PURCHASE_PAYMENT','PERSONAL_WITHDRAWAL') AND COALESCE(operating_date,substr(created_at,1,10))=?",
+                        arrayOf(newCashAccountId,old.paymentDate)
+                    ).use { it.moveToFirst();it.getLong(0) }
+                    val usedWithoutThis=if(old.cashAccountId==newCashAccountId) (used-old.amountMinor).coerceAtLeast(0L) else used
+                    require(rollover-usedWithoutThis>=newAmountMinor) { "المتاح من النقد المدور لا يكفي بعد تصحيح الدفعة" }
+                }
             }
             val invoiceRate=old.invoiceRateMilli
             require(invoiceRate>0L) { "فاتورة الشراء لا تحتوي سعر صرف محفوظاً؛ لا يمكن تصحيح المتبقي السوري بأمان" }
@@ -371,7 +376,7 @@ class PurchasePaymentRepository(context: Context) {
     private data class ExistingSupplierPayment(
         val invoiceId:String,val amountMinor:Long,val currencyCode:String,val exchangeRateMilli:Long?,
         val cashTransactionId:String,val cashAccountId:String,val note:String?,val invoiceTotalUsdCents:Long,
-        val invoiceStatus:String,val invoiceNumber:String,val invoiceRateMilli:Long
+        val invoiceStatus:String,val invoiceNumber:String,val invoiceRateMilli:Long,val paymentDate:String
     )
     private data class SupplierPaymentAccount(
         val name:String,val currencyCode:String,val openingBalanceMinor:Long
