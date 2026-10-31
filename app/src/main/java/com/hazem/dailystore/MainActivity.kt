@@ -10,6 +10,7 @@ import android.text.Editable
 import android.text.InputType
 import android.text.TextWatcher
 import android.view.Gravity
+import android.provider.OpenableColumns
 import android.view.View
 import android.view.ViewGroup
 import android.view.WindowManager
@@ -44,6 +45,8 @@ import com.hazem.dailystore.data.PurchasePaymentRepository
 import com.hazem.dailystore.data.PurchasePaymentRecord
 import com.hazem.dailystore.data.PurchaseInvoicePaymentSummary
 import com.hazem.dailystore.data.StoreProduct
+import com.hazem.dailystore.data.SpreadsheetProductImporter
+import com.hazem.dailystore.data.InventoryValuationRepository
 import java.math.BigDecimal
 import java.math.RoundingMode
 import java.text.DecimalFormat
@@ -71,6 +74,7 @@ class MainActivity : Activity() {
     private var currentUserRole: String = "CASHIER"
     private var activeScreenKey: String = "POS"
     private var activeScreenArgument: String? = null
+    private val productImportRequestCode = 7101
     private val sessionPrefs by lazy { getSharedPreferences("the_daily_shop_session", MODE_PRIVATE) }
 
     private lateinit var productGrid: GridLayout
@@ -91,6 +95,49 @@ class MainActivity : Activity() {
     )
 
     private data class CartLine(val product: Product, var quantity: Double)
+
+    @Deprecated("Using the document picker keeps compatibility with the app's current Activity-based navigation.")
+    override fun onActivityResult(requestCode: Int, resultCode: Int, data: android.content.Intent?) {
+        super.onActivityResult(requestCode, resultCode, data)
+        if (requestCode != productImportRequestCode || resultCode != RESULT_OK) return
+        val uri = data?.data ?: return
+        try {
+            val fileName = contentResolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)?.use { cursor ->
+                if (cursor.moveToFirst()) cursor.getString(0) else null
+            } ?: "products.csv"
+            val rows = contentResolver.openInputStream(uri)?.use {
+                SpreadsheetProductImporter.parse(fileName, it)
+            } ?: error("تعذر فتح الملف المحدد")
+            val store = StoreRepository(this)
+            val rate = store.getCurrentExchangeRateMilli()
+            if (rows.any { it.usesSypPrices } && rate <= 0L) {
+                error("الملف يحتوي أسعاراً بالليرة السورية. سجّل سعر الصرف الحالي من شاشة إدارة المنتجات ثم أعد الاستيراد؛ لن أخمّن سعر التحويل.")
+            }
+            val sample = rows.take(5).joinToString("\n") { "• ${it.name}" }
+            val currencyNote = if (rows.any { it.usesSypPrices })
+                "سيُحوّل سعر الشراء والبيع من الليرة إلى مرجع الدولار بسعر الصرف المسجل حالياً: ${BigDecimal.valueOf(rate, 3).stripTrailingZeros().toPlainString()} ل.س لكل دولار."
+            else "الأسعار مدخلة بالدولار وستُحفظ كما هي دون تحويل."
+            AlertDialog.Builder(this)
+                .setTitle("مراجعة استيراد الأصناف")
+                .setMessage("عدد الأصناف: ${rows.size}\nالمعاينة:\n$sample\n\n$currencyNote\n\nسيتم حفظ جميع الأصناف في عملية واحدة أو إلغاء العملية كاملة عند وجود خطأ. سيبقى المخزون صفراً والباركود فارغاً إذا لم يرد في الملف.")
+                .setNegativeButton("إلغاء", null)
+                .setPositiveButton("اعتماد الاستيراد") { _, _ ->
+                    try {
+                        val count = store.importProducts(rows, rate)
+                        Toast.makeText(this, "تم استيراد $count صنفاً بنجاح. المخزون الافتتاحي بقي صفراً بانتظار الجرد.", Toast.LENGTH_LONG).show()
+                        showProductManagement()
+                    } catch (e: Exception) {
+                        AlertDialog.Builder(this).setTitle("لم يتم الاستيراد")
+                            .setMessage(e.message ?: "حدث خطأ أثناء الاستيراد؛ لم يتم حفظ أي صنف.")
+                            .setPositiveButton("حسناً", null).show()
+                    }
+                }.show()
+        } catch (e: Exception) {
+            AlertDialog.Builder(this).setTitle("تعذر قراءة الملف")
+                .setMessage(e.message ?: "تأكد من أن الملف بصيغة CSV أو XLSX وأن الأعمدة صحيحة.")
+                .setPositiveButton("حسناً", null).show()
+        }
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -764,7 +811,7 @@ class MainActivity : Activity() {
                         "العملاء والديون" -> showCustomers()
                         "الصناديق والمحافظ" -> showCashAccounts()
                         "تحويل رصيد" -> showServiceTransfers()
-                        else -> Toast.makeText(this@MainActivity, "قسم $title سيُفعّل في مرحلته", Toast.LENGTH_SHORT).show()
+                        "التقارير" -> showDailyCashReport()\n                        else -> Toast.makeText(this@MainActivity, "قسم $title سيُفعّل في مرحلته", Toast.LENGTH_SHORT).show()
                     }
                 }
             }
@@ -1911,6 +1958,30 @@ class MainActivity : Activity() {
         val body = ScrollView(this).apply { isFillViewport = true }
         val list = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(dp(16), dp(14), dp(16), dp(24)) }
         list.addView(label("التاريخ: " + report.operatingDate, 13f, mutedColor, false, Gravity.RIGHT))
+        val capital = InventoryValuationRepository(this).dailyCapital()
+        val capitalRate = StoreRepository(this).getCurrentExchangeRateMilli()
+        list.addView(sectionHeading("رأس المال الكلي للمخزون"))
+        list.addView(label(
+            "القيمة الدفترية الحالية وفق FIFO: " + formatDualMoney(capital.current.totalCostUsdCents, capitalRate),
+            17f, green, true, Gravity.RIGHT
+        ).apply { setPadding(0, dp(5), 0, dp(3)) })
+        val changePrefix = if (capital.changeUsdCents >= 0L) "+" else "−"
+        val changeAbs = if (capital.changeUsdCents == Long.MIN_VALUE) Long.MAX_VALUE else kotlin.math.abs(capital.changeUsdCents)
+        list.addView(label(
+            "التغير عن إغلاق اليوم السابق: " + changePrefix + formatDualMoney(changeAbs, capitalRate),
+            14f, if (capital.changeUsdCents >= 0L) green else textColor, true, Gravity.RIGHT
+        ).apply { setPadding(0, dp(2), 0, dp(4)) })
+        if (!capital.current.isComplete) {
+            list.addView(label(
+                "تنبيه محاسبي: توجد كميات غير مقيمة أو فروقات بين سجل حركات المخزون ورصيد المخزون الحالي. عدد الأصناف المتأثرة: ${capital.current.unvaluedProductCount}. قيمة رأس المال المعروضة هي الجزء المؤكد فقط، ولا تشمل هذه الكميات.",
+                12f, Color.rgb(170, 80, 45), true, Gravity.RIGHT
+            ).apply { setPadding(0, dp(2), 0, dp(9)) })
+        } else {
+            list.addView(label(
+                "تمت مطابقة رصيد المخزون مع سجل الحركات، والتقييم مبني على طبقات التكلفة FIFO وليس على سعر البيع أو سعر الصنف الحالي.",
+                11f, mutedColor, false, Gravity.RIGHT
+            ).apply { setPadding(0, dp(2), 0, dp(9)) })
+        }
         val serviceDaily = ServiceTransferRepository(this).dailySummary(report.operatingDate)
         if (serviceDaily.isNotEmpty()) {
             list.addView(sectionHeading("تحويلات الرصيد – تفصيل اليوم"))
@@ -2633,6 +2704,26 @@ class MainActivity : Activity() {
         content.addView(rateInput, fieldParams(dp(48), dp(6)))
         content.addView(saveRate, fieldParams(dp(46), dp(8)))
         content.addView(add, fieldParams(dp(52), dp(8)))
+        val importProducts = Button(this).apply {
+            text = "استيراد أصناف من CSV / Excel"
+            textSize = 14f
+            isAllCaps = false
+            setTextColor(green)
+            setBackgroundColor(Color.WHITE)
+            setOnClickListener {
+                val intent = android.content.Intent(android.content.Intent.ACTION_OPEN_DOCUMENT).apply {
+                    addCategory(android.content.Intent.CATEGORY_OPENABLE)
+                    type = "*/*"
+                    putExtra(android.content.Intent.EXTRA_MIME_TYPES, arrayOf(
+                        "text/csv",
+                        "text/comma-separated-values",
+                        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                    ))
+                }
+                startActivityForResult(intent, productImportRequestCode)
+            }
+        }
+        content.addView(importProducts, fieldParams(dp(48), dp(5)))
         content.addView(category, fieldParams(dp(44), dp(14)))
         content.addView(search, fieldParams(dp(50), dp(12)))
         content.addView(list, matchWidth())
