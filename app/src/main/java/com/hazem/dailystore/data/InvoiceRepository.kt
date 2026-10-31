@@ -206,6 +206,15 @@ class InvoiceRepository(context: Context) {
             }
             require(status == "DRAFT") { "لا يمكن اعتماد فاتورة بهذه الحالة: $status" }
             var cashReceipt: CashSaleReceipt? = null
+            if (type == "PURCHASE") {
+                val purchaseRate = db.rawQuery(
+                    "SELECT exchange_rate_syp_per_usd_milli FROM purchase_invoices WHERE id=?",
+                    arrayOf(invoiceId)
+                ).use { c -> require(c.moveToFirst()); c.getLong(0) }
+                require(purchaseRate > 0L) {
+                    "لا يمكن اعتماد فاتورة شراء دون سعر صرف محفوظ؛ يجب تثبيت سعرها السوري أولاً"
+                }
+            }
             if (type == "SALE") {
                 val saleHeader = db.rawQuery(
                     """SELECT sale_type,customer_id,exchange_rate_syp_per_usd_milli,
