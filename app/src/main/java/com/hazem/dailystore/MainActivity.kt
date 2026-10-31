@@ -38,6 +38,7 @@ import com.hazem.dailystore.data.CustomerPaymentRepository
 import com.hazem.dailystore.data.CashAccountRepository
 import com.hazem.dailystore.data.CashAccountSummary
 import com.hazem.dailystore.data.PurchasePaymentRepository
+import com.hazem.dailystore.data.PurchasePaymentRecord
 import com.hazem.dailystore.data.PurchaseInvoicePaymentSummary
 import com.hazem.dailystore.data.StoreProduct
 import java.math.BigDecimal
