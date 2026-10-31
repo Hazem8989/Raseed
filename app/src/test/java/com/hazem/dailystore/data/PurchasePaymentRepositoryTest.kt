@@ -196,6 +196,24 @@ class PurchasePaymentRepositoryTest {
     }
 
     @Test
+    fun sypCashBoxSupplierPaymentsMustStayWithinDailyRolloverAllocation() {
+        val drawer = cashAccounts.create("درج رئيسي يومي " + UUID.randomUUID(), "CASH_BOX", "SYP", 0L)
+        cashAccounts.setCurrentDayPrimaryDrawer("ADMIN", adminId, drawer.id)
+        val supplierCash = cashAccounts.create("نقد موردين مدور " + UUID.randomUUID(), "CASH_BOX", "SYP", 500000L)
+        val daily = DailyBalanceRepository(RuntimeEnvironment.getApplication())
+        daily.setSupplierRollover(adminId, supplierCash.id, 100000L, "اختبار تخصيص يومي")
+        val paid = payments.addPayment(invoiceId, "rollover-payment-" + UUID.randomUUID(), supplierCash.id, 100000L)
+        assertEquals(100000L, paid.paidSypMinor)
+        assertEquals(0L, daily.currentSupplierRollover()!!.availableMinor)
+        try {
+            payments.addPayment(invoiceId, "rollover-overrun-" + UUID.randomUUID(), supplierCash.id, 1L)
+            throw AssertionError("Supplier payment must not exceed the daily rollover allocation")
+        } catch (_: IllegalArgumentException) { }
+        assertEquals(400000L, cashAccounts.balance(supplierCash.id))
+        assertEquals(0L, daily.currentSupplierRollover()!!.availableMinor)
+    }
+
+    @Test
     fun managerCanCorrectPaymentAmountAndAccountAtomically() {
         val payment = payments.addPayment(invoiceId, "pay-edit-${UUID.randomUUID()}", accountId, 4000L, "قبل التصحيح")
         val replacement = cashAccounts.create("صندوق بديل ${UUID.randomUUID()}", "CASH_BOX", "USD", 10000L)
