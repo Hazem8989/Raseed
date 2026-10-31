@@ -21,6 +21,9 @@ class ServiceTransferRepositoryTest {
     @Before fun setUp() {
         val context = RuntimeEnvironment.getApplication()
         database = AppDatabase.getInstance(context)
+        database.writableDatabase.execSQL("DELETE FROM service_transfers")
+        database.writableDatabase.execSQL("DELETE FROM service_wallet_transactions")
+        database.writableDatabase.execSQL("DELETE FROM cash_transactions WHERE transaction_type IN ('SERVICE_TRANSFER_RECEIPT','SERVICE_RECHARGE','SERVICE_TRANSFER_REVERSAL')")
         StoreRepository(context).ensureBaseSetup()
         val auth = AuthRepository(context)
         auth.ensureInitialAdmin()
@@ -81,8 +84,8 @@ class ServiceTransferRepositoryTest {
 
     @Test fun rechargeDeductsFromElectronicProceedsAndAppliesTwoPercentOnlyToSyriatel() {
         val source = accounts.create("محفظة تمويل " + UUID.randomUUID(), "WALLET", "SYP", 100_000L)
-        val syriatelFee = repo.recharge(actor, ServiceTransferRepository.SYRIATEL_SHARED, source.id,
-            50_000L, "recharge-syr-" + UUID.randomUUID())
+        val syriatelFee = try { repo.recharge(actor, ServiceTransferRepository.SYRIATEL_SHARED, source.id,
+            50_000L, "recharge-syr-" + UUID.randomUUID()) } catch (e: Exception) { System.err.println(e.stackTraceToString()); throw e }
         assertEquals(1_000L, syriatelFee)
         assertEquals(49_000L, accounts.balance(source.id))
         assertEquals(50_000L, repo.listWallets().single { it.serviceKey == ServiceTransferRepository.SYRIATEL_SHARED }.balanceMinor)
