@@ -27,6 +27,14 @@ class InvoiceRepositoryTest {
         store = StoreRepository(context)
         invoices = InvoiceRepository(context)
         store.ensureBaseSetup()
+        val fx = ContentValues().apply {
+            put("id", UUID.randomUUID().toString())
+            put("currency_code", "USD")
+            put("rate_syp_per_usd_milli", 10_000_000L)
+            put("effective_at", "2026-10-31T10:00:00.000Z")
+            put("created_at", "2026-10-31T10:00:00.000Z")
+        }
+        database.writableDatabase.insertOrThrow("exchange_rates", null, fx)
         val unit = store.getUnits().first()
         val category = store.getCategories().first()
         productId = store.saveProduct(
