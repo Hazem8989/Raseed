@@ -376,7 +376,7 @@ class StoreRepository(context: Context) {
                 arrayOf(productId, warehouseId)
             ).use { it.moveToFirst() }
             if (hasBalance) {
-                val changed = db.execSQL(
+                db.execSQL(
                     "UPDATE inventory_balances SET quantity=?,updated_at=? WHERE product_id=? AND warehouse_id=?",
                     arrayOf(quantity, now, productId, warehouseId)
                 )
@@ -419,6 +419,15 @@ class StoreRepository(context: Context) {
             db.endTransaction()
         }
     }
+
+    fun canRecordOpeningStock(productId: String): Boolean =
+        helper.readableDatabase.rawQuery(
+            """SELECT 1 FROM products p
+               WHERE p.id=? AND p.track_inventory=1
+                 AND NOT EXISTS (SELECT 1 FROM inventory_movements m WHERE m.product_id=p.id)
+            """.trimIndent(),
+            arrayOf(productId)
+        ).use { it.moveToFirst() }
 
     fun setProductActive(id: String, active: Boolean) {
         val values = ContentValues().apply {
