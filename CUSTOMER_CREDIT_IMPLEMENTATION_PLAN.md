@@ -1,13 +1,13 @@
 # Customer Credit and FX Revaluation Implementation Plan
 
-Status: Approved scope. Customer checkout and collection foundations are implemented; FX revaluation remains pending.
+Status: Approved scope. SYP-only customer credit collection, daily cash/wallet routing, FX revaluation ledger, customer statement details, and automated tests are implemented in code. Debug build and unit tests passed on 2026-10-31; phone acceptance testing remains pending.
 
 ## Current implementation facts (reviewed 2026-10-31)
 - Customer records and customer list/create/edit/disable flows exist.
 - POS supports cash and credit checkout. Credit sales require a customer; cash sales require an active cash account and post the full receipt atomically with invoice posting.
-- Customer payments can be allocated to a specific credit invoice, including partial and full payments, with cash-account inflow and payment records in one transaction.
+- Customer payments are collected in SYP only and allocated to a specific posted credit invoice. Cash receipt, invoice allocation, invoice status, idempotency registry, and audit record are posted atomically.
 - Automated tests cover partial allocation, idempotent retry, overpayment rejection, and rejection of collection against a cash sale.
-- The customer credit FX revaluation policy is approved but its database ledger, repository logic, UI adjustments, and full test suite are NOT implemented.
+- The approved FX rule is implemented with a persistent revaluation ledger, immutable invoice-time FX snapshots, idempotent account-view revaluation, SYP-only settlement, and account-statement details.
 - The app currently has a local SQLite database. Sync tables exist, but a working synchronization engine/server integration is not yet implemented.
 
 ## Milestone 1 — Customer records and sales checkout
@@ -19,16 +19,16 @@ Implementation status: implemented in code; APK build and unit tests have passed
 - Prevent ambiguous payment states and duplicate posting.
 
 ## Milestone 2 — Customer payments and account ledger
-Implementation status: repository and UI foundations implemented; full device acceptance and broader account-ledger reconciliation remain.
+Implementation status: SYP-only repository and UI flow implemented; automated tests and APK build passed. Phone acceptance and broader account-ledger reconciliation remain.
 - Record payments against a specific posted credit invoice.
 - Post cash-account inflow and invoice payment allocation in one SQLite transaction.
-- Support partial and full settlement, USD/SYP accounts, and payment-time exchange-rate snapshots.
+- Support partial and full SYP settlement only, using max(collection-time rate, original invoice rate) to reduce the USD reference.
 - Use operation idempotency and reject overpayment or invalid account state.
 - Display customer invoices, payments, and outstanding amounts.
 - Keep supplier payables separate from customer receivables.
 
 ## Milestone 3 — Customer credit FX revaluation
-Implementation status: policy documented; implementation pending.
+Implementation status: database migration, revaluation ledger, repository calculations, customer statement display, SYP-only collection, daily drawer/wallet routing, and automated tests implemented. Phone acceptance remains pending.
 - Add a sequential database migration without deleting or recreating business data.
 - Revalue only the unpaid merchandise amount of customer-linked credit invoices.
 - Exclude cash sales, supplier balances, opening balances, services, and unrelated charges.
@@ -73,7 +73,7 @@ This clarification supersedes any earlier wording in this plan that implied cust
 - Partial collections reduce only the allocated unpaid reference balance; prior payments remain immutable. Revaluation must never alter the original invoice or duplicate on account viewing/retry.
 - Legacy invoices without a trustworthy original exchange-rate snapshot remain excluded from automatic revaluation and collection conversion under this rule until safely reviewed.
 
-Implementation remains pending: database/repository logic, SYP-only collection UI, migration/backfill safeguards, account statement display, and automated tests must be completed before this milestone is considered implemented.
+Implementation is present in code and automated tests passed on 2026-10-31. The app now records collection-time, invoice-time, and effective FX rates; USD-reference reduction; receiving account; actual timestamp; and audit details. Device acceptance is still required. Legacy invoices without a reliable original FX snapshot remain blocked pending manual review.
 
 
 ## Customer debt collection destination and daily cash treatment (approved 2026-10-31)
@@ -83,9 +83,9 @@ Implementation remains pending: database/repository logic, SYP-only collection U
 - The primary daily cash drawer is a specifically designated active SYP cash account for the current operating day. It is distinct from any carried-over/rolled cash box used for supplier-payment and purchase/expense balance workflows. Never select a carried-over supplier-payment box as the default destination for customer cash collections.
 - The application must provide a reliable configuration/identity for the primary daily cash drawer and the current operating day. If no valid primary drawer is configured, block cash collection with a clear instruction to configure it; do not silently post to another account.
 - If the customer pays electronically, the operator explicitly selects the receiving active electronic wallet. Increase that wallet's balance by the SYP amount received; do not post it to the daily physical-cash drawer.
-- The collection screen should make the destination clear: cash = current primary daily drawer (shown, not arbitrarily replaced by the rollover box); electronic = selected wallet. USD collection remains unavailable.
-- Every receipt must create one linked, idempotent financial movement and one customer-payment allocation atomically. The statement must show actual collection date/time, customer, invoice allocation(s), SYP amount, collection channel, receiving drawer/wallet, applicable FX snapshots and USD-reference reduction.
-- Daily cash report/closing must include cash collections of old customer debts as today's cash inflows, separately categorized as **customer debt collections**, not sales. Electronic wallet collections appear in that wallet's ledger and balance, not in physical-cash totals.
+- The collection screen makes the destination explicit: cash = current primary daily drawer; electronic = selected SYP wallet. USD collection is unavailable. A manager assigns the daily drawer for the current local operating date; rollover supplier boxes are not selected automatically.
+- Every receipt creates one linked, idempotent financial movement and invoice allocation atomically. The customer statement displays collection date/time, SYP amount, channel, receiving drawer/wallet, invoice-time and collection-time FX snapshots, effective rate, and USD-reference reduction.
+- Cash collections are stored with the distinct transaction type `CUSTOMER_CREDIT_COLLECTION`, separate from sale receipts; wallet receipts are posted only to the selected wallet. A full daily cash report/closing UI remains a separate reporting task.
 - Supplier-payment rollover balances remain a separate workflow and must not be increased by customer collections unless a distinct, explicitly approved transfer is recorded.
 - Corrections/refunds must reverse or adjust the original linked movement with an auditable record; never delete the collection or silently rewrite the daily close.
 
