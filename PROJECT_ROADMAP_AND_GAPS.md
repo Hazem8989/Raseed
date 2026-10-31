@@ -60,6 +60,8 @@ This section distinguishes code present from features that are merely planned. B
 - Purchase invoice creation/posting and stock receipt.
 - Supplier records and supplier payment flows, including partial/multiple payments and manager correction logic.
 - Cash accounts/wallets, opening balances, and linked cash transactions.
+- Daily supplier cash rollover with audited daily edits, personal withdrawals, per-wallet daily opening balances, reference-based wallet top-ups, daily cash/electronic receipts reporting, and atomic idempotent wallet-to-primary-drawer transfers.
+- Daily reporting separates current-day wallet sales receipts from old customer-debt collections; both contribute to electronic receipts available for liquidation without double-counting sales or profit.
 - POS cart and cash/credit checkout.
 - Customer records and credit-sale association.
 - Customer payment allocation to a specific credit invoice, including partial/full collection.
@@ -69,6 +71,7 @@ This section distinguishes code present from features that are merely planned. B
 ### Implemented but still needs broader verification
 - POS cash receipt and customer collection reconciliation across multiple invoices and currencies.
 - Supplier summaries and detailed account statement reconciliation.
+- Daily cash/wallet workflows and report totals (automated tests/build passed; phone acceptance pending).
 - Manager-only actions across all screens and repository entry points.
 - Legacy data migration and recovery behavior on an existing installed app.
 - Default warehouse consistency throughout POS, purchase posting, stock movements, and inventory displays.
@@ -78,7 +81,7 @@ This section distinguishes code present from features that are merely planned. B
 - FIFO cost layers and FIFO COGS/profit calculations.
 - Customer credit FX revaluation ledger and account display (implemented; phone acceptance pending).
 - Full supplier and customer running statements with all adjustments.
-- Daily purchase/expense/personal-withdrawal balance workflow, including user-entered and daily-editable supplier cash rollover, separate personal withdrawals, daily opening balances per e-wallet, Cash/Sham Cash purchase/top-up recording, and fee-free internal store receipts into the selected wallet (see DAILY_CASH_AND_WALLET_BALANCE_POLICY.md).
+
 - Cash transfers between accounts, deposits, withdrawals, and operating/personal expenses.
 - Complete returns/refunds and payment-provider fee handling.
 - Posted invoice correction/version history with safe inventory and financial reversals.
@@ -108,7 +111,7 @@ This section distinguishes code present from features that are merely planned. B
 - [x] Implement customer credit FX revaluation according to its approved policy (automated tests/build passed; phone acceptance pending).
 - [ ] Complete customer and supplier running statements.
 - [ ] Implement returns/refunds and provider-fee rules.
-- [ ] Implement daily purchase/expense/personal-withdrawal balance workflow.
+- [x] Implement daily supplier rollover, personal withdrawals, daily wallet openings, daily cash/electronic receipts report, and wallet-to-drawer internal transfer (automated tests/build passed; phone acceptance pending).
 - [ ] Implement account transfers, deposits, withdrawals, and cash reconciliation.
 - [ ] Implement manager-only posted invoice correction with immutable version/audit trail.
 
@@ -147,7 +150,7 @@ This section distinguishes code present from features that are merely planned. B
 - A milestone is complete only after code, automated tests, verified APK, and required user-device acceptance.
 
 
-### Daily rollover cash, personal withdrawals, and wallet balances (approved 2026-10-31)
+### Daily rollover cash, personal withdrawals, and wallet balances (implemented 2026-10-31; phone acceptance pending)
 
 - The user enters the supplier-payment rollover amount each operating day based on the previous day's close; it must be editable daily and must not be auto-assumed from the prior cash balance.
 - Keep this supplier float separate from the primary daily sales/customer-collection drawer.
@@ -155,7 +158,7 @@ This section distinguishes code present from features that are merely planned. B
 - Record each e-wallet's daily opening balance independently, either manually or through a documented purchase/top-up operation for Cash or Sham Cash, without double-counting.
 - Store sales and customer-debt receipts received through a selected wallet increase that wallet automatically by the full amount, with no provider fee charged/deducted for these internal store transactions.
 - Show electronic wallet receipts in the daily sales/collections statement by source (today's sales vs old-debt collections vs top-ups), including customer-debt collections in the daily electronic receipts total available for liquidation (without classifying them as new sales or profit), while keeping them separate from physical cash; provide an atomic, auditable internal wallet-to-cash transfer when wallet funds are actually liquidated, without recording a second sale or revenue.
-- This is an approved requirement for the future daily balance implementation phase; it is not yet implemented. Detailed rules and tests are in DAILY_CASH_AND_WALLET_BALANCE_POLICY.md.
+- Core daily balance, reporting, wallet receipt classification, and internal wallet-to-drawer transfer flows are implemented and covered by automated tests. APK build and artifact upload succeeded; phone acceptance remains pending. Wallet top-up is currently recorded as a reference-based wallet inflow only; a corresponding cash-source debit and any provider-fee treatment remain open until the purchase funding method is confirmed. See DAILY_CASH_AND_WALLET_BALANCE_POLICY.md.
 
 ### Customer credit collection — final currency rule (approved 2026-10-31)
 
@@ -167,11 +170,11 @@ This section distinguishes code present from features that are merely planned. B
 - SYP-only collection conversion, revaluation ledger, UI, migration safeguards, and automated tests are implemented on the development branch. Phone acceptance remains pending.
 
 
-### Customer debt collections — daily drawer and e-wallet routing (approved 2026-10-31)
+### Customer debt collections — daily drawer and e-wallet routing (implemented 2026-10-31; phone acceptance pending)
 
-- Cash SYP collection of an old customer credit debt posts to the designated current-day primary cash drawer. It is classified as **customer debt collection** (`CUSTOMER_CREDIT_COLLECTION`), not a sale. The dedicated daily closing/report UI remains pending.
+- Cash SYP collection of an old customer credit debt posts to the designated current-day primary cash drawer. It is classified as **customer debt collection** (`CUSTOMER_CREDIT_COLLECTION`), not a sale. The daily cash/electronic report now shows it separately from new sales.
 - This is not a new sale: do not create a sales invoice or include the receipt in today's sales revenue/profit.
 - The current-day primary drawer must be explicitly identifiable/configurable and separate from the carried-over cash box used for supplier payments. Do not route collections to that rollover box by default. If the primary drawer is missing or inactive, block cash collection safely.
-- For electronic payment, the operator selects the receiving active wallet; increase that wallet only and show the receipt in its wallet statement, not physical cash.
+- For electronic payment, the operator selects the receiving active wallet; increase that wallet only and include it in daily electronic receipts available for liquidation, not physical cash.
 - Keep customer collections, daily cash sales, supplier-payment rollover funds, and e-wallet balances separately classified and reconcilable.
-- The feature is an approved requirement; daily drawer designation/routing, wallet routing, reports, and atomic/idempotent tests remain to be implemented and verified.
+- Daily drawer designation/routing, wallet routing, daily reporting, and atomic/idempotent tests are implemented. Phone acceptance remains pending.
