@@ -234,6 +234,7 @@ class MainActivity : Activity() {
     }
 
     private fun showLoginScreen() {
+        markScreen("LOGIN")
         val page = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             gravity = Gravity.CENTER
@@ -278,6 +279,8 @@ class MainActivity : Activity() {
                 if (authenticated != null) {
                     currentUserId = authenticated.id
                     currentUserRole = authenticated.roleKey
+                    sessionPrefs.edit().putString(SESSION_USER_ID, authenticated.id)
+                        .putString(SESSION_SCREEN, "POS").putString(SESSION_CART, "[]").apply()
                     showPointOfSale()
                 } else Toast.makeText(
                     this@MainActivity, "اسم المستخدم أو كلمة المرور غير صحيحة", Toast.LENGTH_SHORT
@@ -297,8 +300,9 @@ class MainActivity : Activity() {
         setContentView(page)
     }
 
-    private fun showPointOfSale() {
-        cart.clear()
+    private fun showPointOfSale(preserveCart: Boolean = false) {
+        markScreen("POS")
+        if (!preserveCart) cart.clear()
         loadCatalog()
         val page = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
@@ -501,6 +505,7 @@ class MainActivity : Activity() {
                         date, 0L, null, lines, saleType
                     )
                     pendingCheckoutDraftId = saved.invoiceId
+                    sessionPrefs.edit().putString(SESSION_CHECKOUT_DRAFT, pendingCheckoutDraftId).apply()
                     val posted = if (isCredit) {
                         InvoiceRepository(this).postSale(saved.invoiceId, UUID.randomUUID().toString())
                     } else {
@@ -509,6 +514,7 @@ class MainActivity : Activity() {
                     require(posted) { "الفاتورة مسجلة مسبقاً؛ حدّث الشاشة لمراجعة حالتها" }
                     val invoiceNumber = saved.invoiceNumber
                     pendingCheckoutDraftId = null
+                    sessionPrefs.edit().remove(SESSION_CHECKOUT_DRAFT).apply()
                     cart.clear()
                     dialog.dismiss()
                     Toast.makeText(
@@ -649,6 +655,7 @@ class MainActivity : Activity() {
     }
 
     private fun renderCart() {
+        sessionPrefs.edit().putString(SESSION_CART, serializeCart()).apply()
         if (!::cartContainer.isInitialized) return
         cartContainer.removeAllViews()
         if (cart.isEmpty()) {
@@ -748,9 +755,7 @@ class MainActivity : Activity() {
             setBackgroundColor(green)
             setOnClickListener {
                 popup.dismiss()
-                cart.clear()
-                currentUserId = null
-                currentUserRole = "CASHIER"
+                clearSessionState()
                 showLoginScreen()
             }
         }
@@ -770,6 +775,7 @@ class MainActivity : Activity() {
     )
 
     private fun showPurchases() {
+        markScreen("PURCHASES")
         val repository = PurchasePaymentRepository(this)
         val page = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
@@ -1037,6 +1043,7 @@ class MainActivity : Activity() {
     }
 
     private fun showSuppliers() {
+        markScreen("SUPPLIERS")
         val repository = PurchasePaymentRepository(this)
         val suppliers = repository.listSupplierSummaries()
 
@@ -1103,6 +1110,7 @@ class MainActivity : Activity() {
     }
 
     private fun showSupplierDetails(supplierId: String) {
+        markScreen("SUPPLIER_DETAILS", supplierId)
         val repository = PurchasePaymentRepository(this)
         val supplier = repository.listSupplierSummaries().firstOrNull { it.id == supplierId }
             ?: run { showSuppliers(); return }
@@ -1196,6 +1204,7 @@ class MainActivity : Activity() {
     }
 
     private fun showCustomers() {
+        markScreen("CUSTOMERS")
         val repository = CustomerRepository(this)
         val paymentRepository = CustomerPaymentRepository(this)
         val customers = repository.listActive()
@@ -1291,6 +1300,7 @@ class MainActivity : Activity() {
     }
 
     private fun showCustomerAccount(customerId: String) {
+        markScreen("CUSTOMER_ACCOUNT", customerId)
         val customer = CustomerRepository(this).get(customerId)
         if (customer == null) {
             Toast.makeText(this, "ملف العميل غير موجود", Toast.LENGTH_SHORT).show()
@@ -1583,6 +1593,7 @@ class MainActivity : Activity() {
     private fun isManager(): Boolean = currentUserRole == "ADMIN" && !currentUserId.isNullOrBlank()
 
     private fun showCashAccounts() {
+        markScreen("CASH_ACCOUNTS")
         val repository = CashAccountRepository(this)
         val page = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
@@ -1760,6 +1771,7 @@ class MainActivity : Activity() {
     }
 
     private fun showDailyCashReport() {
+        markScreen("DAILY_REPORT")
         val report = DailyBalanceRepository(this).dailyReport()
         val page = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setBackgroundColor(backgroundColor) }
         val header = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL; setPadding(dp(14), dp(10), dp(14), dp(10)); setBackgroundColor(Color.WHITE) }
@@ -1816,6 +1828,7 @@ class MainActivity : Activity() {
 
 
     private fun showServiceTransfers() {
+        markScreen("SERVICE_TRANSFERS")
         val repo = ServiceTransferRepository(this)
         val page = LinearLayout(this).apply { orientation=LinearLayout.VERTICAL; setBackgroundColor(backgroundColor) }
         val header = LinearLayout(this).apply { orientation=LinearLayout.HORIZONTAL; gravity=Gravity.CENTER_VERTICAL; setPadding(dp(14),dp(10),dp(14),dp(10)); setBackgroundColor(Color.WHITE) }
@@ -2070,6 +2083,7 @@ class MainActivity : Activity() {
     }
 
     private fun showPurchaseInvoiceEditor() {
+        markScreen("PURCHASE_EDITOR")
         val store = StoreRepository(this)
         store.ensureBaseSetup()
         val supplierRepository = SupplierRepository(this)
@@ -2373,6 +2387,7 @@ class MainActivity : Activity() {
     }
 
     private fun showProductManagement() {
+        markScreen("PRODUCTS")
         val repository = StoreRepository(this)
         repository.ensureBaseSetup()
         val page = LinearLayout(this).apply {
