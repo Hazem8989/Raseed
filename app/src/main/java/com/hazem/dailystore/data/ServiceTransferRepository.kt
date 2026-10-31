@@ -81,6 +81,26 @@ class ServiceTransferRepository(context:Context) {
         } finally {db.endTransaction()}
     }
 
+    fun rechargeAccountId():String? = database.readableDatabase.rawQuery("SELECT setting_value FROM app_settings WHERE setting_key='service_recharge_cash_account_id'",null).use { if(it.moveToFirst())it.getString(0) else null }
+
+    fun setRechargeAccount(actor:String,accountId:String) {
+        val db=database.writableDatabase;db.beginTransaction()
+        try {
+            requireManager(db,actor)
+            val row=receiptAccount(db,accountId)
+            require(row.first=="CASH_BOX"&&row.second=="SYP"&&row.third){"اختر صندوقاً نقدياً نشطاً بالليرة السورية"}
+            val primary=db.rawQuery("SELECT primary_cash_account_id FROM daily_cash_sessions WHERE operating_date=?",arrayOf(today())).use{if(it.moveToFirst())it.getString(0)else null}
+            require(primary!=accountId){"لا يمكن استخدام درج اليوم الرئيسي لشراء رصيد الخدمات"}
+            val rollover=db.rawQuery("SELECT account_id FROM daily_supplier_rollovers WHERE operating_date=?",arrayOf(today())).use{if(it.moveToFirst())it.getString(0)else null}
+            require(rollover!=accountId){"لا يمكن استخدام صندوق النقد المدور للموردين لشراء رصيد الخدمات"}
+            val old=rechargeAccountId()
+            val now=stamp()
+            val values=ContentValues().apply{put("setting_key","service_recharge_cash_account_id");put("setting_value",accountId);put("updated_at",now)}
+            if(old==null)db.insertOrThrow("app_settings",null,values) else db.update("app_settings",values,"setting_key='service_recharge_cash_account_id'",null)
+            audit(db,actor,"SET_SERVICE_RECHARGE_CASH_ACCOUNT",accountId,old?.let{"{\\"account_id\\":\\"$it\\"}" },"{\\"account_id\\":\\"$accountId\\"}",now)
+            db.setTransactionSuccessful()
+        } finally {db.endTransaction()}
+    }
     /** Syriatel recharge cost is 2% of float purchased; Sham Cash recharge has no surcharge. */
     fun recharge(actor:String,serviceKey:String,sourceAccountId:String,floatAmount:Long,operationId:String,reference:String?=null,note:String?=null):Long {
         require(floatAmount>0L&&operationId.isNotBlank()){"أدخل مبلغ شحن ومعرّف عملية صحيحين"}
@@ -99,7 +119,7 @@ class ServiceTransferRepository(context:Context) {
                 db.setTransactionSuccessful();return fee
             }
             val account=receiptAccount(db,sourceAccountId)
-            require(account.first=="CASH_BOX"&&account.second=="SYP"&&account.third){"شراء رصيد الخدمات يجب أن يُموّل حصراً من صندوق شراء الرصيد النقدي النشط بالليرة السورية"}
+            require(account.first=="CASH_BOX"&&account.second=="SYP"&&account.third&&rechargeAccountId()==sourceAccountId){"يجب اختيار صندوق شراء رصيد الخدمات المخصص من شاشة الصناديق والمحافظ"}
             require(cashBalance(db,sourceAccountId)>=debit){"رصيد صندوق شراء الرصيد لا يكفي لقيمة الشحن والعمولة"}
             val now=stamp()
             insertCashMovement(db,sourceAccountId,"OUT",debit,"SERVICE_RECHARGE","SERVICE_RECHARGE",operationId,operationId+":SOURCE",actor,
