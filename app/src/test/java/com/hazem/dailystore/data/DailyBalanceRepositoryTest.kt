@@ -93,6 +93,24 @@ class DailyBalanceRepositoryTest {
         assertEquals(20_000L, row.closingMinor)
     }
 
+    @Test fun coreCashBoxesCanBeFundedByBalancedInternalTransfers() {
+        val drawer = accounts.create("درج تمويل أساسي " + UUID.randomUUID(), "CASH_BOX", "SYP", 50_000L)
+        val supplier = accounts.create("صندوق موردين أساسي " + UUID.randomUUID(), "CASH_BOX", "SYP", 0L)
+        val recharge = accounts.create("صندوق تعبئة أساسي " + UUID.randomUUID(), "CASH_BOX", "SYP", 0L)
+        accounts.setCurrentDayPrimaryDrawer("ADMIN", actorId, drawer.id)
+        daily.transferCashBetweenBoxes(actorId, drawer.id, supplier.id, 20_000L,
+            "cash-to-supplier-" + UUID.randomUUID(), "تخصيص نقد الموردين")
+        val rollover = daily.setSupplierRollover(actorId, supplier.id, 20_000L, "نقد مدور")
+        assertEquals(20_000L, rollover.availableMinor)
+        daily.transferCashBetweenBoxes(actorId, drawer.id, recharge.id, 10_000L,
+            "cash-to-recharge-" + UUID.randomUUID(), "تمويل شراء رصيد الخدمات")
+        assertEquals(20_000L, accounts.balance(drawer.id))
+        assertEquals(20_000L, accounts.balance(supplier.id))
+        assertEquals(10_000L, accounts.balance(recharge.id))
+        assertEquals(accounts.balance(drawer.id),
+            daily.dailyReport().accounts.single { it.accountId == drawer.id }.closingMinor)
+    }
+
     @Test fun supplierRolloverIsSeparateAndPersonalWithdrawalsReduceItsAvailability() {
         val drawer = accounts.create("درج رئيسي " + UUID.randomUUID(), "CASH_BOX", "SYP", 0L)
         val supplierCash = accounts.create("نقد الموردين " + UUID.randomUUID(), "CASH_BOX", "SYP", 100_000L)
