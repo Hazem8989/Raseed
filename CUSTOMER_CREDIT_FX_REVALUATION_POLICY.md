@@ -29,3 +29,25 @@ Status: Approved business rule; implementation pending.
 - If the data model cannot reliably distinguish credit from cash sales, or cannot identify the unpaid portion, do not guess or silently revalue; add the required explicit state and migration first.
 - Existing historical invoices without a reliable original exchange-rate snapshot must not be revalued automatically until a safe migration/backfill rule is approved.
 - This feature is not implemented merely by this policy document. It requires database migration, repository logic, customer-account UI, and automated tests.
+
+
+## Final clarification: SYP-only collection and USD reference (approved 2026-10-31)
+
+This section is the final approved rule and supersedes any earlier ambiguity about the currency accepted when collecting customer credit.
+
+1. **Collection currency:** customer credit is collected in SYP only. Do not offer USD accounts as a payment method for customer credit settlement.
+2. **Debt reference:** at the original credit sale, retain the invoice's SYP value and original sale-time FX snapshot, and establish the corresponding USD reference amount. The original invoice and snapshot remain immutable.
+3. **Outstanding valuation:** for each invoice, value the remaining unpaid USD reference using `max(current_rate, original_invoice_rate)`. If the rate rises, the SYP debt rises. If it falls, the remaining debt's SYP valuation cannot fall below the original-rate SYP floor for that remaining balance.
+4. **Converting a SYP payment into a reference reduction:** use `effective_collection_rate = max(collection_time_rate, original_invoice_rate)`; then convert the received SYP amount to its USD-reference reduction at that effective rate. This rule is mandatory to preserve the original SYP floor when the market rate falls below the sale-time rate.
+5. **Per-invoice allocation:** if one payment is allocated across multiple invoices, calculate each allocation separately using that invoice's own original rate. Never use a blended exchange rate across invoices.
+6. **Audit record:** retain SYP amount received, collection-time rate, original invoice rate, effective collection rate, USD-reference reduction, invoice allocation, cash-account transaction, timestamp, actor, and idempotency key. Use integer minor-unit arithmetic with explicit rounding.
+7. **Partial payment:** only the allocated unpaid reference amount is reduced; previous payments are immutable. Revaluation is applied only to the unpaid merchandise balance and must be idempotent.
+8. **Legacy protection:** invoices without a reliable original FX snapshot are not automatically revalued or converted under this rule until safely reviewed.
+
+### Worked examples
+
+- Original debt: 1,500 SYP at 150 SYP/USD = $10 reference.
+- If the rate rises to 200 and the customer pays 1,000 SYP: effective rate is 200, the reference reduction is $5, and $5 remains, valued at 1,000 SYP.
+- If the rate falls to 100 and the customer pays 750 SYP: effective rate remains the original 150, the reference reduction is $5, and $5 remains, valued at the 750 SYP original-rate floor.
+
+Status remains **approved business rule; implementation pending**. This document does not mean the feature is already available in the APK.

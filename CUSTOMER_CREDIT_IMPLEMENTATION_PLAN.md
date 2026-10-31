@@ -57,3 +57,20 @@ Implementation status: policy documented; implementation pending.
 - Debug APK builds successfully and the artifact is verified.
 - User tests the APK on the Android phone before the milestone is marked complete.
 - All work remains on the-daily-shop-development; main must not be modified.
+
+
+## Final collection-currency clarification (approved 2026-10-31)
+
+This clarification supersedes any earlier wording in this plan that implied customer credit invoices may be collected through either USD or SYP accounts.
+
+- Customer credit collections must be received in **Syrian pounds (SYP) only**. The collection UI must not offer a USD cash account for settling customer credit.
+- At credit-sale posting, preserve the invoice's original SYP amount and original sale-time exchange-rate snapshot, and preserve its USD reference amount calculated from that snapshot.
+- The outstanding debt is tracked against that USD reference. Its SYP valuation is calculated using the greater of the current exchange rate and the original invoice rate. A rise in the rate therefore increases the SYP amount due; a fall never takes the SYP value below the original sale-time SYP floor for the remaining eligible balance.
+- For a SYP collection, convert the amount received into the USD reference reduction using the **effective collection rate = max(current collection-time rate, original invoice rate)**. This is essential: when the current rate is below the original rate, using the lower current rate would over-reduce the USD reference and violate the original SYP floor.
+- Example: a 1,500 SYP credit balance posted at 150 SYP/USD creates a $10 reference debt. At 200 SYP/USD, 1,000 SYP collected reduces the reference by $5, leaving $5 (valued at 1,000 SYP). At 100 SYP/USD, 750 SYP collected reduces the reference by $5 using the original 150 rate, leaving $5 (valued at the 750 SYP original-rate floor).
+- Persist the SYP amount received, collection-time rate, original invoice rate, effective collection rate, USD reference reduction, invoice allocation, account movement, timestamp, actor, and idempotency key. Use integer minor units and explicit rounding; never floating-point money.
+- For a customer with multiple eligible credit invoices, allocate each SYP payment to selected invoice(s) and calculate the USD reduction per invoice using that invoice's own original rate. Do not apply one blended rate across invoices with different snapshots.
+- Partial collections reduce only the allocated unpaid reference balance; prior payments remain immutable. Revaluation must never alter the original invoice or duplicate on account viewing/retry.
+- Legacy invoices without a trustworthy original exchange-rate snapshot remain excluded from automatic revaluation and collection conversion under this rule until safely reviewed.
+
+Implementation remains pending: database/repository logic, SYP-only collection UI, migration/backfill safeguards, account statement display, and automated tests must be completed before this milestone is considered implemented.

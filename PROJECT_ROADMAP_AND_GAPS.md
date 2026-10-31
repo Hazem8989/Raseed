@@ -145,3 +145,13 @@ This section distinguishes code present from features that are merely planned. B
 - Use idempotency keys for all retryable financial and stock operations.
 - Do not claim a feature is complete based only on a schema table, UI element, documentation, or successful APK build.
 - A milestone is complete only after code, automated tests, verified APK, and required user-device acceptance.
+
+
+### Customer credit collection — final currency rule (approved 2026-10-31)
+
+- Customer credit invoices are collected in **SYP only**; the customer-credit collection UI must not offer USD payment accounts.
+- Each credit invoice retains its original sale-time SYP value and FX snapshot, plus its USD reference amount.
+- Outstanding SYP valuation uses `max(current exchange rate, original invoice exchange rate)`: increases in the rate increase the SYP debt; decreases never take it below the original-rate floor for the remaining balance.
+- A SYP payment reduces the USD reference using `max(collection-time rate, original invoice rate)`, calculated separately for each invoice allocation. This prevents a below-original exchange rate from reducing the USD debt by too much and breaching the SYP floor.
+- Preserve the SYP received, collection-time/original/effective rates, USD reference reduction, invoice allocation, and linked cash movement in an immutable idempotent audit trail.
+- This is an approved specification only. SYP-only collection conversion, revaluation ledger, UI, migration safeguards, and tests remain pending implementation.
