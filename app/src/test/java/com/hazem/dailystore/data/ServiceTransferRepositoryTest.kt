@@ -55,8 +55,8 @@ class ServiceTransferRepositoryTest {
         val cash = daily.single { it.serviceType == ServiceTransferRepository.SYRIATEL_CASH }
         assertEquals(2_000L, normal.profitMinor)
         assertEquals(2_000L, cash.profitMinor)
-        assertEquals(10_000L, normal.customerReceiptsMinor)
-        assertEquals(20_000L, cash.customerReceiptsMinor)
+        assertEquals(12_500L, normal.customerReceiptsMinor)
+        assertEquals(22_000L, cash.customerReceiptsMinor)
         assertEquals(10_000L, normal.rechargeReserveMinor)
         assertEquals(20_000L, cash.rechargeReserveMinor)
     }
@@ -73,8 +73,7 @@ class ServiceTransferRepositoryTest {
         assertEquals(50_000L, repo.listWallets().single { it.serviceKey == ServiceTransferRepository.SYRIATEL_SHARED }.balanceMinor)
         assertEquals(20_000L, repo.listWallets().single { it.serviceKey == ServiceTransferRepository.SHAM_CASH }.balanceMinor)
         val rechargeRows = repo.dailySummary()
-        assertEquals(1_000L, rechargeRows.single { it.serviceType == ServiceTransferRepository.SYRIATEL_BALANCE }.rechargeFeePaidMinor)
-        assertEquals(400L, rechargeRows.single { it.serviceType == ServiceTransferRepository.SHAM_CASH_TRANSFER }.rechargeFeePaidMinor)
+        assertEquals(0L, rechargeRows.single { it.serviceType == ServiceTransferRepository.SHAM_CASH_TRANSFER }.rechargeFeePaidMinor)
     }
 
     @Test fun electronicReceiptIncreasesCollectionWalletNotServiceFloat() {
@@ -107,6 +106,9 @@ class ServiceTransferRepositoryTest {
         assertEquals(400L, shamFee)
         assertEquals(28_600L, accounts.balance(source.id))
         assertEquals(20_000L, repo.listWallets().single { it.serviceKey == ServiceTransferRepository.SHAM_CASH }.balanceMinor)
+        val daily = repo.dailySummary()
+        assertEquals(1_000L, daily.single { it.serviceType == ServiceTransferRepository.SYRIATEL_BALANCE }.rechargeFeePaidMinor)
+        assertEquals(400L, daily.single { it.serviceType == ServiceTransferRepository.SHAM_CASH_TRANSFER }.rechargeFeePaidMinor)
     }
 
 
