@@ -154,7 +154,7 @@ This section distinguishes code present from features that are merely planned. B
 - Record personal withdrawals as distinct cash outflows that reduce the allocated available balance and remain visible in the day's statement.
 - Record each e-wallet's daily opening balance independently, either manually or through a documented purchase/top-up operation for Cash or Sham Cash, without double-counting.
 - Store sales and customer-debt receipts received through a selected wallet increase that wallet automatically by the full amount, with no provider fee charged/deducted for these internal store transactions.
-- Show electronic wallet receipts in the daily sales/collections statement by source (today's sales vs old-debt collections vs top-ups), while keeping them separate from physical cash; provide an atomic, auditable internal wallet-to-cash transfer when wallet funds are actually liquidated, without recording a second sale or revenue.
+- Show electronic wallet receipts in the daily sales/collections statement by source (today's sales vs old-debt collections vs top-ups), including customer-debt collections in the daily electronic receipts total available for liquidation (without classifying them as new sales or profit), while keeping them separate from physical cash; provide an atomic, auditable internal wallet-to-cash transfer when wallet funds are actually liquidated, without recording a second sale or revenue.
 - This is an approved requirement for the future daily balance implementation phase; it is not yet implemented. Detailed rules and tests are in DAILY_CASH_AND_WALLET_BALANCE_POLICY.md.
 
 ### Customer credit collection — final currency rule (approved 2026-10-31)
