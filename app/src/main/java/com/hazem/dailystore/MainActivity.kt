@@ -272,10 +272,6 @@ class MainActivity : Activity() {
         }
         val customers = CustomerRepository(this).listActive()
         val accounts = CashAccountRepository(this).listActive()
-        if (customers.isEmpty() && accounts.isEmpty()) {
-            Toast.makeText(this, "أضف عميلاً أو صندوقاً/محفظة نشطة أولاً لإتمام البيع", Toast.LENGTH_LONG).show()
-            return
-        }
         val totalUsd = cartTotalUsdCents()
         val content = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
@@ -293,7 +289,7 @@ class MainActivity : Activity() {
         val creditMode = RadioButton(this).apply { id = View.generateViewId(); text = "بيع آجل"; isEnabled = true }
         mode.addView(cashMode)
         mode.addView(creditMode)
-        if (accounts.isEmpty() && customers.isNotEmpty()) creditMode.isChecked = true
+        if (accounts.isEmpty()) creditMode.isChecked = true
         content.addView(label("نوع البيع", 13f, mutedColor, true, Gravity.RIGHT))
         content.addView(mode, fieldParams(dp(48), dp(8)))
 
