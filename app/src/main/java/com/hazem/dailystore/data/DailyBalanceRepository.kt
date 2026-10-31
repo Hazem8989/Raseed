@@ -102,36 +102,45 @@ class DailyBalanceRepository(context:Context) {
         } finally {db.endTransaction()}
     }
 
-    fun addWalletTopUp(actor:String,walletId:String,amount:Long,operationId:String,reference:String?=null,note:String?=null) {
-        require(amount>0L&&operationId.isNotBlank()){"أدخل مبلغاً ومعرّف عملية صحيحين"}
-        val cleanReference=reference?.trim()?.takeIf { it.isNotEmpty() }
-            ?: throw IllegalArgumentException("مرجع عملية التغذية مطلوب لمنع تكرار تسجيل الرصيد")
+    fun transferCashToWallet(actor:String,sourceAccountId:String,walletId:String,amount:Long,operationId:String,reference:String?=null,note:String?=null):AccountTransferResult {
+        require(amount>0L&&operationId.isNotBlank()) { "بيانات التحويل غير مكتملة" }
+        require(sourceAccountId.isNotBlank()&&walletId.isNotBlank()&&sourceAccountId!=walletId) { "اختر صندوقاً ومحفظة مختلفين" }
         val db=database.writableDatabase;manager(db,actor);db.beginTransaction()
         try {
-            val w=account(db,walletId);require(w.type=="WALLET"&&w.active){"اختر محفظة إلكترونية نشطة"}
-            val openingAlreadyContainsReference=db.rawQuery(
-                "SELECT 1 FROM wallet_daily_openings WHERE operating_date=? AND account_id=? AND note=?",
-                arrayOf(today(),walletId,cleanReference)
-            ).use { it.moveToFirst() }
-            require(!openingAlreadyContainsReference) {
-                "هذا المرجع مسجل ضمن الرصيد الافتتاحي اليدوي اليوم؛ لن نضيفه مرة ثانية"
+            val payload=hash(sourceAccountId+"|"+walletId+"|"+amount+"|"+reference.orEmpty()+"|"+note.orEmpty())
+            val old=db.rawQuery("SELECT id,source_account_id,destination_account_id,amount_minor,payload_hash FROM cash_account_transfers WHERE operation_id=?",arrayOf(operationId)).use {
+                if(it.moveToFirst()) arrayOf(it.getString(0),it.getString(1),it.getString(2),it.getLong(3).toString(),it.getString(4)) else null
             }
-            val sameReference=db.rawQuery(
-                "SELECT account_id,amount_minor FROM cash_transactions WHERE transaction_type='WALLET_TOP_UP' AND source_type='WALLET_TOP_UP' AND source_id=?",
-                arrayOf(cleanReference)
-            ).use { if(it.moveToFirst()) Pair(it.getString(0),it.getLong(1)) else null }
-            if(sameReference!=null) {
-                require(sameReference.first==walletId&&sameReference.second==amount) {
-                    "مرجع التغذية مستخدم مسبقاً بمبلغ أو محفظة مختلفة"
-                }
-                db.setTransactionSuccessful();return
+            if(old!=null) {
+                require(old[1]==sourceAccountId&&old[2]==walletId&&old[3]==amount.toString()&&old[4]==payload) { "معرّف التحويل مستخدم لبيانات مختلفة" }
+                db.setTransactionSuccessful()
+                return AccountTransferResult(old[0]!!,true)
             }
-            val old=db.rawQuery("SELECT account_id,amount_minor,transaction_type,source_id FROM cash_transactions WHERE operation_id=?",arrayOf(operationId)).use { if(it.moveToFirst())arrayOf(it.getString(0),it.getLong(1).toString(),it.getString(2),it.getString(3))else null }
-            if(old!=null){require(old[0]==walletId&&old[1]==amount.toString()&&old[2]=="WALLET_TOP_UP"&&old[3]==cleanReference){"معرّف العملية مستخدم لبيانات مختلفة"};db.setTransactionSuccessful();return}
-            val now=stamp();movement(db,walletId,"IN",amount,w.currency,"WALLET_TOP_UP","WALLET_TOP_UP",cleanReference,operationId,actor,note?:"تغذية رصيد محفظة",now)
-            audit(db,actor,"WALLET_TOP_UP","CASH_ACCOUNT",walletId,null,"{\"amount_minor\":"+amount+",\"currency\":\""+w.currency+"\",\"reference\":\""+esc(cleanReference)+"\"}",now)
+            val source=account(db,sourceAccountId)
+            require(source.type=="CASH_BOX"&&source.currency=="SYP"&&source.active) { "مصدر التمويل يجب أن يكون صندوقاً نقدياً نشطاً بالليرة السورية" }
+            val target=account(db,walletId)
+            require(target.type=="WALLET"&&target.currency=="SYP"&&target.active) { "وجهة التحويل يجب أن تكون محفظة نشطة بالليرة السورية" }
+            val rechargeId=db.rawQuery("SELECT setting_value FROM app_settings WHERE setting_key='service_recharge_cash_account_id'",null).use { if(it.moveToFirst())it.getString(0)else null }
+            require(sourceAccountId!=rechargeId) { "استخدم عملية شراء رصيد الخدمات المخصصة لتمويل محفظة الخدمة" }
+            val supplierId=db.rawQuery("SELECT account_id FROM daily_supplier_rollovers WHERE operating_date=?",arrayOf(today())).use { if(it.moveToFirst())it.getString(0)else null }
+            require(sourceAccountId!=supplierId) { "لا يمكن تمويل المحافظ من صندوق النقد المدور للموردين" }
+            require(balance(db,sourceAccountId)>=amount) { "رصيد صندوق المصدر غير كافٍ" }
+            val id=UUID.randomUUID().toString();val now=stamp()
+            val v=ContentValues().apply {
+                put("id",id);put("operation_id",operationId);put("source_account_id",sourceAccountId);put("destination_account_id",walletId)
+                put("amount_minor",amount);put("currency_code","SYP");put("reference",reference);put("note",note)
+                put("payload_hash",payload);put("created_by",actor);put("created_at",now)
+            }
+            db.insertOrThrow("cash_account_transfers",null,v)
+            movement(db,sourceAccountId,"OUT",amount,"SYP","ACCOUNT_TRANSFER_OUT","ACCOUNT_TRANSFER",id,operationId+":OUT",actor,
+                "تحويل نقدية إلى "+target.name,now)
+            movement(db,walletId,"IN",amount,"SYP","ACCOUNT_TRANSFER_IN","ACCOUNT_TRANSFER",id,operationId+":IN",actor,
+                "تمويل محفظة من "+source.name,now)
+            audit(db,actor,"CASH_TO_WALLET_TRANSFER","CASH_ACCOUNT_TRANSFER",id,null,
+                "{\"source_account_id\":\""+esc(sourceAccountId)+"\",\"destination_account_id\":\""+esc(walletId)+"\",\"amount_minor\":"+amount+"}",now)
             db.setTransactionSuccessful()
-        } finally {db.endTransaction()}
+            return AccountTransferResult(id,false)
+        } finally { db.endTransaction() }
     }
 
     fun addPersonalWithdrawal(actor:String,accountId:String,amount:Long,operationId:String,note:String?=null) {
