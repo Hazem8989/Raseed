@@ -24,7 +24,9 @@ data class CustomerFinancialSummary(
 data class CustomerPaymentRecord(
     val id: String, val amountMinor: Long, val currencyCode: String,
     val accountName: String, val accountType: String, val createdAt: String,
-    val note: String?, val effectiveRateMilli: Long
+    val note: String?, val originalInvoiceRateMilli: Long,
+    val collectionRateMilli: Long, val effectiveRateMilli: Long,
+    val usdReferenceReductionCents: Long
 )
 data class CustomerCreditRevaluationRecord(
     val previousSypMinor: Long, val newSypMinor: Long,
@@ -104,17 +106,28 @@ class CustomerPaymentRepository(context: Context) {
         val result = mutableListOf<CustomerPaymentRecord>()
         database.readableDatabase.rawQuery(
             """SELECT p.id,p.amount_minor,p.currency_code,a.name,a.account_type,
-                      p.created_at,t.description,COALESCE(p.exchange_rate_syp_per_usd_milli,0)
+                      p.created_at,t.description,COALESCE(i.exchange_rate_syp_per_usd_milli,0),
+                      COALESCE(t.exchange_rate_syp_per_usd_milli,0),
+                      COALESCE(p.exchange_rate_syp_per_usd_milli,0)
                FROM invoice_payments p
                JOIN cash_transactions t ON t.id=p.cash_transaction_id
                JOIN cash_accounts a ON a.id=t.account_id
+               JOIN sales_invoices i ON i.id=p.invoice_id
                WHERE p.invoice_type='SALE' AND p.invoice_id=?
                ORDER BY p.created_at DESC""".trimIndent(), arrayOf(invoiceId)
         ).use { c ->
-            while (c.moveToNext()) result.add(CustomerPaymentRecord(
-                c.getString(0), c.getLong(1), c.getString(2), c.getString(3), c.getString(4),
-                c.getString(5), if (c.isNull(6)) null else c.getString(6), c.getLong(7)
-            ))
+            while (c.moveToNext()) {
+                val amount = c.getLong(1)
+                val currency = c.getString(2)
+                val effectiveRate = c.getLong(9)
+                val usdReduction = if (currency == "SYP" && effectiveRate > 0L)
+                    CurrencyConverter.sypToUsdCents(amount, effectiveRate) else amount
+                result.add(CustomerPaymentRecord(
+                    c.getString(0), amount, currency, c.getString(3), c.getString(4),
+                    c.getString(5), if (c.isNull(6)) null else c.getString(6),
+                    c.getLong(7), c.getLong(8), effectiveRate, usdReduction
+                ))
+            }
         }
         return result
     }
