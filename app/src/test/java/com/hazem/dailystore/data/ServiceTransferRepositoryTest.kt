@@ -90,7 +90,7 @@ class ServiceTransferRepositoryTest {
         assertEquals(0L, rechargeRows.single { it.serviceType == ServiceTransferRepository.SHAM_CASH_TRANSFER }.rechargeFeePaidMinor)
     }
 
-    @Test fun electronicReceiptIncreasesCollectionWalletNotServiceFloat() {
+    @Test fun electronicServiceReceiptIsAddedToTheSameOperationalWallet() {
         val collection = repo.serviceAccountId(ServiceTransferRepository.SYRIATEL_SHARED)
         repo.setOpeningBalance(actor, ServiceTransferRepository.SYRIATEL_SHARED, 40_000L)
         val result = repo.executeTransfer(actor, ServiceTransferRepository.SYRIATEL_BALANCE,
@@ -100,7 +100,7 @@ class ServiceTransferRepositoryTest {
         assertEquals("ELECTRONIC", repo.listTransfers().first().receiptChannel)
         assertEquals(6_000L, result.customerChargeMinor)
         val daily = DailyBalanceRepository(RuntimeEnvironment.getApplication()).dailyReport()
-        val row = daily.accounts.single { it.accountId == collection.id }
+        val row = daily.accounts.single { it.accountId == collection }
         assertEquals(6_000L, row.serviceTransferReceiptsMinor)
         assertEquals(6_000L, row.electronicReceiptsMinor)
         assertEquals(6_000L, row.liquidatableElectronicReceiptsMinor)
