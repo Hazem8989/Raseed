@@ -312,6 +312,7 @@ class InvoiceRepository(context: Context) {
                     put("source_id", invoiceId)
                     put("operation_id", operationId)
                     put("description", "قبض قيمة فاتورة البيع " + invoiceNumber)
+                    put("operating_date", SimpleDateFormat("yyyy-MM-dd", Locale.US).format(Date()))
                     put("created_at", now)
                 }
                 db.insertOrThrow("cash_transactions", null, cash)
