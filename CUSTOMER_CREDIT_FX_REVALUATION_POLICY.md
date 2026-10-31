@@ -1,6 +1,6 @@
 # Customer Credit FX Revaluation Policy
 
-Status: Approved business rule; implementation pending.
+Status: Approved business rule; implemented in code and automated tests passed on 2026-10-31. APK phone acceptance remains pending.
 
 ## Scope
 - This rule applies only to merchandise sold on credit to a customer.
@@ -50,7 +50,7 @@ This section is the final approved rule and supersedes any earlier ambiguity abo
 - If the rate rises to 200 and the customer pays 1,000 SYP: effective rate is 200, the reference reduction is $5, and $5 remains, valued at 1,000 SYP.
 - If the rate falls to 100 and the customer pays 750 SYP: effective rate remains the original 150, the reference reduction is $5, and $5 remains, valued at the 750 SYP original-rate floor.
 
-Status remains **approved business rule; implementation pending**. This document does not mean the feature is already available in the APK.
+Implementation status: the SYP-only collection conversion, FX floor, immutable revaluation ledger, and statement details are implemented in the development APK. Build and unit tests passed on 2026-10-31; user-device acceptance is still required.
 
 
 ## Receiving account and daily cash classification (approved 2026-10-31)
