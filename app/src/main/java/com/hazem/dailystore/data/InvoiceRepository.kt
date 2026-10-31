@@ -248,21 +248,21 @@ class InvoiceRepository(context: Context) {
                     val accountType=account.first
                     val accountCurrency=account.second
                     require(accountCurrency == "USD" || accountCurrency == "SYP") { "عملة حساب القبض غير مدعومة" }
-                    if(accountType=="CASH_BOX") {
+                    if(accountType=="CASH_BOX" && accountCurrency=="SYP") {
                         val date=SimpleDateFormat("yyyy-MM-dd",Locale.US).format(Date())
                         val primary=db.rawQuery("SELECT primary_cash_account_id FROM daily_cash_sessions WHERE operating_date=?",arrayOf(date)).use {
                             if(it.moveToFirst())it.getString(0)else null
                         }
                         require(primary==selectedAccountId) {
-                            "قبض المبيعات النقدي يجب أن يذهب إلى درج البيع اليومي الرئيسي فقط"
+                            "قبض المبيعات النقدي بالليرة يجب أن يذهب إلى درج البيع اليومي الرئيسي فقط"
                         }
                         val supplierRole=db.rawQuery(
                             "SELECT 1 FROM system_cash_account_roles WHERE role_key='SUPPLIER_ROLLOVER' AND account_id=?",
                             arrayOf(selectedAccountId)
                         ).use{it.moveToFirst()}
                         require(!supplierRole) { "صندوق النقد المدور للموردين لا يستقبل مبيعات" }
-                    } else require(accountType=="WALLET") {
-                        "يجب اختيار درج البيع اليومي أو محفظة إلكترونية نشطة لقبض المبيعات"
+                    } else require(accountType=="WALLET" || accountType=="CASH_BOX") {
+                        "يجب اختيار صندوق نقدي أو محفظة إلكترونية نشطة لقبض المبيعات"
                     }
                     val amount = when (accountCurrency) {
                         "USD" -> totalUsdCents
