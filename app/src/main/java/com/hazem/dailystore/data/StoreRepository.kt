@@ -335,6 +335,91 @@ class StoreRepository(context: Context) {
         error("وحدة القياس غير معروفة: $rawName؛ أضفها من إعدادات الوحدات ثم أعد الاستيراد")
     }
 
+    /**
+     * Records the first verified physical count for an imported/new item.
+     * It is intentionally one-time: subsequent stock changes must be posted as
+     * purchases, sales, returns or explicit stock adjustments, never overwritten.
+     */
+    fun recordOpeningStock(productId: String, quantity: Double, actorUserId: String, note: String?): Unit {
+        require(productId.isNotBlank() && actorUserId.isNotBlank()) { "بيانات العملية غير مكتملة" }
+        require(quantity > 0.0 && quantity.isFinite()) { "كمية الجرد يجب أن تكون أكبر من صفر" }
+        val db = helper.writableDatabase
+        val now = timestamp()
+        db.beginTransaction()
+        try {
+            val product = db.rawQuery(
+                """SELECT p.track_inventory,p.purchase_cost_usd_cents,u.decimal_places
+                   FROM products p JOIN units u ON u.id=p.unit_id WHERE p.id=?""".trimIndent(),
+                arrayOf(productId)
+            ).use { cursor ->
+                require(cursor.moveToFirst()) { "المنتج غير موجود" }
+                Triple(cursor.getInt(0) == 1, cursor.getLong(1), cursor.getInt(2))
+            }
+            require(product.first) { "هذا المنتج لا يتتبع المخزون" }
+            require(product.second > 0L) {
+                "تكلفة شراء المنتج غير مسجلة؛ حدّث تكلفة الشراء أولاً حتى لا يدخل المخزون في رأس المال بقيمة مجهولة"
+            }
+            val precision = BigDecimal.valueOf(quantity).stripTrailingZeros().scale().coerceAtLeast(0)
+            require(precision <= product.third) { "دقة الكمية تتجاوز المنازل العشرية المسموحة لوحدة القياس" }
+            val priorMovement = db.rawQuery(
+                "SELECT 1 FROM inventory_movements WHERE product_id=? LIMIT 1",
+                arrayOf(productId)
+            ).use { it.moveToFirst() }
+            require(!priorMovement) {
+                "يوجد سجل حركة سابق لهذا المنتج؛ لا يجوز إنشاء رصيد افتتاحي جديد فوق سجل قائم. استخدم تسوية جرد مستقلة."
+            }
+            val warehouseId = db.rawQuery(
+                "SELECT id FROM warehouses WHERE is_default=1 AND is_active=1 LIMIT 1", null
+            ).use { cursor -> require(cursor.moveToFirst()) { "المستودع الرئيسي غير مهيأ" }; cursor.getString(0) }
+            val hasBalance = db.rawQuery(
+                "SELECT 1 FROM inventory_balances WHERE product_id=? AND warehouse_id=?",
+                arrayOf(productId, warehouseId)
+            ).use { it.moveToFirst() }
+            if (hasBalance) {
+                val changed = db.execSQL(
+                    "UPDATE inventory_balances SET quantity=?,updated_at=? WHERE product_id=? AND warehouse_id=?",
+                    arrayOf(quantity, now, productId, warehouseId)
+                )
+            } else {
+                val balance = ContentValues().apply {
+                    put("product_id", productId)
+                    put("warehouse_id", warehouseId)
+                    put("quantity", quantity)
+                    put("updated_at", now)
+                }
+                db.insertOrThrow("inventory_balances", null, balance)
+            }
+            val movement = ContentValues().apply {
+                put("id", UUID.randomUUID().toString())
+                put("product_id", productId)
+                put("warehouse_id", warehouseId)
+                put("movement_type", "OPENING")
+                put("quantity_delta", quantity)
+                put("unit_cost_usd_cents", product.second)
+                put("source_type", "STOCKTAKE_OPENING")
+                put("source_id", productId)
+                put("operation_id", "OPENING_STOCK:$productId")
+                put("note", note?.trim()?.takeIf { it.isNotEmpty() } ?: "رصيد افتتاحي ناتج عن جرد فعلي")
+                put("created_by", actorUserId)
+                put("created_at", now)
+            }
+            db.insertOrThrow("inventory_movements", null, movement)
+            val audit = ContentValues().apply {
+                put("id", UUID.randomUUID().toString())
+                put("user_id", actorUserId)
+                put("action", "OPENING_STOCK_RECORDED")
+                put("entity_type", "PRODUCT")
+                put("entity_id", productId)
+                put("after_json", """{"quantity":$quantity,"unit_cost_usd_cents":${product.second},"valuation":"FIFO"}""")
+                put("created_at", now)
+            }
+            db.insertOrThrow("audit_log", null, audit)
+            db.setTransactionSuccessful()
+        } finally {
+            db.endTransaction()
+        }
+    }
+
     fun setProductActive(id: String, active: Boolean) {
         val values = ContentValues().apply {
             put("is_active", if (active) 1 else 0)
