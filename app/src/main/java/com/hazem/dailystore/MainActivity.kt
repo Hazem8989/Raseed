@@ -1630,6 +1630,7 @@ class MainActivity : Activity() {
             val channelLabel = if (a.accountType == "WALLET") "إلكتروني" else "نقدي"
             card.addView(label("مبيعات اليوم – قبض " + channelLabel + ": " + formatAccountBalance(a.salesReceiptsMinor, a.currencyCode), 12f, textColor, false, Gravity.RIGHT))
             card.addView(label("تحصيل ديون – قبض " + channelLabel + ": " + formatAccountBalance(a.debtCollectionsMinor, a.currencyCode), 12f, textColor, false, Gravity.RIGHT))
+            card.addView(label("مقبوض تحويل رصيد – قبض " + channelLabel + ": " + formatAccountBalance(a.serviceTransferReceiptsMinor, a.currencyCode), 12f, textColor, false, Gravity.RIGHT))
             val receiptTotalLabel = if (a.accountType == "WALLET") "إجمالي مقبوضات اليوم: "
                 else "إجمالي المقبوضات النقدية في الحساب: "
             card.addView(label(receiptTotalLabel + formatAccountBalance(a.electronicReceiptsMinor, a.currencyCode), 13f, green, true, Gravity.RIGHT))
