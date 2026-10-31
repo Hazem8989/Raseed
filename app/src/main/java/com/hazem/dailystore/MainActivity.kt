@@ -1708,13 +1708,14 @@ class MainActivity : Activity() {
         }
         val repo = DailyBalanceRepository(this)
         val all = CashAccountRepository(this).listActive()
-        val actions = listOf("تحديد النقد المدور للموردين", "تسجيل مسحوبات شخصية", "تحديد الرصيد الافتتاحي لمحفظة", "تغذية / شراء رصيد محفظة", "تحويل محفظة إلى درج الكاش")
+        val actions = listOf("تحديد النقد المدور للموردين", "تسجيل مسحوبات شخصية", "تحديد الرصيد الافتتاحي لمحفظة", "تغذية / شراء رصيد محفظة", "تحويل محفظة إلى صندوق نقدي تختاره")
         val content = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(dp(18), dp(8), dp(18), dp(4)) }
         val action = Spinner(this)
         action.adapter = ArrayAdapter(this, android.R.layout.simple_spinner_dropdown_item, actions)
         val account = Spinner(this)
         val accountHint = label("", 11f, mutedColor, false, Gravity.RIGHT)
         val destination = Spinner(this)
+        val destinationTitle = label("وجهة التحويل النقدية", 12f, mutedColor, false, Gravity.RIGHT)
         val destinationHint = label("", 11f, mutedColor, false, Gravity.RIGHT)
         var dailyOperationsDialog: AlertDialog? = null
         var availableAccounts: List<CashAccountSummary> = emptyList()
@@ -1739,7 +1740,7 @@ class MainActivity : Activity() {
                 selected == 0 -> "أنشئ صندوقاً نقدياً بالليرة السورية مخصصاً لمدفوعات الموردين، غير درج اليوم الرئيسي."
                 selected == 1 -> "حدد النقد المدور للموردين لهذا اليوم أولاً من خيار إدارة الأرصدة اليومية."
                 selected == 2 || selected == 3 -> "أنشئ محفظة إلكترونية نشطة أولاً."
-                else -> "أنشئ محفظة قبض إلكترونية نشطة بالليرة السورية أولاً."
+                else -> "اختر محفظة مصدر نشطة بالليرة السورية أولاً."
             }
             accountHint.visibility = if (options.isEmpty()) View.VISIBLE else View.GONE
             if (previousId != null) {
@@ -1758,6 +1759,7 @@ class MainActivity : Activity() {
                 if (destinationOptions.isEmpty()) listOf("لا توجد وجهة نقدية متاحة")
                 else destinationOptions.map { it.name + " • " + formatAccountBalance(it.balanceMinor, it.currencyCode) })
             destination.isEnabled = destinationOptions.isNotEmpty()
+            destinationTitle.visibility = if (selected == 4) View.VISIBLE else View.GONE
             destination.visibility = if (selected == 4) View.VISIBLE else View.GONE
             destinationHint.visibility = if (selected == 4 && destinationOptions.isEmpty()) View.VISIBLE else View.GONE
             destinationHint.text = "أنشئ صندوقاً نقدياً نشطاً بالليرة السورية، مع استبعاد صندوق الموردين وصندوق شراء رصيد الخدمات."
@@ -1778,7 +1780,7 @@ class MainActivity : Activity() {
         content.addView(label("الحساب المالي", 12f, mutedColor, false, Gravity.RIGHT))
         content.addView(account, fieldParams(dp(48), dp(8)))
         content.addView(accountHint, fieldParams(-2, dp(2)))
-        content.addView(label("وجهة التحويل النقدية", 12f, mutedColor, false, Gravity.RIGHT))
+        content.addView(destinationTitle, fieldParams(-2, dp(2)))
         content.addView(destination, fieldParams(dp(48), dp(8)))
         content.addView(destinationHint, fieldParams(-2, dp(2)))
         content.addView(smallButton("إضافة صندوق أو محفظة") {
