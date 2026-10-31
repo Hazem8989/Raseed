@@ -32,7 +32,7 @@ data class DailyInventoryCapital(
  */
 class InventoryValuationRepository(context: Context) {
     private val db = AppDatabase.getInstance(context).readableDatabase
-    private data class Lot(var quantity: Double, val unitCostUsdCents: Long)
+    private data class Lot(var quantity: Double, val unitCostUsdCents: Long?)
 
     fun dailyCapital(): DailyInventoryCapital {
         val now = Date()
@@ -57,7 +57,6 @@ class InventoryValuationRepository(context: Context) {
         val cutoffText = utcStamp(cutoff)
         val layers = linkedMapOf<String, MutableList<Lot>>()
         val deficits = mutableMapOf<String, Double>()
-        val uncosted = mutableMapOf<String, Double>()
         val balances = mutableMapOf<String, Double>()
         val affectedProducts = mutableSetOf<String>()
 
@@ -97,11 +96,7 @@ class InventoryValuationRepository(context: Context) {
                         if (deficits[key]!! <= 0.0000001) deficits.remove(key)
                     }
                     if (incoming > 0.0000001) {
-                        if (unitCost > 0L) queue.add(Lot(incoming, unitCost))
-                        else {
-                            uncosted[key] = (uncosted[key] ?: 0.0) + incoming
-                            affectedProducts.add(productId)
-                        }
+                        queue.add(Lot(incoming, unitCost.takeIf { it > 0L }))
                     }
                 } else if (delta < 0.0) {
                     var outgoing = -delta
@@ -120,12 +115,19 @@ class InventoryValuationRepository(context: Context) {
             }
         }
 
-        var unvaluedAmount = uncosted.values.sum() + deficits.values.sum()
-        val allKeys = (layers.keys + balances.keys + uncosted.keys + deficits.keys).toSet()
+        var unvaluedAmount = deficits.values.sum()
+        val allKeys = (layers.keys + balances.keys + deficits.keys).toSet()
+        for (key in allKeys) {
+            val missingCost = layers[key].orEmpty().filter { it.unitCostUsdCents == null }.sumOf { it.quantity }
+            if (missingCost > 0.0000001) {
+                affectedProducts.add(key.substringBefore("|"))
+                unvaluedAmount += missingCost
+            }
+        }
         if (reconcileWithCurrentBalances) {
             for (key in allKeys) {
-                val ledgerQuantity = (layers[key]?.sumOf { it.quantity } ?: 0.0) +
-                    (uncosted[key] ?: 0.0) - (deficits[key] ?: 0.0)
+                val ledgerQuantity = (layers[key]?.sumOf { it.quantity } ?: 0.0) -
+                    (deficits[key] ?: 0.0)
                 val actualQuantity = balances[key] ?: 0.0
                 val difference = actualQuantity - ledgerQuantity
                 if (kotlin.math.abs(difference) > 0.0000001) {
@@ -142,9 +144,9 @@ class InventoryValuationRepository(context: Context) {
             if (productId in affectedProducts) continue
             for (lot in layers[key].orEmpty()) {
                 if (lot.quantity <= 0.0000001) continue
+                val unitCost = lot.unitCostUsdCents ?: continue
                 total = total.add(
-                    BigDecimal.valueOf(lot.unitCostUsdCents)
-                        .multiply(BigDecimal.valueOf(lot.quantity))
+                    BigDecimal.valueOf(unitCost).multiply(BigDecimal.valueOf(lot.quantity))
                 )
                 valuedQuantity += lot.quantity
             }
