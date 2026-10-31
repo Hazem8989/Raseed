@@ -1606,9 +1606,12 @@ class MainActivity : Activity() {
         list.addView(label("التاريخ: " + report.operatingDate, 13f, mutedColor, false, Gravity.RIGHT))
         val electronicText = if (report.electronicReceiptsByCurrency.isEmpty()) "لا توجد مقبوضات إلكترونية" else
             report.electronicReceiptsByCurrency.entries.joinToString(" • ") { formatAccountBalance(it.value, it.key) }
+        val liquidatableText = if (report.liquidatableElectronicReceiptsByCurrency.isEmpty()) "لا يوجد مبلغ إلكتروني متبقٍ" else
+            report.liquidatableElectronicReceiptsByCurrency.entries.joinToString(" • ") { formatAccountBalance(it.value, it.key) }
         val physicalText = if (report.physicalCashReceiptsByCurrency.isEmpty()) "لا توجد مقبوضات نقدية" else
             report.physicalCashReceiptsByCurrency.entries.joinToString(" • ") { formatAccountBalance(it.value, it.key) }
-        list.addView(label("إجمالي المقبوضات الإلكترونية القابلة للتصريف: " + electronicText, 17f, green, true, Gravity.RIGHT).apply { setPadding(0, dp(8), 0, dp(4)) })
+        list.addView(label("إجمالي المقبوضات الإلكترونية خلال اليوم: " + electronicText, 16f, green, true, Gravity.RIGHT).apply { setPadding(0, dp(8), 0, dp(3)) })
+        list.addView(label("المتبقي من مقبوضات اليوم بعد التحويل إلى الكاش: " + liquidatableText, 16f, green, true, Gravity.RIGHT).apply { setPadding(0, dp(2), 0, dp(4)) })
         list.addView(label("إجمالي المقبوضات النقدية الفعلية: " + physicalText, 15f, textColor, true, Gravity.RIGHT).apply { setPadding(0, dp(2), 0, dp(12)) })
         report.supplierRollover?.let { r ->
             list.addView(label("النقد المدور للموردين: " + formatSypAmount(r.allocatedMinor) +
@@ -1624,9 +1627,13 @@ class MainActivity : Activity() {
             val channelLabel = if (a.accountType == "WALLET") "إلكتروني" else "نقدي"
             card.addView(label("مبيعات اليوم – قبض " + channelLabel + ": " + formatAccountBalance(a.salesReceiptsMinor, a.currencyCode), 12f, textColor, false, Gravity.RIGHT))
             card.addView(label("تحصيل ديون – قبض " + channelLabel + ": " + formatAccountBalance(a.debtCollectionsMinor, a.currencyCode), 12f, textColor, false, Gravity.RIGHT))
-            val receiptTotalLabel = if (a.accountType == "WALLET") "إجمالي المقبوضات الإلكترونية المتاحة للتصريف: "
+            val receiptTotalLabel = if (a.accountType == "WALLET") "إجمالي مقبوضات اليوم: "
                 else "إجمالي المقبوضات النقدية في الحساب: "
             card.addView(label(receiptTotalLabel + formatAccountBalance(a.electronicReceiptsMinor, a.currencyCode), 13f, green, true, Gravity.RIGHT))
+            if (a.accountType == "WALLET") card.addView(label(
+                "المتبقي من مقبوضات اليوم بعد التحويل: " + formatAccountBalance(a.liquidatableElectronicReceiptsMinor, a.currencyCode),
+                13f, green, true, Gravity.RIGHT
+            ))
             card.addView(label("إضافات أخرى: " + formatAccountBalance(a.otherInflowsMinor, a.currencyCode), 12f, textColor, false, Gravity.RIGHT))
             card.addView(label("دفعات الموردين: " + formatAccountBalance(a.supplierPaymentsMinor, a.currencyCode), 12f, textColor, false, Gravity.RIGHT))
             card.addView(label("المسحوبات الشخصية: " + formatAccountBalance(a.personalWithdrawalsMinor, a.currencyCode), 12f, textColor, false, Gravity.RIGHT))
