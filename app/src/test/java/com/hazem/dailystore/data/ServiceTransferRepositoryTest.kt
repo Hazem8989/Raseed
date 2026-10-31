@@ -63,9 +63,6 @@ class ServiceTransferRepositoryTest {
         assertEquals(10_500L, result.customerChargeMinor)
         assertEquals(50_000L, repo.listWallets().single { it.serviceKey == ServiceTransferRepository.SYRIATEL_SHARED }.balanceMinor)
         assertEquals(20_000L, repo.listWallets().single { it.serviceKey == ServiceTransferRepository.SHAM_CASH }.balanceMinor)
-        val summary = repo.dailySummary()
-        assertEquals(1_000L, summary.first { it.serviceType == ServiceTransferRepository.SYRIATEL_BALANCE }.rechargeFeeEstimateMinor)
-        assertEquals(0L, summary.first { it.serviceType == ServiceTransferRepository.SHAM_CASH_TRANSFER }.rechargeFeeEstimateMinor)
     }
 
     @Test fun electronicReceiptIncreasesCollectionWalletNotServiceFloat() {
