@@ -12,6 +12,7 @@ import java.util.UUID
 
 data class ServiceWalletSummary(val serviceKey:String,val name:String,val balanceMinor:Long)
 data class ServiceTransferRecord(val id:String,val serviceType:String,val serviceName:String,val deliveredMinor:Long,val profitMinor:Long,val providerFeeMinor:Long,val customerChargeMinor:Long,val receiptAccountName:String,val receiptChannel:String,val createdAt:String,val status:String)
+data class ServiceDailySummary(val serviceType:String,val serviceName:String,val operationCount:Int,val deliveredMinor:Long,val customerReceiptsMinor:Long,val profitMinor:Long,val providerFeeMinor:Long,val rechargeFeeEstimateMinor:Long) { val rechargeReserveMinor:Long get()=Math.addExact(deliveredMinor,rechargeFeeEstimateMinor) }
 data class ServiceTransferResult(val transferId:String,val deliveredMinor:Long,val profitMinor:Long,val providerFeeMinor:Long,val customerChargeMinor:Long,val replayed:Boolean)
 
 /** Provider operational balances are separate from store collection accounts. All amounts are integer SYP units. */
@@ -32,6 +33,23 @@ class ServiceTransferRepository(context:Context) {
         }
     }
 
+    fun dailySummary(date:String=today()):List<ServiceDailySummary> {
+        require(date.matches(Regex("\\d{4}-\\d{2}-\\d{2}"))){"تاريخ الكشف غير صالح"}
+        val out=mutableListOf<ServiceDailySummary>()
+        database.readableDatabase.rawQuery(
+            """SELECT service_type,COUNT(*),COALESCE(SUM(amount_delivered_minor),0),
+                      COALESCE(SUM(customer_charge_minor),0),COALESCE(SUM(profit_minor),0),
+                      COALESCE(SUM(provider_fee_minor),0)
+               FROM service_transfers
+               WHERE substr(created_at,1,10)=? AND status='POSTED'
+               GROUP BY service_type ORDER BY service_type""".trimIndent(),arrayOf(date)
+        ).use { c -> while(c.moveToNext()) {
+            val type=c.getString(0); val delivered=c.getLong(2)
+            val rechargeFee=if(type==SYRIATEL_BALANCE||type==SYRIATEL_CASH) percent(delivered,2) else 0L
+            out.add(ServiceDailySummary(type,serviceTypeName(type),c.getInt(1),delivered,c.getLong(3),c.getLong(4),c.getLong(5),rechargeFee))
+        } }
+        return out
+    }
     fun listTransfers(limit:Int=50):List<ServiceTransferRecord> {
         val out=mutableListOf<ServiceTransferRecord>()
         database.readableDatabase.rawQuery(
@@ -81,8 +99,8 @@ class ServiceTransferRepository(context:Context) {
                 db.setTransactionSuccessful();return fee
             }
             val account=receiptAccount(db,sourceAccountId)
-            require(account.first=="WALLET"&&account.second=="SYP"&&account.third){"شراء رصيد الخدمة يجب أن يُموّل من محفظة قبض إلكترونية نشطة بالليرة السورية"}
-            require(cashBalance(db,sourceAccountId)>=debit){"رصيد محفظة القبض لا يكفي لقيمة الشحن والعمولة"}
+            require(account.first=="CASH_BOX"&&account.second=="SYP"&&account.third){"شراء رصيد الخدمات يجب أن يُموّل حصراً من صندوق شراء الرصيد النقدي النشط بالليرة السورية"}
+            require(cashBalance(db,sourceAccountId)>=debit){"رصيد صندوق شراء الرصيد لا يكفي لقيمة الشحن والعمولة"}
             val now=stamp()
             insertCashMovement(db,sourceAccountId,"OUT",debit,"SERVICE_RECHARGE","SERVICE_RECHARGE",operationId,operationId+":SOURCE",actor,
                 "شراء رصيد ${serviceName(serviceKey)}"+if(fee>0L)" • عمولة شحن 2%: $fee ل.س" else "",now)
