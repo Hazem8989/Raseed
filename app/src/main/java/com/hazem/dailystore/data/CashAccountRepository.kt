@@ -18,6 +18,89 @@ class CashAccountRepository(context: Context) {
     private val database = AppDatabase.getInstance(context)
 
     fun listActive(): List<CashAccountSummary> = listAccounts(true)
+
+    fun currentDayPrimaryDrawer(): CashAccountSummary? {
+        val date = operatingDate()
+        return database.readableDatabase.rawQuery(
+            """SELECT a.id,a.name,a.account_type,a.currency_code,a.opening_balance_minor,a.is_active
+               FROM daily_cash_sessions s JOIN cash_accounts a ON a.id=s.primary_cash_account_id
+               WHERE s.operating_date=? AND a.is_active=1
+                 AND a.account_type='CASH_BOX' AND a.currency_code='SYP' LIMIT 1""".trimIndent(),
+            arrayOf(date)
+        ).use { c ->
+            if (!c.moveToFirst()) null else CashAccountSummary(
+                c.getString(0), c.getString(1), c.getString(2), c.getString(3),
+                balance(c.getString(0), c.getLong(4)), c.getInt(5) == 1
+            )
+        }
+    }
+
+    fun setCurrentDayPrimaryDrawer(actorRole: String, actorUserId: String, accountId: String) {
+        require(actorRole == "ADMIN" && actorUserId.isNotBlank()) {
+            "تعيين الدرج اليومي الرئيسي متاح للمدير فقط"
+        }
+        val db = database.writableDatabase
+        db.beginTransaction()
+        try {
+            val managerExists = db.rawQuery(
+                "SELECT 1 FROM users WHERE id=? AND role_key='ADMIN' AND is_active=1",
+                arrayOf(actorUserId)
+            ).use { it.moveToFirst() }
+            require(managerExists) { "جلسة المدير غير صالحة" }
+            val accountName = db.rawQuery(
+                "SELECT name FROM cash_accounts WHERE id=? AND account_type='CASH_BOX' AND currency_code='SYP' AND is_active=1",
+                arrayOf(accountId)
+            ).use {
+                require(it.moveToFirst()) { "اختر صندوقاً نقدياً نشطاً بالليرة السورية" }
+                it.getString(0)
+            }
+            val date = operatingDate()
+            val before = db.rawQuery(
+                "SELECT primary_cash_account_id FROM daily_cash_sessions WHERE operating_date=?",
+                arrayOf(date)
+            ).use { if (it.moveToFirst()) it.getString(0) else null }
+            val now = timestamp()
+            if (before == null) {
+                val values = ContentValues().apply {
+                    put("operating_date", date)
+                    put("primary_cash_account_id", accountId)
+                    put("created_by", actorUserId)
+                    put("created_at", now)
+                }
+                db.insertOrThrow("daily_cash_sessions", null, values)
+            } else {
+                val values = ContentValues().apply {
+                    put("primary_cash_account_id", accountId)
+                    put("created_by", actorUserId)
+                    put("created_at", now)
+                }
+                require(db.update("daily_cash_sessions", values, "operating_date=?", arrayOf(date)) == 1) {
+                    "تعذر تحديث درج اليوم الرئيسي"
+                }
+            }
+            val audit = ContentValues().apply {
+                put("id", UUID.randomUUID().toString())
+                put("user_id", actorUserId)
+                put("action", "SET_DAILY_PRIMARY_DRAWER")
+                put("entity_type", "DAILY_CASH_SESSION")
+                put("entity_id", date)
+                put("before_json", before?.let { "{\"primary_cash_account_id\":\"$it\"}" })
+                put("after_json", "{\"primary_cash_account_id\":\"$accountId\",\"account_name\":\"\${jsonEscape(accountName)}\"}")
+                put("created_at", now)
+            }
+            db.insertOrThrow("audit_log", null, audit)
+            db.setTransactionSuccessful()
+        } finally {
+            db.endTransaction()
+        }
+    }
+
+    private fun operatingDate(): String =
+        SimpleDateFormat("yyyy-MM-dd", Locale.US).format(Date())
+
+    private fun jsonEscape(value: String): String =
+        value.replace("\\", "\\\\").replace("\"", "\\\"").replace("\n", "\\n")
+
     fun listAll(): List<CashAccountSummary> = listAccounts(false)
 
     private fun listAccounts(activeOnly: Boolean): List<CashAccountSummary> {
