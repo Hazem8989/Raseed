@@ -13,12 +13,14 @@ import java.util.UUID
 data class PurchaseInvoicePaymentSummary(
     val id: String, val invoiceNumber: String, val date: String, val invoiceStatus: String,
     val paymentStatus: String, val totalUsdCents: Long, val paidUsdCents: Long,
-    val outstandingUsdCents: Long, val supplierId: String?, val supplierName: String?
+    val outstandingUsdCents: Long, val supplierId: String?, val supplierName: String?,
+    val totalSypMinor: Long, val paidSypMinor: Long, val outstandingSypMinor: Long, val invoiceRateMilli: Long
 )
 data class SupplierFinancialSummary(
     val id: String, val name: String, val phone: String?, val address: String?,
     val totalPurchaseUsdCents: Long, val paidUsdCents: Long,
-    val outstandingUsdCents: Long, val unpaidInvoiceCount: Int
+    val outstandingUsdCents: Long, val unpaidInvoiceCount: Int,
+    val totalPurchaseSypMinor: Long, val paidSypMinor: Long, val outstandingSypMinor: Long
 )
 data class PurchasePaymentRecord(
     val id: String, val amountMinor: Long, val currencyCode: String, val accountName: String,
@@ -27,7 +29,8 @@ data class PurchasePaymentRecord(
 )
 data class PurchasePaymentResult(
     val paymentId: String, val paidUsdCents: Long, val outstandingUsdCents: Long,
-    val paymentStatus: String, val replayed: Boolean
+    val paymentStatus: String, val replayed: Boolean,
+    val paidSypMinor: Long = 0L, val outstandingSypMinor: Long = 0L
 )
 
 /** Posts supplier payments atomically with their cash-account outflow. */
@@ -40,27 +43,31 @@ class PurchasePaymentRepository(context: Context) {
         val args = if (supplierId == null) null else arrayOf(supplierId)
         database.readableDatabase.rawQuery(
             """SELECT i.id,i.invoice_number,i.invoice_date,i.status,i.total_usd_cents,
-                      i.supplier_id,s.name
+                      i.supplier_id,s.name,i.exchange_rate_syp_per_usd_milli
                FROM purchase_invoices i LEFT JOIN suppliers s ON s.id=i.supplier_id
                $selection ORDER BY i.invoice_date DESC,i.created_at DESC""".trimIndent(), args
         ).use { c ->
             while (c.moveToNext()) {
-                val id = c.getString(0)
-                val invoiceStatus = c.getString(3)
-                val total = c.getLong(4)
-                val paid = paidUsdCents(database.readableDatabase, id)
-                val outstanding = (total - paid).coerceAtLeast(0L)
-                val paymentStatus = when {
-                    invoiceStatus == "CANCELLED" -> "CANCELLED"
-                    invoiceStatus == "DRAFT" -> "DRAFT"
-                    outstanding == 0L -> "PAID"
-                    paid > 0L -> "PARTIALLY_PAID"
+                val id=c.getString(0); val invoiceStatus=c.getString(3); val totalUsd=c.getLong(4)
+                val rate=c.getLong(7)
+                val totalSyp=if(rate>0L) CurrencyConverter.usdCentsToSyp(totalUsd,rate) else 0L
+                val paidSyp=if(rate>0L) paidSypMinor(database.readableDatabase,id,rate) else 0L
+                val outstandingSyp=(totalSyp-paidSyp).coerceAtLeast(0L)
+                val paidUsd=if(rate>0L) CurrencyConverter.sypToUsdCents(paidSyp,rate)
+                    else paidUsdCentsLegacy(database.readableDatabase,id)
+                val outstandingUsd=(totalUsd-paidUsd).coerceAtLeast(0L)
+                val paymentStatus=when {
+                    invoiceStatus=="CANCELLED" -> "CANCELLED"
+                    invoiceStatus=="DRAFT" -> "DRAFT"
+                    rate<=0L -> if(paidUsd>0L) "PARTIALLY_PAID" else "UNPAID"
+                    outstandingSyp==0L -> "PAID"
+                    paidSyp>0L -> "PARTIALLY_PAID"
                     else -> "UNPAID"
                 }
                 result.add(PurchaseInvoicePaymentSummary(
-                    id, c.getString(1), c.getString(2), invoiceStatus, paymentStatus,
-                    total, paid, outstanding, if (c.isNull(5)) null else c.getString(5),
-                    if (c.isNull(6)) null else c.getString(6)
+                    id,c.getString(1),c.getString(2),invoiceStatus,paymentStatus,totalUsd,paidUsd,outstandingUsd,
+                    if(c.isNull(5)) null else c.getString(5),if(c.isNull(6)) null else c.getString(6),
+                    totalSyp,paidSyp,outstandingSyp,rate
                 ))
             }
         }
@@ -68,21 +75,18 @@ class PurchasePaymentRepository(context: Context) {
     }
 
     fun listSupplierSummaries(): List<SupplierFinancialSummary> {
-        val result = mutableListOf<SupplierFinancialSummary>()
-        database.readableDatabase.rawQuery(
-            "SELECT id,name,phone,address FROM suppliers ORDER BY name COLLATE NOCASE", null
-        ).use { c ->
-            while (c.moveToNext()) {
-                val id = c.getString(0)
-                val invoices = listPurchaseInvoices(id).filter {
-                    it.invoiceStatus != "DRAFT" && it.invoiceStatus != "CANCELLED"
-                }
+        val result=mutableListOf<SupplierFinancialSummary>()
+        database.readableDatabase.rawQuery("SELECT id,name,phone,address FROM suppliers ORDER BY name COLLATE NOCASE",null).use { c ->
+            while(c.moveToNext()) {
+                val id=c.getString(0)
+                val invoices=listPurchaseInvoices(id).filter { it.invoiceStatus!="DRAFT" && it.invoiceStatus!="CANCELLED" }
                 result.add(SupplierFinancialSummary(
-                    id, c.getString(1), if (c.isNull(2)) null else c.getString(2),
-                    if (c.isNull(3)) null else c.getString(3),
-                    invoices.sumOf { it.totalUsdCents }, invoices.sumOf { it.paidUsdCents },
+                    id,c.getString(1),if(c.isNull(2)) null else c.getString(2),if(c.isNull(3)) null else c.getString(3),
+                    invoices.sumOf { it.totalUsdCents },invoices.sumOf { it.paidUsdCents },
                     invoices.sumOf { it.outstandingUsdCents },
-                    invoices.count { it.outstandingUsdCents > 0L }
+                    invoices.count { it.outstandingSypMinor>0L || it.invoiceRateMilli<=0L },
+                    invoices.sumOf { it.totalSypMinor },invoices.sumOf { it.paidSypMinor },
+                    invoices.sumOf { it.outstandingSypMinor }
                 ))
             }
         }
@@ -127,18 +131,23 @@ class PurchasePaymentRepository(context: Context) {
                     "معرّف العملية مستخدم لعملية أو بيانات مختلفة"
                 }
                 val paymentId = existing.reference ?: error("سجل العملية لا يحتوي مرجع الدفعة")
-                val current = invoicePaymentState(db, invoiceId)
+                val current = db.rawQuery("SELECT total_usd_cents,exchange_rate_syp_per_usd_milli FROM purchase_invoices WHERE id=?", arrayOf(invoiceId)).use {
+                    require(it.moveToFirst()) { "فاتورة الشراء غير موجودة" }
+                    invoicePaymentStateSyp(db, invoiceId, it.getLong(0), it.getLong(1))
+                }
+                val replayRate = db.rawQuery("SELECT exchange_rate_syp_per_usd_milli FROM purchase_invoices WHERE id=?", arrayOf(invoiceId)).use { it.moveToFirst(); it.getLong(0) }
                 db.setTransactionSuccessful()
-                return PurchasePaymentResult(paymentId, current.first, current.second, current.third, true)
+                return PurchasePaymentResult(paymentId,CurrencyConverter.sypToUsdCents(current.first,replayRate),
+                    CurrencyConverter.sypToUsdCents(current.second,replayRate),current.third,true,current.first,current.second)
             }
 
             val invoice = db.rawQuery(
-                "SELECT status,total_usd_cents,supplier_id,invoice_number FROM purchase_invoices WHERE id=?",
+                "SELECT status,total_usd_cents,supplier_id,invoice_number,exchange_rate_syp_per_usd_milli FROM purchase_invoices WHERE id=?",
                 arrayOf(invoiceId)
             ).use {
                 require(it.moveToFirst()) { "فاتورة الشراء غير موجودة" }
                 InvoiceForPayment(it.getString(0), it.getLong(1),
-                    if (it.isNull(2)) null else it.getString(2), it.getString(3))
+                    if (it.isNull(2)) null else it.getString(2), it.getString(3), it.getLong(4))
             }
             require(invoice.status == "POSTED" || invoice.status == "PARTIALLY_PAID") {
                 "لا يمكن دفع فاتورة غير معتمدة أو ملغاة"
@@ -156,21 +165,16 @@ class PurchasePaymentRepository(context: Context) {
             require(account.currencyCode == "USD" || account.currencyCode == "SYP") {
                 "عملة الحساب غير مدعومة"
             }
-            val rate = currentRate(db)
-            val usdEquivalent = when (account.currencyCode) {
-                "USD" -> amountMinor
-                "SYP" -> {
-                    require(rate > 0L) { "يجب تسجيل سعر الصرف قبل الدفع بالليرة السورية" }
-                    CurrencyConverter.sypToUsdCents(amountMinor, rate)
-                }
+            val paymentRate=currentRate(db); val invoiceRate=invoice.exchangeRateMilli
+            require(invoiceRate>0L) { "فاتورة الشراء لا تحتوي سعر صرف محفوظاً؛ لا يمكن تثبيت المتبقي السوري بأمان" }
+            val amountSypEquivalent=when(account.currencyCode) {
+                "USD" -> CurrencyConverter.usdCentsToSyp(amountMinor,invoiceRate)
+                "SYP" -> amountMinor
                 else -> error("عملة الحساب غير مدعومة")
             }
-            require(usdEquivalent > 0L) { "مبلغ الدفعة صغير جداً ولا يقابل قيمة بالدولار" }
-
-            val currentState = invoicePaymentState(db, invoiceId)
-            require(usdEquivalent <= currentState.second) {
-                "مبلغ الدفعة يتجاوز المتبقي على الفاتورة"
-            }
+            require(amountSypEquivalent>0L) { "مبلغ الدفعة صغير جداً" }
+            val currentState=invoicePaymentStateSyp(db,invoiceId,invoice.totalUsdCents,invoiceRate)
+            require(amountSypEquivalent<=currentState.second) { "مبلغ الدفعة يتجاوز المتبقي السوري الثابت على الفاتورة" }
             val currentAccountBalance = accountBalance(db, cashAccountId, account.openingBalanceMinor)
             require(currentAccountBalance >= amountMinor) {
                 "رصيد الحساب غير كافٍ. الرصيد المتاح: $currentAccountBalance ${account.currencyCode}"
@@ -183,7 +187,7 @@ class PurchasePaymentRepository(context: Context) {
                 put("id", cashTransactionId); put("account_id", cashAccountId)
                 put("direction", "OUT"); put("amount_minor", amountMinor)
                 put("currency_code", account.currencyCode)
-                if (rate > 0L) put("exchange_rate_syp_per_usd_milli", rate)
+                if (paymentRate > 0L) put("exchange_rate_syp_per_usd_milli", paymentRate)
                 else putNull("exchange_rate_syp_per_usd_milli")
                 put("transaction_type", "PURCHASE_PAYMENT")
                 put("source_type", "PURCHASE_INVOICE"); put("source_id", invoiceId)
@@ -203,9 +207,12 @@ class PurchasePaymentRepository(context: Context) {
             }
             db.insertOrThrow("invoice_payments", null, payment)
 
-            val newPaid = Math.addExact(currentState.first, usdEquivalent)
-            val newOutstanding = (invoice.totalUsdCents - newPaid).coerceAtLeast(0L)
-            val newStatus = if (newOutstanding == 0L) "PAID" else "PARTIALLY_PAID"
+            val newPaidSyp=Math.addExact(currentState.first,amountSypEquivalent)
+            val totalSyp=CurrencyConverter.usdCentsToSyp(invoice.totalUsdCents,invoiceRate)
+            val newOutstandingSyp=(totalSyp-newPaidSyp).coerceAtLeast(0L)
+            val newPaidUsd=CurrencyConverter.sypToUsdCents(newPaidSyp,invoiceRate)
+            val newOutstandingUsd=CurrencyConverter.sypToUsdCents(newOutstandingSyp,invoiceRate)
+            val newStatus=if(newOutstandingSyp==0L) "PAID" else "PARTIALLY_PAID"
             db.execSQL(
                 "UPDATE purchase_invoices SET status=?,updated_at=? WHERE id=? AND status IN ('POSTED','PARTIALLY_PAID')",
                 arrayOf(newStatus, now, invoiceId)
@@ -215,7 +222,7 @@ class PurchasePaymentRepository(context: Context) {
             }
             registerOperation(db, operationId, "PURCHASE_PAYMENT", payloadHash, paymentId, now)
             db.setTransactionSuccessful()
-            return PurchasePaymentResult(paymentId, newPaid, newOutstanding, newStatus, false)
+            return PurchasePaymentResult(paymentId,newPaidUsd,newOutstandingUsd,newStatus,false,newPaidSyp,newOutstandingSyp)
         } finally {
             db.endTransaction()
         }
@@ -243,7 +250,7 @@ class PurchasePaymentRepository(context: Context) {
         try {
             val old = db.rawQuery(
                 """SELECT p.invoice_id,p.amount_minor,p.currency_code,p.exchange_rate_syp_per_usd_milli,
-                          p.cash_transaction_id,t.account_id,t.description,i.total_usd_cents,i.status,i.invoice_number
+                          p.cash_transaction_id,t.account_id,t.description,i.total_usd_cents,i.status,i.invoice_number,i.exchange_rate_syp_per_usd_milli
                    FROM invoice_payments p
                    JOIN cash_transactions t ON t.id=p.cash_transaction_id
                    JOIN purchase_invoices i ON i.id=p.invoice_id
@@ -254,7 +261,7 @@ class PurchasePaymentRepository(context: Context) {
                 ExistingSupplierPayment(
                     it.getString(0),it.getLong(1),it.getString(2),if(it.isNull(3)) null else it.getLong(3),
                     it.getString(4),it.getString(5),if(it.isNull(6)) null else it.getString(6),
-                    it.getLong(7),it.getString(8),it.getString(9)
+                    it.getLong(7),it.getString(8),it.getString(9),it.getLong(10)
                 )
             }
             require(old.invoiceStatus in setOf("POSTED","PARTIALLY_PAID","PAID")) {
@@ -271,29 +278,24 @@ class PurchasePaymentRepository(context: Context) {
             require(target.currencyCode == old.currencyCode) {
                 "يجب اختيار حساب بنفس عملة الدفعة؛ لا يمكن تغيير العملة التاريخية أثناء التصحيح"
             }
-            val rate = old.exchangeRateMilli ?: 0L
-            val newUsdEquivalent = when (old.currencyCode) {
-                "USD" -> newAmountMinor
-                "SYP" -> {
-                    require(rate > 0L) { "دفعة الليرة لا تحتوي سعر صرف محفوظاً ولا يمكن تعديلها آلياً" }
-                    CurrencyConverter.sypToUsdCents(newAmountMinor, rate)
-                }
+            val invoiceRate=old.invoiceRateMilli
+            require(invoiceRate>0L) { "فاتورة الشراء لا تحتوي سعر صرف محفوظاً؛ لا يمكن تصحيح المتبقي السوري بأمان" }
+            val newSypEquivalent=when(old.currencyCode) {
+                "USD" -> CurrencyConverter.usdCentsToSyp(newAmountMinor,invoiceRate)
+                "SYP" -> newAmountMinor
                 else -> error("عملة دفعة غير مدعومة")
             }
-            require(newUsdEquivalent > 0L) { "المبلغ الجديد صغير جداً" }
-
-            val paidBefore = paidUsdCents(db, old.invoiceId)
-            val oldUsdEquivalent = when (old.currencyCode) {
-                "USD" -> old.amountMinor
-                "SYP" -> {
-                    require(rate > 0L) { "دفعة الليرة لا تحتوي سعر صرف محفوظاً" }
-                    CurrencyConverter.sypToUsdCents(old.amountMinor, rate)
-                }
+            val oldSypEquivalent=when(old.currencyCode) {
+                "USD" -> CurrencyConverter.usdCentsToSyp(old.amountMinor,invoiceRate)
+                "SYP" -> old.amountMinor
                 else -> error("عملة دفعة غير مدعومة")
             }
-            val paidWithoutThis = (paidBefore - oldUsdEquivalent).coerceAtLeast(0L)
-            require(newUsdEquivalent <= (old.invoiceTotalUsdCents - paidWithoutThis).coerceAtLeast(0L)) {
-                "المبلغ المعدل يتجاوز قيمة الفاتورة بعد احتساب الدفعات الأخرى"
+            require(newSypEquivalent>0L) { "المبلغ الجديد صغير جداً" }
+            val paidBeforeSyp=paidSypMinor(db,old.invoiceId,invoiceRate)
+            val paidWithoutThisSyp=(paidBeforeSyp-oldSypEquivalent).coerceAtLeast(0L)
+            val invoiceTotalSyp=CurrencyConverter.usdCentsToSyp(old.invoiceTotalUsdCents,invoiceRate)
+            require(newSypEquivalent<=(invoiceTotalSyp-paidWithoutThisSyp).coerceAtLeast(0L)) {
+                "المبلغ المعدل يتجاوز المتبقي السوري الثابت بعد احتساب الدفعات الأخرى"
             }
 
             val oldBalance = accountBalance(db, old.cashAccountId)
@@ -324,9 +326,11 @@ class PurchasePaymentRepository(context: Context) {
             require(db.update("invoice_payments",paymentValues,"id=?",arrayOf(paymentId)) == 1) {
                 "تعذر تعديل سجل دفعة الفاتورة"
             }
-            val paidAfter = Math.addExact(paidWithoutThis,newUsdEquivalent)
-            val outstanding = (old.invoiceTotalUsdCents-paidAfter).coerceAtLeast(0L)
-            val status = if (outstanding == 0L) "PAID" else if (paidAfter > 0L) "PARTIALLY_PAID" else "POSTED"
+            val paidAfterSyp=Math.addExact(paidWithoutThisSyp,newSypEquivalent)
+            val outstandingSyp=(invoiceTotalSyp-paidAfterSyp).coerceAtLeast(0L)
+            val paidAfterUsd=CurrencyConverter.sypToUsdCents(paidAfterSyp,invoiceRate)
+            val outstandingUsd=CurrencyConverter.sypToUsdCents(outstandingSyp,invoiceRate)
+            val status=if(outstandingSyp==0L) "PAID" else if(paidAfterSyp>0L) "PARTIALLY_PAID" else "POSTED"
             db.execSQL("UPDATE purchase_invoices SET status=?,updated_at=? WHERE id=?",
                 arrayOf(status,now,old.invoiceId))
             val audit = ContentValues().apply {
@@ -336,8 +340,8 @@ class PurchasePaymentRepository(context: Context) {
             }
             db.insertOrThrow("audit_log",null,audit)
             db.setTransactionSuccessful()
-            return PurchasePaymentResult(paymentId,paidAfter,outstanding,
-                if(outstanding==0L) "PAID" else "PARTIALLY_PAID",false)
+            return PurchasePaymentResult(paymentId,paidAfterUsd,outstandingUsd,
+                if(outstandingSyp==0L) "PAID" else "PARTIALLY_PAID",false,paidAfterSyp,outstandingSyp)
         } finally { db.endTransaction() }
     }
 
@@ -365,43 +369,47 @@ class PurchasePaymentRepository(context: Context) {
         "\"" + value.replace("\\", "\\\\").replace("\"", "\\\"")
             .replace("\n", "\\n").replace("\r", "\\r") + "\""
 
-    private fun paidUsdCents(db: SQLiteDatabase, invoiceId: String): Long {
-        var total = 0L
-        db.rawQuery(
-            """SELECT amount_minor,currency_code,exchange_rate_syp_per_usd_milli
-               FROM invoice_payments WHERE invoice_type='PURCHASE' AND invoice_id=?""".trimIndent(),
-            arrayOf(invoiceId)
-        ).use { c ->
-            while (c.moveToNext()) {
-                val amount = c.getLong(0)
-                val currency = c.getString(1)
-                val rate = if (c.isNull(2)) 0L else c.getLong(2)
-                val equivalent = when (currency) {
-                    "USD" -> amount
-                    "SYP" -> {
-                        require(rate > 0L) { "دفعة ليرة قديمة بلا سعر صرف محفوظ" }
-                        CurrencyConverter.sypToUsdCents(amount, rate)
-                    }
-                    else -> error("عملة دفعة غير مدعومة: $currency")
+    private fun paidSypMinor(db: SQLiteDatabase, invoiceId: String, invoiceRateMilli: Long): Long {
+        require(invoiceRateMilli>0L) { "فاتورة الشراء لا تحتوي سعر صرف محفوظاً" }
+        var total=0L
+        db.rawQuery("""SELECT amount_minor,currency_code FROM invoice_payments
+            WHERE invoice_type='PURCHASE' AND invoice_id=?""".trimIndent(),arrayOf(invoiceId)).use { c ->
+            while(c.moveToNext()) {
+                val amount=c.getLong(0)
+                val equivalent=when(c.getString(1)) {
+                    "USD" -> CurrencyConverter.usdCentsToSyp(amount,invoiceRateMilli)
+                    "SYP" -> amount
+                    else -> error("عملة دفعة غير مدعومة")
                 }
-                total = Math.addExact(total, equivalent)
+                total=Math.addExact(total,equivalent)
             }
         }
         return total
     }
 
-    private fun invoicePaymentState(db: SQLiteDatabase, invoiceId: String): Triple<Long, Long, String> {
-        val total = db.rawQuery(
-            "SELECT total_usd_cents FROM purchase_invoices WHERE id=?", arrayOf(invoiceId)
-        ).use { require(it.moveToFirst()) { "فاتورة الشراء غير موجودة" }; it.getLong(0) }
-        val paid = paidUsdCents(db, invoiceId)
-        val outstanding = (total - paid).coerceAtLeast(0L)
-        val status = when {
-            outstanding == 0L -> "PAID"
-            paid > 0L -> "PARTIALLY_PAID"
-            else -> "UNPAID"
+    private fun paidUsdCentsLegacy(db: SQLiteDatabase, invoiceId: String): Long {
+        var total=0L
+        db.rawQuery("""SELECT amount_minor,currency_code,exchange_rate_syp_per_usd_milli
+            FROM invoice_payments WHERE invoice_type='PURCHASE' AND invoice_id=?""".trimIndent(),arrayOf(invoiceId)).use { c ->
+            while(c.moveToNext()) {
+                val amount=c.getLong(0); val rate=if(c.isNull(2)) 0L else c.getLong(2)
+                val equivalent=when(c.getString(1)) {
+                    "USD" -> amount
+                    "SYP" -> { require(rate>0L) { "دفعة ليرة قديمة بلا سعر صرف محفوظ" }; CurrencyConverter.sypToUsdCents(amount,rate) }
+                    else -> error("عملة دفعة غير مدعومة")
+                }
+                total=Math.addExact(total,equivalent)
+            }
         }
-        return Triple(paid, outstanding, status)
+        return total
+    }
+
+    private fun invoicePaymentStateSyp(db: SQLiteDatabase, invoiceId: String, totalUsdCents: Long, rate: Long): SypPaymentState {
+        val totalSyp=CurrencyConverter.usdCentsToSyp(totalUsdCents,rate)
+        val paid=paidSypMinor(db,invoiceId,rate)
+        val outstanding=(totalSyp-paid).coerceAtLeast(0L)
+        val status=when { outstanding==0L -> "PAID"; paid>0L -> "PARTIALLY_PAID"; else -> "UNPAID" }
+        return SypPaymentState(paid,outstanding,status)
     }
 
     private fun accountBalance(db: SQLiteDatabase, id: String, opening: Long): Long {
@@ -419,9 +427,8 @@ class PurchasePaymentRepository(context: Context) {
             null
         ).use { if (it.moveToFirst()) it.getLong(0) else 0L }
 
-    private data class InvoiceForPayment(
-        val status: String, val totalUsdCents: Long, val supplierId: String?, val invoiceNumber: String
-    )
+    private data class InvoiceForPayment(val status: String,val totalUsdCents: Long,val supplierId: String?,val invoiceNumber: String,val exchangeRateMilli: Long)
+    private data class SypPaymentState(val first: Long,val second: Long,val third: String)
     private data class AccountForPayment(
         val name: String, val accountType: String, val currencyCode: String, val openingBalanceMinor: Long
     )
