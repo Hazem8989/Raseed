@@ -84,6 +84,7 @@ class ServiceTransferRepositoryTest {
 
     @Test fun rechargeDeductsFromDedicatedCashBoxAndAppliesTwoPercentOnlyToSyriatel() {
         val source = accounts.create("صندوق شراء رصيد " + UUID.randomUUID(), "CASH_BOX", "SYP", 100_000L)
+        repo.setRechargeAccount(actor, source.id)
         val syriatelFee = repo.recharge(actor, ServiceTransferRepository.SYRIATEL_SHARED, source.id,
             50_000L, "recharge-syr-" + UUID.randomUUID())
         assertEquals(1_000L, syriatelFee)
