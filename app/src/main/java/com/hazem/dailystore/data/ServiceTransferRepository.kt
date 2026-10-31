@@ -57,7 +57,7 @@ class ServiceTransferRepository(context:Context) {
             if(amount>0L) {
                 val now=stamp()
                 insertWalletMovement(db,serviceKey,"IN",amount,"OPENING",null,"OPENING:"+UUID.randomUUID(),0L,note,actor,now)
-                audit(db,actor,"SERVICE_WALLET_OPENING",serviceKey,null,"{\"amount_minor\":$amount,\"note\":\"@@{esc(note.orEmpty())}\"}",now)
+                audit(db,actor,"SERVICE_WALLET_OPENING",serviceKey,null,"{\"amount_minor\":$amount,\"note\":\"${esc(note.orEmpty())}\"}",now)
             }
             db.setTransactionSuccessful()
         } finally {db.endTransaction()}
@@ -85,10 +85,10 @@ class ServiceTransferRepository(context:Context) {
             require(cashBalance(db,sourceAccountId)>=debit){"رصيد محفظة القبض لا يكفي لقيمة الشحن والعمولة"}
             val now=stamp()
             insertCashMovement(db,sourceAccountId,"OUT",debit,"SERVICE_RECHARGE","SERVICE_RECHARGE",operationId,operationId+":SOURCE",actor,
-                "شراء رصيد @@{serviceName(serviceKey)}"+if(fee>0L)" • عمولة شحن 2%: $fee ل.س" else "",now)
+                "شراء رصيد ${serviceName(serviceKey)}"+if(fee>0L)" • عمولة شحن 2%: $fee ل.س" else "",now)
             insertWalletMovement(db,serviceKey,"IN",floatAmount,"RECHARGE",sourceAccountId,operationId,fee,note?:reference,actor,now)
             audit(db,actor,"SERVICE_WALLET_RECHARGE",serviceKey,null,
-                "{\"float_minor\":$floatAmount,\"recharge_fee_minor\":$fee,\"source_account_id\":\"@@{esc(sourceAccountId)}\",\"reference\":\"@@{esc(reference.orEmpty())}\"}",now)
+                "{\"float_minor\":$floatAmount,\"recharge_fee_minor\":$fee,\"source_account_id\":\"${esc(sourceAccountId)}\",\"reference\":\"${esc(reference.orEmpty())}\"}",now)
             db.setTransactionSuccessful();return fee
         } finally {db.endTransaction()}
     }
@@ -121,7 +121,7 @@ class ServiceTransferRepository(context:Context) {
                 val primary=db.rawQuery("SELECT primary_cash_account_id FROM daily_cash_sessions WHERE operating_date=?",arrayOf(today())).use{if(it.moveToFirst())it.getString(0)else null}
                 require(primary==receiptAccountId){"القبض النقدي يجب أن يذهب إلى درج اليوم الرئيسي"}
             } else require(account.first=="WALLET"){"حساب الاستلام يجب أن يكون درجاً نقدياً أو محفظة إلكترونية"}
-            require(walletBalance(db,serviceKey)>=deliveredMinor){"رصيد @@{serviceName(serviceKey)} غير كافٍ. المتاح: @@{walletBalance(db,serviceKey)} ل.س"}
+            require(walletBalance(db,serviceKey)>=deliveredMinor){"رصيد ${serviceName(serviceKey)} غير كافٍ. المتاح: ${walletBalance(db,serviceKey)} ل.س"}
             val id=UUID.randomUUID().toString();val now=stamp()
             val v=ContentValues().apply {
                 put("id",id);put("operation_id",operationId);put("service_type",serviceType);put("service_key",serviceKey)
@@ -134,9 +134,9 @@ class ServiceTransferRepository(context:Context) {
             db.insertOrThrow("service_transfers",null,v)
             insertWalletMovement(db,serviceKey,"OUT",deliveredMinor,"TRANSFER_OUT",id,operationId,0L,note?:serviceTypeName(serviceType),actor,now)
             insertCashMovement(db,receiptAccountId,"IN",charge,"SERVICE_TRANSFER_RECEIPT","SERVICE_TRANSFER",id,operationId+":RECEIPT",actor,
-                "مقبوض تحويل رصيد • @@{serviceTypeName(serviceType)} • ربح $profit ل.س • رسوم الشركة $providerFeeMinor ل.س",now)
+                "مقبوض تحويل رصيد • ${serviceTypeName(serviceType)} • ربح $profit ل.س • رسوم الشركة $providerFeeMinor ل.س",now)
             audit(db,actor,"SERVICE_TRANSFER_POSTED",id,null,
-                "{\"service_type\":\"$serviceType\",\"delivered_minor\":$deliveredMinor,\"profit_minor\":$profit,\"provider_fee_minor\":$providerFeeMinor,\"customer_charge_minor\":$charge,\"receipt_account_id\":\"@@{esc(receiptAccountId)}\"}",now)
+                "{\"service_type\":\"$serviceType\",\"delivered_minor\":$deliveredMinor,\"profit_minor\":$profit,\"provider_fee_minor\":$providerFeeMinor,\"customer_charge_minor\":$charge,\"receipt_account_id\":\"${esc(receiptAccountId)}\"}",now)
             db.setTransactionSuccessful()
             return ServiceTransferResult(id,deliveredMinor,profit,providerFeeMinor,charge,false)
         } finally {db.endTransaction()}
@@ -161,7 +161,7 @@ class ServiceTransferRepository(context:Context) {
             insertCashMovement(db,receipt,"OUT",charge,"SERVICE_TRANSFER_REVERSAL","SERVICE_TRANSFER_REVERSAL",transferId,operationId+":RECEIPT",actor,"عكس تحويل رصيد: $reason",now)
             val update=ContentValues().apply{put("status","REVERSED");put("reversed_at",now);put("reversed_by",actor);put("reversal_reason",reason)}
             db.update("service_transfers",update,"id=? AND status='POSTED'",arrayOf(transferId))
-            audit(db,actor,"SERVICE_TRANSFER_REVERSED",transferId,"{\"status\":\"POSTED\"}","{\"status\":\"REVERSED\",\"reason\":\"@@{esc(reason)}\"}",now)
+            audit(db,actor,"SERVICE_TRANSFER_REVERSED",transferId,"{\"status\":\"POSTED\"}","{\"status\":\"REVERSED\",\"reason\":\"${esc(reason)}\"}",now)
             db.setTransactionSuccessful()
         } finally {db.endTransaction()}
     }
