@@ -36,7 +36,8 @@ class AppDatabaseTest {
             "customers", "suppliers", "purchase_invoices", "purchase_items",
             "sales_invoices", "sales_items", "cash_accounts", "cash_transactions",
             "invoice_payments", "debts", "returns", "return_items",
-            "return_refund_allocations", "operation_registry", "sync_queue",
+            "return_refund_allocations", "daily_cash_sessions", "customer_credit_revaluations",
+            "daily_supplier_rollovers", "wallet_daily_openings", "cash_account_transfers", "operation_registry", "sync_queue",
             "sync_conflicts", "audit_log"
         )
 
