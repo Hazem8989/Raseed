@@ -10,14 +10,15 @@ import java.util.Locale
 import java.util.TimeZone
 import java.util.UUID
 
-data class ServiceWalletSummary(val serviceKey:String,val name:String,val balanceMinor:Long)
+data class ServiceWalletSummary(val serviceKey:String,val name:String,val balanceMinor:Long,val accountId:String)
 data class ServiceTransferRecord(val id:String,val serviceType:String,val serviceName:String,val deliveredMinor:Long,val profitMinor:Long,val providerFeeMinor:Long,val customerChargeMinor:Long,val receiptAccountName:String,val receiptChannel:String,val createdAt:String,val status:String)
 data class ServiceDailySummary(val serviceType:String,val serviceName:String,val operationCount:Int,val deliveredMinor:Long,val customerReceiptsMinor:Long,val profitMinor:Long,val providerFeeMinor:Long,val rechargeFeePaidMinor:Long,val rechargeReserveMinor:Long=deliveredMinor)
 data class ServiceTransferResult(val transferId:String,val deliveredMinor:Long,val profitMinor:Long,val providerFeeMinor:Long,val customerChargeMinor:Long,val replayed:Boolean)
 
-/** Provider operational balances are separate from store collection accounts. All amounts are integer SYP units. */
+/** Each service wallet is one real cash-account wallet used for both provider float and electronic customer receipts. */
 class ServiceTransferRepository(context:Context) {
     private val database=AppDatabase.getInstance(context)
+    private val appContext=context.applicationContext
     companion object {
         const val SYRIATEL_SHARED="SYRIATEL_SHARED"
         const val SHAM_CASH="SHAM_CASH"
@@ -26,10 +27,28 @@ class ServiceTransferRepository(context:Context) {
         const val SHAM_CASH_TRANSFER="SHAM_CASH"
     }
 
+    fun ensureSystemAccounts() {
+        val db=database.writableDatabase
+        db.beginTransaction()
+        try {
+            ensureSystemAccounts(db)
+            db.setTransactionSuccessful()
+        } finally { db.endTransaction() }
+    }
+
+    fun serviceAccountId(serviceKey:String):String {
+        require(serviceKey==SYRIATEL_SHARED||serviceKey==SHAM_CASH) { "محفظة الخدمة غير معروفة" }
+        ensureSystemAccounts()
+        return serviceAccountId(database.readableDatabase,serviceKey)
+    }
+
     fun listWallets():List<ServiceWalletSummary> {
-        val db=database.writableDatabase;ensureWallets(db)
+        ensureSystemAccounts()
+        val db=database.readableDatabase
         return listOf(SYRIATEL_SHARED,SHAM_CASH).map { key ->
-            ServiceWalletSummary(key,serviceName(key),walletBalance(db,key))
+            val id=serviceAccountId(db,key)
+            val row=db.rawQuery("SELECT name FROM cash_accounts WHERE id=?",arrayOf(id)).use { it.moveToFirst();it.getString(0) }
+            ServiceWalletSummary(key,row,walletBalance(db,key),id)
         }
     }
 
@@ -83,19 +102,9 @@ class ServiceTransferRepository(context:Context) {
     }
 
     fun setOpeningBalance(actor:String,serviceKey:String,amount:Long,note:String?=null) {
-        require(amount>=0L){"الرصيد الافتتاحي لا يمكن أن يكون سالباً"}
-        val db=database.writableDatabase;db.beginTransaction()
-        try {
-            requireManager(db,actor);ensureWallets(db)
-            val exists=db.rawQuery("SELECT 1 FROM service_wallet_transactions WHERE service_key=? AND transaction_type='OPENING'",arrayOf(serviceKey)).use{it.moveToFirst()}
-            require(!exists){"تم تسجيل الرصيد الافتتاحي لهذه الخدمة سابقاً؛ استخدم تسوية موثقة عند الحاجة"}
-            if(amount>0L) {
-                val now=stamp()
-                insertWalletMovement(db,serviceKey,"IN",amount,"OPENING",null,"OPENING:"+UUID.randomUUID(),0L,note,actor,now)
-                audit(db,actor,"SERVICE_WALLET_OPENING",serviceKey,null,"{\"amount_minor\":$amount,\"note\":\"${esc(note.orEmpty())}\"}",now)
-            }
-            db.setTransactionSuccessful()
-        } finally {db.endTransaction()}
+        require(amount>=0L) { "الرصيد لا يمكن أن يكون سالباً" }
+        val accountId=serviceAccountId(serviceKey)
+        DailyBalanceRepository(appContext).setWalletOpening(actor,accountId,amount,note)
     }
 
     fun rechargeAccountId():String? = database.readableDatabase.rawQuery("SELECT setting_value FROM app_settings WHERE setting_key='service_recharge_cash_account_id'",null).use { if(it.moveToFirst())it.getString(0) else null }
@@ -126,7 +135,7 @@ class ServiceTransferRepository(context:Context) {
         val debit=Math.addExact(floatAmount,fee)
         val db=database.writableDatabase;db.beginTransaction()
         try {
-            requireManager(db,actor);ensureWallets(db)
+            requireManager(db,actor);ensureSystemAccounts(db)
             val payload=hash("$serviceKey|$sourceAccountId|$floatAmount|$reference|$note")
             val prior=db.rawQuery("SELECT service_key,amount_minor,payload_hash FROM service_wallet_transactions WHERE operation_id=?",arrayOf(operationId)).use{
                 if(it.moveToFirst()) Triple(it.getString(0),it.getLong(1),it.getString(2)) else null
@@ -160,7 +169,7 @@ class ServiceTransferRepository(context:Context) {
         val charge=Math.addExact(Math.addExact(deliveredMinor,profit),providerFeeMinor)
         val db=database.writableDatabase;db.beginTransaction()
         try {
-            requireActiveUser(db,actor);ensureWallets(db)
+            requireActiveUser(db,actor);ensureSystemAccounts(db)
             val payload=hash("$serviceType|$deliveredMinor|$providerFeeMinor|$receiptAccountId|$reference|$note")
             val old=db.rawQuery("SELECT id,service_type,amount_delivered_minor,profit_minor,provider_fee_minor,customer_charge_minor,payload_hash FROM service_transfers WHERE operation_id=?",arrayOf(operationId)).use{
                 if(it.moveToFirst()) arrayOf(it.getString(0),it.getString(1),it.getLong(2).toString(),it.getLong(3).toString(),it.getLong(4).toString(),it.getLong(5).toString(),it.getString(6)) else null
@@ -203,6 +212,7 @@ class ServiceTransferRepository(context:Context) {
         val db=database.writableDatabase;db.beginTransaction()
         try {
             requireManager(db,actor)
+            ensureSystemAccounts(db)
             val row=db.rawQuery("SELECT service_key,amount_delivered_minor,customer_charge_minor,receipt_account_id,status FROM service_transfers WHERE id=?",arrayOf(transferId)).use{
                 require(it.moveToFirst()){"عملية التحويل غير موجودة"}
                 arrayOf(it.getString(0),it.getLong(1).toString(),it.getLong(2).toString(),it.getString(3),it.getString(4))
@@ -225,11 +235,102 @@ class ServiceTransferRepository(context:Context) {
         db.execSQL("INSERT OR IGNORE INTO service_wallets(service_key,name,created_at) VALUES(?,?,?)",arrayOf(SYRIATEL_SHARED,"رصيد سيرياتيل المشترك",stamp()))
         db.execSQL("INSERT OR IGNORE INTO service_wallets(service_key,name,created_at) VALUES(?,?,?)",arrayOf(SHAM_CASH,"رصيد شام كاش",stamp()))
     }
+
+    private fun ensureSystemAccounts(db:SQLiteDatabase) {
+        ensureWallets(db)
+        ensureServiceAccountLink(db,SYRIATEL_SHARED,"system_service_syriatel","محفظة سيرياتيل كاش",
+            listOf("محفظة سيرياتيل كاش","محفظة سيرياتيل","رصيد سيرياتيل المشترك","رصيد سيرياتيل","محفظة رصيد سيرياتيل"))
+        ensureServiceAccountLink(db,SHAM_CASH,"system_service_sham_cash","محفظة شام كاش",
+            listOf("محفظة شام كاش","رصيد شام كاش","محفظة شام"))
+        migrateLegacyWalletMovements(db,SYRIATEL_SHARED)
+        migrateLegacyWalletMovements(db,SHAM_CASH)
+    }
+
+    private fun ensureServiceAccountLink(db:SQLiteDatabase,key:String,systemId:String,defaultName:String,aliases:List<String>) {
+        val linked=db.rawQuery("SELECT account_id FROM service_wallet_account_links WHERE service_key=?",arrayOf(key)).use {
+            if(it.moveToFirst()) it.getString(0) else null
+        }
+        if(linked!=null) {
+            val valid=db.rawQuery("SELECT 1 FROM cash_accounts WHERE id=? AND account_type='WALLET' AND currency_code='SYP' AND is_active=1",arrayOf(linked)).use{it.moveToFirst()}
+            require(valid) { "محفظة الخدمة المرتبطة غير نشطة أو تغير نوعها؛ راجع الحسابات المالية" }
+            return
+        }
+        val placeholders=aliases.joinToString(",") { "?" }
+        val existing=db.rawQuery(
+            "SELECT id FROM cash_accounts WHERE account_type='WALLET' AND currency_code='SYP' AND is_active=1 AND lower(trim(name)) IN ($placeholders) ORDER BY created_at,id LIMIT 1",
+            aliases.map{it.lowercase(Locale.ROOT)}.toTypedArray()
+        ).use { if(it.moveToFirst()) it.getString(0) else null }
+        var accountId=existing
+        if(accountId==null) {
+            accountId=systemId
+            val collision=db.rawQuery("SELECT 1 FROM cash_accounts WHERE id=?",arrayOf(accountId)).use{it.moveToFirst()}
+            if(collision) accountId=UUID.randomUUID().toString()
+            val v=ContentValues().apply {
+                put("id",accountId);put("name",defaultName);put("account_type","WALLET")
+                put("currency_code","SYP");put("opening_balance_minor",0L);put("is_active",1);put("created_at",stamp())
+            }
+            db.insertOrThrow("cash_accounts",null,v)
+        }
+        val link=ContentValues().apply{put("service_key",key);put("account_id",accountId);put("linked_at",stamp())}
+        db.insertOrThrow("service_wallet_account_links",null,link)
+    }
+
+    private fun serviceAccountId(db:SQLiteDatabase,key:String):String =
+        db.rawQuery("SELECT account_id FROM service_wallet_account_links WHERE service_key=?",arrayOf(key)).use {
+            require(it.moveToFirst()) { "محفظة الخدمة غير مربوطة بحساب مالي" }
+            it.getString(0)
+        }
+
+    private fun migrateLegacyWalletMovements(db:SQLiteDatabase,key:String) {
+        val accountId=serviceAccountId(db,key)
+        val accountOpening=db.rawQuery("SELECT opening_balance_minor FROM cash_accounts WHERE id=?",arrayOf(accountId)).use{it.moveToFirst();it.getLong(0)}
+        db.rawQuery(
+            "SELECT id,direction,amount_minor,transaction_type,note,created_by,created_at FROM service_wallet_transactions WHERE service_key=? ORDER BY created_at,id",
+            arrayOf(key)
+        ).use { c ->
+            while(c.moveToNext()) {
+                val movementId=c.getString(0)
+                val already=db.rawQuery("SELECT 1 FROM cash_transactions WHERE source_type='SERVICE_WALLET_LEDGER' AND source_id=? LIMIT 1",arrayOf(movementId)).use{it.moveToFirst()}
+                if(already) continue
+                val legacyType=c.getString(3)
+                if(legacyType=="OPENING" && accountOpening>0L) continue
+                val cashType=when(legacyType) {
+                    "OPENING" -> "SERVICE_FLOAT_OPENING"
+                    "RECHARGE" -> "SERVICE_RECHARGE_IN"
+                    "TRANSFER_OUT" -> "SERVICE_TRANSFER_OUT"
+                    "TRANSFER_REVERSAL" -> "SERVICE_TRANSFER_REVERSAL_IN"
+                    else -> "SERVICE_FLOAT_"+legacyType
+                }
+                val createdAt=c.getString(6)
+                val v=ContentValues().apply {
+                    put("id",UUID.randomUUID().toString());put("account_id",accountId);put("direction",c.getString(1))
+                    put("amount_minor",c.getLong(2));put("currency_code","SYP");put("transaction_type",cashType)
+                    put("source_type","SERVICE_WALLET_LEDGER");put("source_id",movementId)
+                    put("operation_id","SERVICE_FLOAT_LEDGER:"+movementId)
+                    put("description","ترحيل حركة رصيد خدمة قديمة • "+(c.getString(4)?:legacyType))
+                    putNull("created_by");put("created_at",createdAt);put("operating_date",createdAt.take(10))
+                }
+                db.insertOrThrow("cash_transactions",null,v)
+            }
+        }
+    }
+
     private fun walletBalance(db:SQLiteDatabase,key:String):Long =
-        db.rawQuery("SELECT COALESCE(SUM(CASE WHEN direction='IN' THEN amount_minor ELSE -amount_minor END),0) FROM service_wallet_transactions WHERE service_key=?",arrayOf(key)).use{it.moveToFirst();it.getLong(0)}
+        cashBalance(db,serviceAccountId(db,key))
+
     private fun insertWalletMovement(db:SQLiteDatabase,key:String,direction:String,amount:Long,type:String,sourceId:String?,operationId:String,fee:Long,note:String?,actor:String,now:String,payloadHash:String?=null) {
-        val v=ContentValues().apply{put("id",UUID.randomUUID().toString());put("service_key",key);put("direction",direction);put("amount_minor",amount);put("transaction_type",type);put("source_id",sourceId);put("operation_id",operationId);if(payloadHash!=null)put("payload_hash",payloadHash);put("fee_minor",fee);put("note",note);put("created_by",actor);put("created_at",now)}
+        val movementId=UUID.randomUUID().toString()
+        val v=ContentValues().apply{put("id",movementId);put("service_key",key);put("direction",direction);put("amount_minor",amount);put("transaction_type",type);put("source_id",sourceId);put("operation_id",operationId);if(payloadHash!=null)put("payload_hash",payloadHash);put("fee_minor",fee);put("note",note);put("created_by",actor);put("created_at",now)}
         db.insertOrThrow("service_wallet_transactions",null,v)
+        val cashType=when(type) {
+            "OPENING" -> "SERVICE_FLOAT_OPENING"
+            "RECHARGE" -> "SERVICE_RECHARGE_IN"
+            "TRANSFER_OUT" -> "SERVICE_TRANSFER_OUT"
+            "TRANSFER_REVERSAL" -> "SERVICE_TRANSFER_REVERSAL_IN"
+            else -> "SERVICE_FLOAT_"+type
+        }
+        insertCashMovement(db,serviceAccountId(db,key),direction,amount,cashType,"SERVICE_WALLET_LEDGER",movementId,
+            "SERVICE_FLOAT_LEDGER:"+movementId,actor,note?:type,now)
     }
     private fun insertCashMovement(db:SQLiteDatabase,accountId:String,direction:String,amount:Long,type:String,sourceType:String,sourceId:String,operationId:String,actor:String,description:String,now:String) {
         val v=ContentValues().apply{put("id",UUID.randomUUID().toString());put("account_id",accountId);put("direction",direction);put("amount_minor",amount);put("currency_code","SYP");put("transaction_type",type);put("source_type",sourceType);put("source_id",sourceId);put("operation_id",operationId);put("description",description);put("created_by",actor);put("operating_date",today());put("created_at",now)}
