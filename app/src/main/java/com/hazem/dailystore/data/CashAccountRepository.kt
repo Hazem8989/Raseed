@@ -85,7 +85,7 @@ class CashAccountRepository(context: Context) {
                 put("entity_type", "DAILY_CASH_SESSION")
                 put("entity_id", date)
                 put("before_json", before?.let { "{\"primary_cash_account_id\":\"$it\"}" })
-                put("after_json", "{\"primary_cash_account_id\":\"$accountId\",\"account_name\":\"\${jsonEscape(accountName)}\"}")
+                put("after_json", "{\"primary_cash_account_id\":\"" + accountId + "\",\"account_name\":\"" + jsonEscape(accountName) + "\"}")
                 put("created_at", now)
             }
             db.insertOrThrow("audit_log", null, audit)
