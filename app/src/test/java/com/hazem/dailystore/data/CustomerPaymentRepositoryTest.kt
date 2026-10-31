@@ -103,11 +103,14 @@ class CustomerPaymentRepositoryTest {
             saleType = "CASH"
         )
         invoices.postCashSale(draft.invoiceId, "customer-cash-post-" + UUID.randomUUID(), accountId)
+        // A cash sale correctly creates its own receipt row; the rejected customer-credit
+        // collection must not add a second payment row.
+        val receiptsBefore = payments.listPayments(draft.invoiceId).size
         try {
             payments.addPayment(draft.invoiceId, "customer-cash-payment-" + UUID.randomUUID(), accountId, 100L)
             throw AssertionError("Cash sale must not be collected as customer credit")
         } catch (_: IllegalArgumentException) { }
-        assertEquals(0, payments.listPayments(draft.invoiceId).size)
+        assertEquals(receiptsBefore, payments.listPayments(draft.invoiceId).size)
     }
 
     private fun createCreditInvoice(): String {
