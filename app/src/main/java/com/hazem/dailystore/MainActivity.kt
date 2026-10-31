@@ -270,6 +270,7 @@ class MainActivity : Activity() {
             "CUSTOMER_ACCOUNT" -> showCustomerAccount(activeScreenArgument ?: "")
             "CASH_ACCOUNTS" -> showCashAccounts()
             "DAILY_REPORT" -> showDailyCashReport()
+            "GENERAL_REPORTS" -> showGeneralReports()
             "SERVICE_TRANSFERS" -> showServiceTransfers()
             "PURCHASE_EDITOR" -> showPurchaseInvoiceEditor()
             else -> showPointOfSale(preserveCart = true)
