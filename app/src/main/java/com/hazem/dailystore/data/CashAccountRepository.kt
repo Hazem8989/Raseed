@@ -138,6 +138,7 @@ class CashAccountRepository(context: Context) {
     }
 
     fun setCurrentDayPrimaryDrawer(actorRole: String, actorUserId: String, accountId: String) {
+        ensureSystemCashAccounts()
         require(actorRole == "ADMIN" && actorUserId.isNotBlank()) {
             "تعيين الدرج اليومي الرئيسي متاح للمدير فقط"
         }
