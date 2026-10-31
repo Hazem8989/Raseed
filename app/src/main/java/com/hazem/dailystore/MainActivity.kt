@@ -37,6 +37,7 @@ import com.hazem.dailystore.data.CustomerRepository
 import com.hazem.dailystore.data.CustomerPaymentRepository
 import com.hazem.dailystore.data.CashAccountRepository
 import com.hazem.dailystore.data.CashAccountSummary
+import com.hazem.dailystore.data.DailyBalanceRepository
 import com.hazem.dailystore.data.PurchasePaymentRepository
 import com.hazem.dailystore.data.PurchasePaymentRecord
 import com.hazem.dailystore.data.PurchaseInvoicePaymentSummary
