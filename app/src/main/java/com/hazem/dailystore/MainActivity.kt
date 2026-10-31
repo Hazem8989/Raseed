@@ -100,6 +100,7 @@ class MainActivity : Activity() {
         window.decorView.layoutDirection = View.LAYOUT_DIRECTION_RTL
         StoreRepository(this).ensureBaseSetup()
         AuthRepository(this).ensureInitialAdmin()
+        ServiceTransferRepository(this).ensureSystemAccounts()
         if (restoreSession(savedInstanceState)) restoreActiveScreen() else {
             clearSessionState()
             showLoginScreen()
@@ -141,10 +142,10 @@ class MainActivity : Activity() {
         }
         AlertDialog.Builder(this)
             .setTitle("إغلاق التطبيق")
-            .setMessage("سيتم إغلاق التطبيق وإنهاء الجلسة. عند فتحه مجدداً ستحتاج إلى تسجيل الدخول.")
+            .setMessage("سيتم إغلاق التطبيق فقط. عند فتحه مجدداً ستعود إلى الصفحة التي كنت تعمل عليها. لتسجيل الخروج استخدم القائمة الجانبية.")
             .setNegativeButton("متابعة العمل", null)
             .setPositiveButton("إغلاق التطبيق") { _, _ ->
-                clearSessionState()
+                persistSessionState()
                 finish()
             }
             .show()
@@ -1909,7 +1910,7 @@ class MainActivity : Activity() {
         val body=ScrollView(this).apply{isFillViewport=true}
         val content=LinearLayout(this).apply{orientation=LinearLayout.VERTICAL;setPadding(dp(16),dp(14),dp(16),dp(24))}
         content.addView(label("أرصدة تشغيل خدمات التحويل",21f,green,true,Gravity.RIGHT))
-        content.addView(label("رصيد سيرياتيل مشترك للتحويل العادي وسيرياتيل كاش، ورصيد شام كاش مستقل. هذه الأرصدة منفصلة عن محافظ قبض أموال الزبائن.",13f,mutedColor,false,Gravity.RIGHT).apply{setPadding(0,dp(5),0,dp(12))})
+        content.addView(label("محفظتا سيرياتيل وشام كاش هما رصيد التشغيل نفسه وحساب القبض الإلكتروني للخدمة؛ كل حركة بيع أو قبض أو تحويل داخلي تظهر على رصيد المحفظة ذاتها.",13f,mutedColor,false,Gravity.RIGHT).apply{setPadding(0,dp(5),0,dp(12))})
         repo.listWallets().forEach { w ->
             val card=LinearLayout(this).apply{orientation=LinearLayout.VERTICAL;setPadding(dp(14),dp(12),dp(14),dp(12));background=cardBackground()}
             card.addView(label(w.name,16f,green,true,Gravity.RIGHT))
@@ -1917,7 +1918,7 @@ class MainActivity : Activity() {
             content.addView(card,fieldParams(-2,dp(8)))
         }
         if(isManager()) {
-            content.addView(smallButton("تسجيل الرصيد الافتتاحي للخدمة"){showServiceOpeningDialog()},fieldParams(dp(46),dp(7)))
+            content.addView(smallButton("تسجيل مطابقة رصيد محفظة التشغيل"){showServiceOpeningDialog()},fieldParams(dp(46),dp(7)))
             content.addView(smallButton("شراء / شحن رصيد الخدمة"){showServiceRechargeDialog()},fieldParams(dp(46),dp(12)))
         }
         content.addView(Button(this).apply{text="＋ تنفيذ تحويل للزبون";isAllCaps=false;setTextColor(Color.WHITE);setBackgroundColor(green);setOnClickListener{showServiceTransferDialog()}},fieldParams(dp(52),dp(12)))
@@ -1954,7 +1955,7 @@ class MainActivity : Activity() {
         val repo=ServiceTransferRepository(this)
         val form=LinearLayout(this).apply{orientation=LinearLayout.VERTICAL;setPadding(dp(18),dp(8),dp(18),dp(4))}
         val service=Spinner(this).apply{adapter=ArrayAdapter(this@MainActivity,android.R.layout.simple_spinner_dropdown_item,listOf("رصيد سيرياتيل المشترك","رصيد شام كاش"))}
-        val amount=fieldForDialog("الرصيد الافتتاحي بالليرة السورية").apply{inputType=InputType.TYPE_CLASS_NUMBER or InputType.TYPE_NUMBER_FLAG_DECIMAL}
+        val amount=fieldForDialog("الرصيد الفعلي الحالي للمحفظة بالليرة السورية").apply{inputType=InputType.TYPE_CLASS_NUMBER or InputType.TYPE_NUMBER_FLAG_DECIMAL}
         val note=fieldForDialog("ملاحظة / مرجع")
         form.addView(label("الخدمة",12f,mutedColor,false,Gravity.RIGHT));form.addView(service,fieldParams(dp(48),dp(8)));form.addView(amount,fieldParams(dp(48),dp(8)));form.addView(note,fieldParams(dp(48),dp(8)))
         val dialog=AlertDialog.Builder(this).setTitle("الرصيد الافتتاحي للخدمة").setView(form).setNegativeButton("إلغاء",null).setPositiveButton("حفظ",null).create()
@@ -1985,14 +1986,14 @@ class MainActivity : Activity() {
         }
         val ref=fieldForDialog("مرجع عملية الشراء / ملاحظة")
         form.addView(label("محفظة الخدمة",12f,mutedColor,false,Gravity.RIGHT));form.addView(service,fieldParams(dp(48),dp(8)))
-        form.addView(label("التمويل من محفظة القبض الإلكترونية",12f,mutedColor,false,Gravity.RIGHT));form.addView(source,fieldParams(dp(48),dp(8)))
+        form.addView(label("التمويل من صندوق شراء رصيد الخدمات",12f,mutedColor,false,Gravity.RIGHT));form.addView(source,fieldParams(dp(48),dp(8)))
         form.addView(amount,fieldParams(dp(48),dp(6)));form.addView(fee);form.addView(ref,fieldParams(dp(48),dp(8)))
         val op=UUID.randomUUID().toString()
         val dialog=AlertDialog.Builder(this).setTitle("شراء / شحن رصيد الخدمة").setView(form).setNegativeButton("إلغاء",null).setPositiveButton("شراء الرصيد",null).create()
         dialog.setOnShowListener{dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener{
             try{
                 val key=if(service.selectedItemPosition==0)ServiceTransferRepository.SYRIATEL_SHARED else ServiceTransferRepository.SHAM_CASH
-                val selected=sources.getOrNull(source.selectedItemPosition)?:error("اختر محفظة التمويل")
+                val selected=sources.getOrNull(source.selectedItemPosition)?:error("اختر صندوق شراء الرصيد")
                 val note=ref.text.toString().trim().ifEmpty{null}
                 val feeAmount=repo.recharge(currentUserId?:error("جلسة المدير غير صالحة"),key,selected.id,parseSypAmount(amount.text.toString()),op,note,note)
                 dialog.dismiss();Toast.makeText(this,"تم شراء الرصيد. عمولة الشحن: "+formatSypAmount(feeAmount)+" ل.س",Toast.LENGTH_LONG).show();showServiceTransfers()
