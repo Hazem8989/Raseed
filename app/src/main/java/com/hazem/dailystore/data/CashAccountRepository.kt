@@ -122,8 +122,8 @@ class CashAccountRepository(context: Context) {
     }
 
     private fun jsonString(value: String): String =
-        "\"" + value.replace("\\\\", "\\\\\\\\").replace("\"", "\\\\"")
-            .replace("\\n", "\\\\n").replace("\\r", "\\\\r") + "\""
+        "\"" + value.replace("\\", "\\\\").replace("\"", "\\\"")
+            .replace("\n", "\\n").replace("\r", "\\r") + "\""
 
     fun balance(accountId: String): Long {
         val opening = database.readableDatabase.rawQuery(
