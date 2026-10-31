@@ -727,6 +727,21 @@ class MainActivity : Activity() {
                     showPurchasePaymentDialog(invoice.id, invoice.invoiceNumber) { showPurchases() }
                 }, fieldParams(dp(44), dp(4)))
             }
+            val revaluations = repository.listRevaluations(invoice.id)
+            if (revaluations.isNotEmpty()) {
+                card.addView(label("تعديلات تقييم الدين حسب سعر الصرف", 11f, gold.toInt(), true, Gravity.RIGHT)
+                    .apply { setPadding(0, dp(6), 0, dp(3)) })
+                revaluations.forEach { adjustment ->
+                    val rateText = BigDecimal.valueOf(adjustment.appliedRateMilli, 3)
+                        .stripTrailingZeros().toPlainString()
+                    card.addView(label(
+                        formatSypAmount(adjustment.previousSypMinor) + " ← " +
+                            formatSypAmount(adjustment.newSypMinor) + " ل.س • " +
+                            rateText + " ل.س/$ • " + adjustment.createdAt,
+                        10f, mutedColor, false, Gravity.RIGHT
+                    ).apply { setPadding(0, dp(2), 0, dp(2)) })
+                }
+            }
             val history = repository.listPayments(invoice.id)
             if (history.isNotEmpty()) {
                 card.addView(label("سجل الدفعات:", 12f, mutedColor, true, Gravity.RIGHT)
@@ -1197,7 +1212,9 @@ class MainActivity : Activity() {
             14f, textColor, false, Gravity.RIGHT))
         summaryCard.addView(label("إجمالي التحصيلات: " + moneyText(paid) + " USD",
             14f, textColor, false, Gravity.RIGHT).apply { setPadding(0, dp(5), 0, dp(5)) })
-        summaryCard.addView(label("الرصيد المتبقي: " + moneyText(outstanding) + " USD",
+        summaryCard.addView(label("الرصيد المتبقي المرجعي: " + moneyText(outstanding) + " USD",
+            14f, textColor, false, Gravity.RIGHT).apply { setPadding(0, dp(5), 0, dp(3)) })
+        summaryCard.addView(label("المطلوب حالياً: " + formatSypAmount(summary?.outstandingSypMinor ?: 0L) + " ل.س",
             17f, green, true, Gravity.RIGHT))
         content.addView(summaryCard, fieldParams(-2, dp(16)))
         content.addView(sectionHeading("فواتير البيع الآجل"))
@@ -1228,7 +1245,9 @@ class MainActivity : Activity() {
                 13f, textColor, false, Gravity.RIGHT))
             card.addView(label("المدفوع: " + moneyText(invoice.paidUsdCents) + " USD",
                 13f, textColor, false, Gravity.RIGHT).apply { setPadding(0, dp(3), 0, dp(3)) })
-            card.addView(label("المتبقي: " + moneyText(invoice.outstandingUsdCents) + " USD",
+            card.addView(label("المتبقي المرجعي: " + moneyText(invoice.outstandingUsdCents) + " USD",
+                13f, textColor, false, Gravity.RIGHT))
+            card.addView(label("المطلوب حالياً: " + formatSypAmount(invoice.outstandingSypMinor) + " ل.س",
                 15f, green, true, Gravity.RIGHT))
             if (invoice.outstandingUsdCents > 0L &&
                 (invoice.invoiceStatus == "POSTED" || invoice.invoiceStatus == "PARTIALLY_PAID")) {
@@ -1246,11 +1265,10 @@ class MainActivity : Activity() {
                 card.addView(label("سجل الدفعات", 12f, gold.toInt(), true, Gravity.RIGHT)
                     .apply { setPadding(0, dp(8), 0, dp(3)) })
                 history.forEach { payment ->
-                    val amount = if (payment.currencyCode == "USD")
-                        "$" + moneyText(payment.amountMinor)
-                    else formatSypAmount(payment.amountMinor) + " ل.س"
+                    val amount = formatSypAmount(payment.amountMinor) + " ل.س"
+                    val channel = if (payment.accountType == "WALLET") "محفظة إلكترونية" else "درج نقدي"
                     card.addView(label(
-                        amount + " • " + payment.accountName + " • " + payment.createdAt,
+                        amount + " • " + channel + ": " + payment.accountName + " • " + payment.createdAt,
                         11f, mutedColor, false, Gravity.RIGHT
                     ).apply { setPadding(0, dp(2), 0, dp(2)) })
                 }
@@ -1266,52 +1284,86 @@ class MainActivity : Activity() {
     private fun showCustomerPaymentDialog(
         customerId: String, invoice: com.hazem.dailystore.data.CustomerInvoicePaymentSummary
     ) {
-        val accounts = CashAccountRepository(this).listActive()
-        if (accounts.isEmpty()) {
-            AlertDialog.Builder(this).setTitle("لا يوجد حساب مالي نشط")
-                .setMessage("أنشئ صندوقاً أو محفظة نشطة من قسم الصناديق والمحافظ قبل تسجيل التحصيل.")
-                .setPositiveButton("حسناً", null).show()
+        val accountRepository = CashAccountRepository(this)
+        val drawer = accountRepository.currentDayPrimaryDrawer()
+        val wallets = accountRepository.listActive().filter {
+            it.accountType == "WALLET" && it.currencyCode == "SYP"
+        }
+        if (drawer == null && wallets.isEmpty()) {
+            AlertDialog.Builder(this).setTitle("لا يوجد حساب صالح للتحصيل")
+                .setMessage("يجب على المدير تعيين درج نقدي رئيسي لليوم أو إنشاء محفظة إلكترونية نشطة بالليرة السورية. لا يمكن استخدام صندوق الموردين المدور.")
+                .setPositiveButton("فتح الصناديق والمحافظ") { _, _ -> showCashAccounts() }.show()
             return
         }
         val content = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             setPadding(dp(18), dp(8), dp(18), dp(4))
         }
-        val amount = fieldForDialog("مبلغ التحصيل", "", InputType.TYPE_CLASS_NUMBER or InputType.TYPE_NUMBER_FLAG_DECIMAL)
-        val accountSpinner = Spinner(this)
-        accountSpinner.adapter = ArrayAdapter(
+        val channel = RadioGroup(this).apply { orientation = RadioGroup.VERTICAL }
+        val cashOption = RadioButton(this).apply {
+            id = View.generateViewId()
+            text = if (drawer != null) "نقداً إلى درج اليوم الرئيسي: " + drawer.name
+                else "نقداً (يتطلب تعيين درج اليوم الرئيسي)"
+            isEnabled = drawer != null
+            textSize = 13f
+        }
+        val walletOption = RadioButton(this).apply {
+            id = View.generateViewId()
+            text = "تحويل إلكتروني إلى محفظة"
+            isEnabled = wallets.isNotEmpty()
+            textSize = 13f
+        }
+        channel.addView(cashOption)
+        channel.addView(walletOption)
+        val walletSpinner = Spinner(this)
+        walletSpinner.adapter = ArrayAdapter(
             this, android.R.layout.simple_spinner_dropdown_item,
-            accounts.map { it.name + " • " + it.currencyCode + " • الرصيد " +
-                formatAccountBalance(it.balanceMinor, it.currencyCode) }
+            wallets.map { it.name + " • الرصيد " + formatAccountBalance(it.balanceMinor, it.currencyCode) }
         )
+        val amount = fieldForDialog("مبلغ التحصيل بالليرة السورية", "",
+            InputType.TYPE_CLASS_NUMBER or InputType.TYPE_NUMBER_FLAG_DECIMAL)
         val note = fieldForDialog("ملاحظة اختيارية")
         content.addView(label("الفاتورة: " + invoice.invoiceNumber, 15f, green, true, Gravity.RIGHT))
         content.addView(label("المتبقي المرجعي: " + moneyText(invoice.outstandingUsdCents) + " USD",
-            12f, mutedColor, false, Gravity.RIGHT).apply { setPadding(0, dp(4), 0, dp(8)) })
-        content.addView(label("الحساب الذي سيستقبل المبلغ", 12f, mutedColor, false, Gravity.RIGHT))
-        content.addView(accountSpinner, fieldParams(dp(48), dp(8)))
+            12f, mutedColor, false, Gravity.RIGHT).apply { setPadding(0, dp(4), 0, dp(2)) })
+        content.addView(label("المطلوب حالياً: " + formatSypAmount(invoice.outstandingSypMinor) + " ل.س",
+            14f, green, true, Gravity.RIGHT).apply { setPadding(0, dp(2), 0, dp(8)) })
+        content.addView(label("طريقة التحصيل", 12f, mutedColor, true, Gravity.RIGHT))
+        content.addView(channel, fieldParams(-2, dp(6)))
+        val walletLabel = label("المحفظة المستلمة", 12f, mutedColor, false, Gravity.RIGHT)
+        content.addView(walletLabel)
+        content.addView(walletSpinner, fieldParams(dp(48), dp(8)))
         content.addView(amount, fieldParams(dp(48), dp(8)))
         content.addView(note, fieldParams(dp(48), dp(8)))
-        val dialog = AlertDialog.Builder(this).setTitle("تسجيل تحصيل")
+        channel.check(if (drawer != null) cashOption.id else walletOption.id)
+        fun updateChannel() {
+            val useWallet = channel.checkedRadioButtonId == walletOption.id
+            walletLabel.visibility = if (useWallet) View.VISIBLE else View.GONE
+            walletSpinner.visibility = if (useWallet) View.VISIBLE else View.GONE
+        }
+        channel.setOnCheckedChangeListener { _, _ -> updateChannel() }
+        updateChannel()
+        val dialog = AlertDialog.Builder(this).setTitle("تحصيل دين زبون")
             .setView(content).setNegativeButton("إلغاء", null)
-            .setPositiveButton("تسجيل", null).create()
+            .setPositiveButton("تسجيل التحصيل", null).create()
         dialog.setOnShowListener {
             dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener {
                 try {
-                    val account = accounts.getOrNull(accountSpinner.selectedItemPosition)
-                        ?: error("اختر الحساب المالي")
-                    val amountMinor = if (account.currencyCode == "USD")
-                        parseUsdCents(amount.text.toString()) else parseSypAmount(amount.text.toString())
+                    val useWallet = channel.checkedRadioButtonId == walletOption.id
+                    val accountId = if (useWallet) wallets.getOrNull(walletSpinner.selectedItemPosition)?.id
+                        ?: error("اختر المحفظة الإلكترونية المستلمة")
+                    else drawer?.id ?: error("لم يتم تعيين درج اليوم الرئيسي؛ لا يمكن تسجيل التحصيل النقدي")
+                    val amountMinor = parseSypAmount(amount.text.toString())
                     require(amountMinor > 0L) { "أدخل مبلغ تحصيل أكبر من صفر" }
                     val result = CustomerPaymentRepository(this).addPayment(
-                        invoice.id, UUID.randomUUID().toString(), account.id, amountMinor,
-                        note.text.toString().trim().ifEmpty { null }
+                        invoice.id, UUID.randomUUID().toString(), accountId, amountMinor,
+                        note.text.toString().trim().ifEmpty { null }, currentUserId
                     )
                     dialog.dismiss()
                     Toast.makeText(
                         this,
                         if (result.outstandingUsdCents == 0L) "تم التحصيل وأصبحت الفاتورة مسددة بالكامل"
-                        else "تم تسجيل الدفعة الجزئية بنجاح",
+                        else "تم تسجيل التحصيل المالي الجزئي بنجاح",
                         Toast.LENGTH_LONG
                     ).show()
                     showCustomerAccount(customerId)
