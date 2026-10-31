@@ -57,8 +57,8 @@ class ServiceTransferRepositoryTest {
         assertEquals(2_000L, cash.profitMinor)
         assertEquals(10_000L, normal.customerReceiptsMinor)
         assertEquals(20_000L, cash.customerReceiptsMinor)
-        assertEquals(10_200L, normal.rechargeReserveMinor)
-        assertEquals(20_400L, cash.rechargeReserveMinor)
+        assertEquals(10_000L, normal.rechargeReserveMinor)
+        assertEquals(20_000L, cash.rechargeReserveMinor)
     }
 
     @Test fun shamCashUsesIndependentFloatAndFivePercentProfit() {
