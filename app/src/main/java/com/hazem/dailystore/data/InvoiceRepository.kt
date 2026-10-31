@@ -48,7 +48,7 @@ class InvoiceRepository(context: Context) {
         lines: List<InvoiceLineInput>
     ): InvoiceSaveResult = saveDraft(
         "PURCHASE", operationId, invoiceId, supplierId, invoiceDate,
-        discountUsdCents, notes, lines
+        discountUsdCents, notes, lines, null
     )
 
     fun saveSalesDraft(
@@ -58,11 +58,18 @@ class InvoiceRepository(context: Context) {
         invoiceDate: String,
         discountUsdCents: Long,
         notes: String?,
-        lines: List<InvoiceLineInput>
-    ): InvoiceSaveResult = saveDraft(
-        "SALE", operationId, invoiceId, customerId, invoiceDate,
-        discountUsdCents, notes, lines
-    )
+        lines: List<InvoiceLineInput>,
+        saleType: String = "CASH"
+    ): InvoiceSaveResult {
+        require(saleType == "CASH" || saleType == "CREDIT") { "نوع البيع غير صالح" }
+        if (saleType == "CREDIT") require(!customerId.isNullOrBlank()) {
+            "يجب تحديد الزبون للبيع الآجل"
+        }
+        return saveDraft(
+            "SALE", operationId, invoiceId, customerId, invoiceDate,
+            discountUsdCents, notes, lines, saleType
+        )
+    }
 
     private fun saveDraft(
         type: String,
@@ -72,7 +79,8 @@ class InvoiceRepository(context: Context) {
         invoiceDate: String,
         discountUsdCents: Long,
         notes: String?,
-        lines: List<InvoiceLineInput>
+        lines: List<InvoiceLineInput>,
+        saleType: String?
     ): InvoiceSaveResult {
         require(operationId.isNotBlank()) { "معرّف العملية مطلوب" }
         require(invoiceDate.isNotBlank()) { "تاريخ الفاتورة مطلوب" }
@@ -82,7 +90,7 @@ class InvoiceRepository(context: Context) {
         val table = if (type == "PURCHASE") "purchase_invoices" else "sales_invoices"
         val itemTable = if (type == "PURCHASE") "purchase_items" else "sales_items"
         val partyColumn = if (type == "PURCHASE") "supplier_id" else "customer_id"
-        val payloadHash = hashPayload(type, invoiceId, partyId, invoiceDate, discountUsdCents, notes, lines)
+        val payloadHash = hashPayload(type, invoiceId, partyId, invoiceDate, discountUsdCents, notes, lines, saleType)
         db.beginTransaction()
         try {
             findOperation(db, operationId)?.let { existing ->
@@ -111,6 +119,7 @@ class InvoiceRepository(context: Context) {
                 put("warehouse_id", warehouseId)
                 put("invoice_date", invoiceDate)
                 put("status", "DRAFT")
+                if (type == "SALE") put("sale_type", saleType ?: "CASH")
                 put("subtotal_usd_cents", subtotal)
                 put("discount_usd_cents", discountUsdCents)
                 put("total_usd_cents", total)
@@ -181,6 +190,18 @@ class InvoiceRepository(context: Context) {
                 return false
             }
             require(status == "DRAFT") { "لا يمكن اعتماد فاتورة بهذه الحالة: $status" }
+            if (type == "SALE") {
+                db.rawQuery(
+                    "SELECT sale_type,customer_id,exchange_rate_syp_per_usd_milli FROM sales_invoices WHERE id=?",
+                    arrayOf(invoiceId)
+                ).use { c ->
+                    require(c.moveToFirst()) { "فاتورة البيع غير موجودة" }
+                    if (c.getString(0) == "CREDIT") {
+                        require(!c.isNull(1)) { "البيع الآجل يتطلب زبوناً محدداً" }
+                        require(c.getLong(2) > 0L) { "لا يمكن اعتماد بيع آجل دون سعر صرف محفوظ" }
+                    }
+                }
+            }
             val warehouseId = invoiceWarehouse(db, table, invoiceId)
             val now = timestamp()
             db.rawQuery(
@@ -385,10 +406,11 @@ class InvoiceRepository(context: Context) {
 
     private fun hashPayload(
         type: String, invoiceId: String?, partyId: String?, date: String, discount: Long,
-        notes: String?, lines: List<InvoiceLineInput>
+        notes: String?, lines: List<InvoiceLineInput>, saleType: String?
     ): String = hash(buildString {
         append(type).append('|').append(invoiceId.orEmpty()).append('|').append(partyId.orEmpty())
             .append('|').append(date).append('|').append(discount).append('|').append(notes.orEmpty())
+            .append('|').append(saleType.orEmpty())
         lines.forEach { append('|').append(it.productId).append(':').append(it.quantity.stripTrailingZeros().toPlainString())
             .append(':').append(it.unitPriceUsdCents) }
     })

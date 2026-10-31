@@ -41,16 +41,26 @@ class AppDatabase private constructor(context: Context) :
     }
 
     override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) {
-        // Never destroy business data to perform an upgrade. Add explicit,
-        // sequential migrations here whenever DATABASE_VERSION is increased.
-        throw IllegalStateException(
-            "Missing database migration from version $oldVersion to $newVersion"
-        )
+        var version = oldVersion
+        if (version < 2) {
+            db.beginTransaction()
+            try {
+                db.execSQL("ALTER TABLE sales_invoices ADD COLUMN sale_type TEXT NOT NULL DEFAULT 'CASH' CHECK(sale_type IN ('CASH','CREDIT'))")
+                db.execSQL("CREATE INDEX idx_sales_customer_date ON sales_invoices(customer_id, invoice_date)")
+                db.setTransactionSuccessful()
+                version = 2
+            } finally {
+                db.endTransaction()
+            }
+        }
+        if (version != newVersion) {
+            throw IllegalStateException("Missing database migration from version $version to $newVersion")
+        }
     }
 
     companion object {
         const val DATABASE_NAME = "the_daily_shop.db"
-        const val DATABASE_VERSION = 1
+        const val DATABASE_VERSION = 2
 
         @Volatile
         private var INSTANCE: AppDatabase? = null
@@ -292,6 +302,7 @@ class AppDatabase private constructor(context: Context) :
                 id TEXT PRIMARY KEY NOT NULL,
                 invoice_number TEXT NOT NULL UNIQUE,
                 customer_id TEXT,
+                sale_type TEXT NOT NULL DEFAULT 'CASH' CHECK(sale_type IN ('CASH','CREDIT')),
                 warehouse_id TEXT NOT NULL,
                 invoice_date TEXT NOT NULL,
                 status TEXT NOT NULL CHECK(status IN
@@ -524,6 +535,7 @@ class AppDatabase private constructor(context: Context) :
             "CREATE INDEX idx_products_barcode ON products(barcode)",
             "CREATE INDEX idx_inventory_movements_product_date ON inventory_movements(product_id, created_at)",
             "CREATE INDEX idx_sales_date ON sales_invoices(invoice_date)",
+            "CREATE INDEX idx_sales_customer_date ON sales_invoices(customer_id, invoice_date)",
             "CREATE INDEX idx_purchase_date ON purchase_invoices(invoice_date)",
             "CREATE INDEX idx_cash_transactions_account_date ON cash_transactions(account_id, created_at)",
             "CREATE INDEX idx_debts_party ON debts(party_type, party_id, created_at)",
