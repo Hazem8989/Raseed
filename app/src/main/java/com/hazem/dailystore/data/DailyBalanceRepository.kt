@@ -12,10 +12,10 @@ import java.util.UUID
 
 data class DailyAccountSummary(
     val accountId:String,val accountName:String,val accountType:String,val currencyCode:String,
-    val openingMinor:Long,val salesReceiptsMinor:Long,val debtCollectionsMinor:Long,val otherInflowsMinor:Long,
+    val openingMinor:Long,val salesReceiptsMinor:Long,val debtCollectionsMinor:Long,val serviceTransferReceiptsMinor:Long,val otherInflowsMinor:Long,
     val supplierPaymentsMinor:Long,val personalWithdrawalsMinor:Long,val transferInMinor:Long,val transferOutMinor:Long,
     val otherOutflowsMinor:Long,val closingMinor:Long
-) { val electronicReceiptsMinor:Long get()=Math.addExact(salesReceiptsMinor,debtCollectionsMinor); val liquidatableElectronicReceiptsMinor:Long get()=(electronicReceiptsMinor-transferOutMinor).coerceAtLeast(0L) }
+) { val electronicReceiptsMinor:Long get()=Math.addExact(Math.addExact(salesReceiptsMinor,debtCollectionsMinor),serviceTransferReceiptsMinor); val liquidatableElectronicReceiptsMinor:Long get()=(electronicReceiptsMinor-transferOutMinor).coerceAtLeast(0L) }
 data class DailyCashReport(val operatingDate:String,val accounts:List<DailyAccountSummary>,val electronicReceiptsByCurrency:Map<String,Long>,val liquidatableElectronicReceiptsByCurrency:Map<String,Long>,val physicalCashReceiptsByCurrency:Map<String,Long>,val supplierRollover:SupplierRolloverSummary?)
 data class SupplierRolloverSummary(
     val operatingDate:String,val accountId:String,val accountName:String,val allocatedMinor:Long,
@@ -175,13 +175,13 @@ class DailyBalanceRepository(context:Context) {
                 val id=c.getString(0);val base=c.getLong(4)
                 val opening=db.rawQuery("SELECT opening_minor FROM wallet_daily_openings WHERE operating_date=? AND account_id=?",arrayOf(date,id)).use { if(it.moveToFirst())it.getLong(0)else openingBefore(db,id,base,date) }
                 val s=totals(db,id,date)
-                rows.add(DailyAccountSummary(id,c.getString(1),c.getString(2),c.getString(3),opening,s[0],s[1],s[2],s[3],s[4],s[5],s[6],s[7],Math.addExact(opening,s.sum())))
+                rows.add(DailyAccountSummary(id,c.getString(1),c.getString(2),c.getString(3),opening,s[0],s[1],s[8],s[2],s[3],s[4],s[5],s[6],s[7],Math.addExact(opening,s.sum())))
             }
         }
         val walletRows=rows.filter{it.accountType=="WALLET"}
         val electronic=walletRows.groupBy{it.currencyCode}.mapValues { entry -> entry.value.sumOf { it.electronicReceiptsMinor } }
         val liquidatable=walletRows.groupBy{it.currencyCode}.mapValues { entry -> entry.value.sumOf { it.liquidatableElectronicReceiptsMinor } }
-        val cash=rows.filter{it.accountType=="CASH_BOX"}.groupBy{it.currencyCode}.mapValues { entry -> entry.value.sumOf { Math.addExact(it.salesReceiptsMinor,it.debtCollectionsMinor) } }
+        val cash=rows.filter{it.accountType=="CASH_BOX"}.groupBy{it.currencyCode}.mapValues { entry -> entry.value.sumOf { Math.addExact(Math.addExact(it.salesReceiptsMinor,it.debtCollectionsMinor),it.serviceTransferReceiptsMinor) } }
         return DailyCashReport(date,rows,electronic,liquidatable,cash,rolloverForDate(db,date))
     }
 
@@ -193,10 +193,11 @@ class DailyBalanceRepository(context:Context) {
     }
 
     private fun totals(db:SQLiteDatabase,id:String,date:String):List<Long>{
-        val s=MutableList(8){0L}
+        val s=MutableList(9){0L}
         db.rawQuery("SELECT transaction_type,direction,SUM(amount_minor) FROM cash_transactions WHERE account_id=? AND COALESCE(operating_date,substr(created_at,1,10))=? AND transaction_type<>'WALLET_DAILY_OPENING_ADJUSTMENT' GROUP BY transaction_type,direction",arrayOf(id,date)).use { c->
             while(c.moveToNext()){val t=c.getString(0);val d=c.getString(1);val n=c.getLong(2)
                 when{t=="SALE_RECEIPT"&&d=="IN"->s[0]+=n;t=="CUSTOMER_CREDIT_COLLECTION"&&d=="IN"->s[1]+=n
+                    t=="SERVICE_TRANSFER_RECEIPT"&&d=="IN"->s[8]+=n
                     t=="ACCOUNT_TRANSFER_IN"&&d=="IN"->s[5]+=n;t=="PURCHASE_PAYMENT"&&d=="OUT"->s[3]+=n
                     t=="PERSONAL_WITHDRAWAL"&&d=="OUT"->s[4]+=n;t=="ACCOUNT_TRANSFER_OUT"&&d=="OUT"->s[6]+=n
                     d=="IN"->s[2]+=n;d=="OUT"->s[7]+=n}
@@ -240,7 +241,7 @@ class DailyBalanceRepository(context:Context) {
         db.insertOrThrow("audit_log",null,v)
     }
     private fun manager(db:SQLiteDatabase,id:String){require(id.isNotBlank()){"جلسة المدير غير صالحة"};val ok=db.rawQuery("SELECT 1 FROM users WHERE id=? AND role_key='ADMIN' AND is_active=1",arrayOf(id)).use{it.moveToFirst()};require(ok){"هذه العملية متاحة للمدير فقط"}}
-    private fun typeName(t:String)=when(t){"SALE_RECEIPT"->"قبض مبيعات";"CUSTOMER_CREDIT_COLLECTION"->"تحصيل ديون";"PURCHASE_PAYMENT"->"دفعة مورد";"PERSONAL_WITHDRAWAL"->"مسحوبات شخصية";"ACCOUNT_TRANSFER_IN","ACCOUNT_TRANSFER_OUT"->"تحويل داخلي – تصريف محفظة";"WALLET_TOP_UP"->"تغذية محفظة";else->t}
+    private fun typeName(t:String)=when(t){"SALE_RECEIPT"->"قبض مبيعات";"CUSTOMER_CREDIT_COLLECTION"->"تحصيل ديون";"PURCHASE_PAYMENT"->"دفعة مورد";"PERSONAL_WITHDRAWAL"->"مسحوبات شخصية";"ACCOUNT_TRANSFER_IN","ACCOUNT_TRANSFER_OUT"->"تحويل داخلي – تصريف محفظة";"WALLET_TOP_UP"->"تغذية محفظة";"SERVICE_TRANSFER_RECEIPT"->"مقبوض تحويل رصيد";"SERVICE_RECHARGE"->"شراء رصيد خدمة";else->t}
     private fun esc(s:String)=s.replace("\\","\\\\").replace("\"","\\\"").replace("\n","\\n").replace("\r","\\r")
     private fun hash(s:String)=MessageDigest.getInstance("SHA-256").digest(s.toByteArray(Charsets.UTF_8)).joinToString(""){"%02x".format(it)}
     private fun today()=SimpleDateFormat("yyyy-MM-dd",Locale.US).format(Date())
