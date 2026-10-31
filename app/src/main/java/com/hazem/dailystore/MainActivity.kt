@@ -1713,7 +1713,7 @@ class MainActivity : Activity() {
         val cashAccounts = CashAccountRepository(this)
         val all = cashAccounts.listActive()
         val supplierDefaultId = cashAccounts.systemRoleAccountId("SUPPLIER_ROLLOVER")
-        val actions = listOf("تحديد النقد المدور للموردين", "تسجيل مسحوبات شخصية", "مطابقة الرصيد الافتتاحي اليومي لمحفظة", "تحويل محفظة إلى صندوق نقدي تختاره")
+        val actions = listOf("تحديد النقد المدور للموردين", "تسجيل مسحوبات شخصية", "مطابقة الرصيد الافتتاحي اليومي لمحفظة", "تحويل محفظة إلى صندوق نقدي تختاره", "تحويل نقدية بين صندوقين")
         val content = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(dp(18), dp(8), dp(18), dp(4)) }
         val action = Spinner(this)
         action.adapter = ArrayAdapter(this, android.R.layout.simple_spinner_dropdown_item, actions)
@@ -1736,7 +1736,12 @@ class MainActivity : Activity() {
                 }.sortedBy { if(it.id==supplierDefaultId) 0 else 1 }
                 1 -> all.filter { it.accountType == "CASH_BOX" && it.currencyCode == "SYP" && it.id == repo.currentSupplierRollover()?.accountId }
                 2 -> all.filter { it.accountType == "WALLET" }
-                else -> all.filter { it.accountType == "WALLET" && it.currencyCode == "SYP" }
+                3 -> all.filter { it.accountType == "WALLET" && it.currencyCode == "SYP" }
+                else -> all.filter {
+                    it.accountType == "CASH_BOX" && it.currencyCode == "SYP" &&
+                        it.id != ServiceTransferRepository(this).rechargeAccountId() &&
+                        it.id != supplierDefaultId && it.id != repo.currentSupplierRollover()?.accountId
+                }
             }
             availableAccounts = options
             account.tag = options
@@ -1748,8 +1753,9 @@ class MainActivity : Activity() {
                 options.isNotEmpty() -> ""
                 selected == 0 -> "أنشئ صندوقاً نقدياً بالليرة السورية مخصصاً لمدفوعات الموردين، غير درج اليوم الرئيسي."
                 selected == 1 -> "حدد النقد المدور للموردين لهذا اليوم أولاً من خيار إدارة الأرصدة اليومية."
-                selected == 2 || selected == 3 -> "أنشئ محفظة إلكترونية نشطة أولاً."
-                else -> "اختر محفظة مصدر نشطة بالليرة السورية أولاً."
+                selected == 2 -> "أنشئ محفظة إلكترونية نشطة أولاً."
+                selected == 3 -> "اختر محفظة مصدر نشطة بالليرة السورية أولاً."
+                else -> "اختر صندوقاً نقدياً مصدراً؛ لا يمكن السحب من صندوق الموردين أو صندوق شراء الرصيد."
             }
             accountHint.visibility = if (options.isEmpty()) View.VISIBLE else View.GONE
             if (previousId != null) {
@@ -1759,19 +1765,27 @@ class MainActivity : Activity() {
             val previousDestinationId = availableDestinations.getOrNull(destination.selectedItemPosition)?.id
             val rechargeId = ServiceTransferRepository(this).rechargeAccountId()
             val supplierId = repo.currentSupplierRollover()?.accountId
-            val destinationOptions = if (selected == 3) all.filter {
-                it.accountType == "CASH_BOX" && it.currencyCode == "SYP" &&
-                    it.id != rechargeId && it.id != supplierId && it.id != supplierDefaultId
-            } else emptyList()
+            val sourceId = availableAccounts.getOrNull(account.selectedItemPosition)?.id
+            val destinationOptions = when(selected) {
+                3 -> all.filter {
+                    it.accountType == "CASH_BOX" && it.currencyCode == "SYP" &&
+                        it.id != rechargeId && it.id != supplierId && it.id != supplierDefaultId
+                }
+                4 -> all.filter {
+                    it.accountType == "CASH_BOX" && it.currencyCode == "SYP" && it.id != sourceId
+                }
+                else -> emptyList()
+            }
             availableDestinations = destinationOptions
             destination.adapter = ArrayAdapter(this, android.R.layout.simple_spinner_dropdown_item,
                 if (destinationOptions.isEmpty()) listOf("لا توجد وجهة نقدية متاحة")
                 else destinationOptions.map { it.name + " • " + formatAccountBalance(it.balanceMinor, it.currencyCode) })
             destination.isEnabled = destinationOptions.isNotEmpty()
-            destinationTitle.visibility = if (selected == 3) View.VISIBLE else View.GONE
-            destination.visibility = if (selected == 3) View.VISIBLE else View.GONE
-            destinationHint.visibility = if (selected == 3 && destinationOptions.isEmpty()) View.VISIBLE else View.GONE
-            destinationHint.text = "أنشئ صندوقاً نقدياً نشطاً بالليرة السورية، مع استبعاد صندوق الموردين وصندوق شراء رصيد الخدمات."
+            destinationTitle.text = if(selected==4) "الصندوق النقدي الوجهة" else "وجهة التحويل النقدية"
+            destinationTitle.visibility = if (selected == 3 || selected == 4) View.VISIBLE else View.GONE
+            destination.visibility = if (selected == 3 || selected == 4) View.VISIBLE else View.GONE
+            destinationHint.visibility = if ((selected == 3 || selected == 4) && destinationOptions.isEmpty()) View.VISIBLE else View.GONE
+            destinationHint.text = if(selected==4) "اختر صندوقاً نقدياً وجهة؛ يمكن تمويل صندوق الموردين أو صندوق شراء رصيد الخدمات من الدرج الرئيسي." else "اختر صندوقاً نقدياً نشطاً بالليرة السورية، مع استبعاد صندوق الموردين وصندوق شراء رصيد الخدمات."
             if (previousDestinationId != null) {
                 val restored = destinationOptions.indexOfFirst { it.id == previousDestinationId }
                 if (restored >= 0) destination.setSelection(restored)
@@ -1827,6 +1841,12 @@ class MainActivity : Activity() {
                                 ?: error("اختر صندوقاً نقدياً كوجهة للتحويل")
                             require(target.id != selected.id) { "لا يمكن التحويل إلى الحساب نفسه" }
                             repo.transferWalletToDrawer(actor, selected.id, target.id, value, operationId, note, note)
+                        }
+                        4 -> {
+                            val target = availableDestinations.getOrNull(destination.selectedItemPosition)
+                                ?: error("اختر صندوقاً نقدياً كوجهة للتحويل")
+                            require(target.id != selected.id) { "لا يمكن التحويل إلى الحساب نفسه" }
+                            repo.transferCashBetweenBoxes(actor, selected.id, target.id, value, operationId, note, note)
                         }
                     }
                     dialog.dismiss()
