@@ -71,6 +71,8 @@ class DailyBalanceRepositoryTest {
         assertEquals(20_000L, walletRow.debtCollectionsMinor)
         assertEquals(25_000L, walletRow.transferOutMinor)
         assertEquals(35_000L, walletRow.liquidatableElectronicReceiptsMinor)
+        assertEquals(135_000L, walletRow.closingMinor)
+        assertEquals(accounts.balance(wallet.id), walletRow.closingMinor)
         assertEquals(25_000L, report.accounts.single { it.accountId == drawer.id }.transferInMinor)
         assertEquals(0L, report.accounts.single { it.accountId == drawer.id }.salesReceiptsMinor)
         assertEquals(report.accounts.filter { it.accountType == "WALLET" && it.currencyCode == "SYP" }.sumOf { it.liquidatableElectronicReceiptsMinor }, report.liquidatableElectronicReceiptsByCurrency["SYP"])
