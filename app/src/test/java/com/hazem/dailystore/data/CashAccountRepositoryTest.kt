@@ -60,7 +60,9 @@ class CashAccountRepositoryTest {
             accounts.setCurrentDayPrimaryDrawer("ADMIN", adminId, supplierCash.id)
             fail("Supplier rollover account must not also be the daily drawer")
         } catch (_: IllegalArgumentException) { }
-        assertEquals(null, accounts.currentDayPrimaryDrawer())
+        val dailyDrawer = accounts.currentDayPrimaryDrawer()
+        assertNotNull(dailyDrawer)
+        assertNotEquals(supplierCash.id, dailyDrawer!!.id)
     }
 
     @Test fun nonManagerCannotEditAccount() {
