@@ -71,6 +71,12 @@ class ServiceTransferRepositoryTest {
         assertEquals(35_000L, repo.listWallets().single { it.serviceKey == ServiceTransferRepository.SYRIATEL_SHARED }.balanceMinor)
         assertEquals("ELECTRONIC", repo.listTransfers().first().receiptChannel)
         assertEquals(6_000L, result.customerChargeMinor)
+        val daily = DailyBalanceRepository(RuntimeEnvironment.getApplication()).dailyReport()
+        val row = daily.accounts.single { it.accountId == collection.id }
+        assertEquals(6_000L, row.serviceTransferReceiptsMinor)
+        assertEquals(6_000L, row.electronicReceiptsMinor)
+        assertEquals(6_000L, row.liquidatableElectronicReceiptsMinor)
+        assertEquals(0L, row.salesReceiptsMinor)
     }
 
     @Test fun rechargeDeductsFromElectronicProceedsAndAppliesTwoPercentOnlyToSyriatel() {
@@ -85,6 +91,20 @@ class ServiceTransferRepositoryTest {
         assertEquals(0L, shamFee)
         assertEquals(29_000L, accounts.balance(source.id))
         assertEquals(20_000L, repo.listWallets().single { it.serviceKey == ServiceTransferRepository.SHAM_CASH }.balanceMinor)
+    }
+
+
+    @Test fun managerCanReverseTransferWithAuditedOppositeMovements() {
+        val drawer = accounts.create("درج عكس " + UUID.randomUUID(), "CASH_BOX", "SYP", 0L)
+        accounts.setCurrentDayPrimaryDrawer("ADMIN", actor, drawer.id)
+        repo.setOpeningBalance(actor, ServiceTransferRepository.SYRIATEL_SHARED, 5_000L)
+        val transfer = repo.executeTransfer(actor, ServiceTransferRepository.SYRIATEL_BALANCE,
+            1_000L, 0L, drawer.id, "svc-reverse-" + UUID.randomUUID())
+        assertEquals(1_200L, accounts.balance(drawer.id))
+        repo.reverseTransfer(actor, transfer.transferId, "svc-reverse-action-" + UUID.randomUUID(), "إدخال خاطئ")
+        assertEquals(0L, accounts.balance(drawer.id))
+        assertEquals(5_000L, repo.listWallets().single { it.serviceKey == ServiceTransferRepository.SYRIATEL_SHARED }.balanceMinor)
+        assertEquals("REVERSED", repo.listTransfers().first().status)
     }
 
     @Test fun transferIsIdempotentAndInsufficientFloatDoesNotCreateReceipt() {
