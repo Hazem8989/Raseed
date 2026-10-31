@@ -83,7 +83,7 @@ class CashAccountRepository(context: Context) {
         }
         var rechargeId=if(validConfigured) configuredRecharge!! else ensureRoleAccount(db,"SERVICE_RECHARGE",
             "system_cash_service_recharge","صندوق شراء رصيد الخدمات",
-            listOf("صندوق رصيد خدمات نقدي","صندوق شراء رصيد الخدمات","صندوق رصيد الخدمات","صندوق تعبئة رصيد الخدمات"))
+            listOf("صندوق رصيد خدمات نقدي","صندوق رصيد الخدمات نقدي","صندوق رصيد الخدمات النقدي","صندوق شراء رصيد الخدمات","صندوق رصيد الخدمات","صندوق تعبئة رصيد الخدمات"))
         if(rechargeId==dailyId || rechargeId==supplierId) {
             db.delete("system_cash_account_roles","role_key='SERVICE_RECHARGE'",null)
             rechargeId=UUID.randomUUID().toString()
