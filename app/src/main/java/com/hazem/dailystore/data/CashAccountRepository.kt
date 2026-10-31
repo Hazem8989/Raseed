@@ -55,6 +55,13 @@ class CashAccountRepository(context: Context) {
                 it.getString(0)
             }
             val date = operatingDate()
+            val isSupplierRolloverAccount = db.rawQuery(
+                "SELECT 1 FROM daily_supplier_rollovers WHERE operating_date=? AND account_id=?",
+                arrayOf(date, accountId)
+            ).use { it.moveToFirst() }
+            require(!isSupplierRolloverAccount) {
+                "هذا الصندوق مخصص للنقد المدور للموردين اليوم ولا يمكن تعيينه كدرج المبيعات والتحصيل"
+            }
             val before = db.rawQuery(
                 "SELECT primary_cash_account_id FROM daily_cash_sessions WHERE operating_date=?",
                 arrayOf(date)
