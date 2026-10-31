@@ -1816,9 +1816,9 @@ class MainActivity : Activity() {
             list.addView(sectionHeading("تحويلات الرصيد – تفصيل اليوم"))
             serviceDaily.forEach { d ->
                 list.addView(label(d.serviceName+": المقبوض "+formatSypAmount(d.customerReceiptsMinor)+" ل.س • الربح "+formatSypAmount(d.profitMinor)+" ل.س • رسوم الشركة "+formatSypAmount(d.providerFeeMinor)+" ل.س",12f,textColor,false,Gravity.RIGHT).apply{setPadding(0,dp(3),0,dp(3))})
-                list.addView(label("الرصيد المستهلك "+formatSypAmount(d.deliveredMinor)+" ل.س • يخصص لإعادة التعبئة تقريباً "+formatSypAmount(d.rechargeReserveMinor)+" ل.س",12f,green,true,Gravity.RIGHT).apply{setPadding(0,dp(2),0,dp(5))})
+                list.addView(label("الرصيد المستهلك "+formatSypAmount(d.deliveredMinor)+" ل.س • قيمة الرصيد المطلوب تعويضه "+formatSypAmount(d.rechargeReserveMinor)+" ل.س",12f,green,true,Gravity.RIGHT).apply{setPadding(0,dp(2),0,dp(5))})
             }
-            list.addView(label("مبلغ إعادة التعبئة تقديري ولا يُخصم تلقائياً. يشمل 2% كلفة تعبئة سيرياتيل، ولا تضاف هذه الكلفة لشام كاش.",11f,mutedColor,false,Gravity.RIGHT).apply{setPadding(0,dp(2),0,dp(8))})
+            list.addView(label("قيمة الرصيد المستهلك هي المبلغ الأساسي اللازم لتعويض الرصيد. عمولة 2% لا تُحسب إلا عند تعبئة سيرياتيل فعلياً، وتظهر حينها ضمن رسوم التعبئة المدفوعة.",11f,mutedColor,false,Gravity.RIGHT).apply{setPadding(0,dp(2),0,dp(8))})
         }
         val electronicText = if (report.electronicReceiptsByCurrency.isEmpty()) "لا توجد مقبوضات إلكترونية" else
             report.electronicReceiptsByCurrency.entries.joinToString(" • ") { formatAccountBalance(it.value, it.key) }
@@ -1898,10 +1898,10 @@ class MainActivity : Activity() {
             card.addView(label("إجمالي ما أُرسل من رصيد الخدمة: "+formatSypAmount(d.deliveredMinor)+" ل.س",12f,textColor,false,Gravity.RIGHT))
             card.addView(label("إجمالي ما قبضه المتجر من الزبائن: "+formatSypAmount(d.customerReceiptsMinor)+" ل.س",12f,textColor,false,Gravity.RIGHT))
             card.addView(label("ربح المتجر: "+formatSypAmount(d.profitMinor)+" ل.س • رسوم الشركة: "+formatSypAmount(d.providerFeeMinor)+" ل.س",12f,green,true,Gravity.RIGHT))
-            card.addView(label("تقدير كلفة إعادة التعبئة: "+formatSypAmount(d.rechargeFeeEstimateMinor)+" ل.س • المبلغ المقترح تخصيصه: "+formatSypAmount(d.rechargeReserveMinor)+" ل.س",12f,mutedColor,true,Gravity.RIGHT))
+            card.addView(label("رسوم التعبئة المدفوعة فعلياً اليوم: "+formatSypAmount(d.rechargeFeePaidMinor)+" ل.س • قيمة الرصيد اللازم تعويضه: "+formatSypAmount(d.rechargeReserveMinor)+" ل.س",12f,mutedColor,true,Gravity.RIGHT))
             content.addView(card,fieldParams(-2,dp(7)))
         }
-        content.addView(label("مبالغ الزبائن تُقبض في الدرج الرئيسي (أو محفظة القبض عند الدفع إلكترونياً). مبلغ إعادة التعبئة تقديري: قيمة الرصيد المستهلك، مضافاً إليها 2% لسيرياتيل فقط، ولا يُخصم تلقائياً من الدرج.",11f,mutedColor,false,Gravity.RIGHT).apply{setPadding(0,dp(3),0,dp(10))})
+        content.addView(label("مبالغ الزبائن تُقبض في الدرج الرئيسي (أو محفظة القبض عند الدفع إلكترونياً). قيمة الرصيد المستهلك تُعرض لتقدير ما يلزم تعويضه. عمولة 2% تُحسب وتُسجل فقط عند تنفيذ تعبئة سيرياتيل فعلياً، ولا تُضاف إلى كل تحويل.",11f,mutedColor,false,Gravity.RIGHT).apply{setPadding(0,dp(3),0,dp(10))})
         content.addView(sectionHeading("سجل تحويلات الرصيد"))
         val rows=repo.listTransfers(80)
         if(rows.isEmpty()) content.addView(label("لا توجد تحويلات مسجلة حتى الآن.",13f,mutedColor,false,Gravity.CENTER).apply{setPadding(0,dp(18),0,dp(18))})
