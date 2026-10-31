@@ -1917,7 +1917,7 @@ class MainActivity : Activity() {
             content.addView(card,fieldParams(-2,dp(8)))
         }
         if(isManager()) {
-            content.addView(smallButton("تسجيل مطابقة رصيد محفظة التشغيل"){showServiceOpeningDialog()},fieldParams(dp(46),dp(7)))
+            content.addView(smallButton("مطابقة الرصيد الفعلي لمحفظة التشغيل"){showServiceOpeningDialog()},fieldParams(dp(46),dp(7)))
             content.addView(smallButton("شراء / شحن رصيد الخدمة"){showServiceRechargeDialog()},fieldParams(dp(46),dp(12)))
         }
         content.addView(Button(this).apply{text="＋ تنفيذ تحويل للزبون";isAllCaps=false;setTextColor(Color.WHITE);setBackgroundColor(green);setOnClickListener{showServiceTransferDialog()}},fieldParams(dp(52),dp(12)))
@@ -1957,12 +1957,12 @@ class MainActivity : Activity() {
         val amount=fieldForDialog("الرصيد الفعلي الحالي للمحفظة بالليرة السورية").apply{inputType=InputType.TYPE_CLASS_NUMBER or InputType.TYPE_NUMBER_FLAG_DECIMAL}
         val note=fieldForDialog("ملاحظة / مرجع")
         form.addView(label("الخدمة",12f,mutedColor,false,Gravity.RIGHT));form.addView(service,fieldParams(dp(48),dp(8)));form.addView(amount,fieldParams(dp(48),dp(8)));form.addView(note,fieldParams(dp(48),dp(8)))
-        val dialog=AlertDialog.Builder(this).setTitle("الرصيد الافتتاحي للخدمة").setView(form).setNegativeButton("إلغاء",null).setPositiveButton("حفظ",null).create()
+        val dialog=AlertDialog.Builder(this).setTitle("مطابقة رصيد محفظة التشغيل").setView(form).setNegativeButton("إلغاء",null).setPositiveButton("حفظ",null).create()
         dialog.setOnShowListener{dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener{
             try{
                 val key=if(service.selectedItemPosition==0)ServiceTransferRepository.SYRIATEL_SHARED else ServiceTransferRepository.SHAM_CASH
                 repo.setOpeningBalance(currentUserId?:error("جلسة المدير غير صالحة"),key,parseSypAmount(amount.text.toString()),note.text.toString().trim().ifEmpty{null})
-                dialog.dismiss();Toast.makeText(this,"تم تسجيل الرصيد الافتتاحي",Toast.LENGTH_LONG).show();showServiceTransfers()
+                dialog.dismiss();Toast.makeText(this,"تمت مطابقة رصيد المحفظة مع الرصيد الفعلي",Toast.LENGTH_LONG).show();showServiceTransfers()
             }catch(e:Exception){Toast.makeText(this,e.message?:"تعذر حفظ الرصيد",Toast.LENGTH_LONG).show()}
         }}
         dialog.show()
