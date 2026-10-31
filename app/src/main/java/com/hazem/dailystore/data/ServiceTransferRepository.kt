@@ -97,7 +97,7 @@ class ServiceTransferRepository(context:Context) {
             val now=stamp()
             val values=ContentValues().apply{put("setting_key","service_recharge_cash_account_id");put("setting_value",accountId);put("updated_at",now)}
             if(old==null)db.insertOrThrow("app_settings",null,values) else db.update("app_settings",values,"setting_key='service_recharge_cash_account_id'",null)
-            audit(db,actor,"SET_SERVICE_RECHARGE_CASH_ACCOUNT",accountId,old?.let{"{\\"account_id\\":\\"$it\\"}" },"{\\"account_id\\":\\"$accountId\\"}",now)
+            audit(db,actor,"SET_SERVICE_RECHARGE_CASH_ACCOUNT",accountId,old?.let{"{\"account_id\":\"$it\"}" },"{\"account_id\":\"$accountId\"}",now)
             db.setTransactionSuccessful()
         } finally {db.endTransaction()}
     }
