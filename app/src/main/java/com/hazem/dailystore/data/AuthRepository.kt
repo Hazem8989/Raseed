@@ -55,12 +55,20 @@ class AuthRepository(context: Context) {
     ): String {
         requireManager(actorRole)
         require(actorUserId.isNotBlank()) { "جلسة المدير غير صالحة" }
+        requireActiveManager(actorUserId)
         require(roleKey in setOf("ADMIN", "CASHIER")) { "صلاحية المستخدم غير صالحة" }
         return createUserInternal(username, displayName, password, roleKey, actorUserId)
     }
 
     fun requireManager(roleKey: String) {
         require(roleKey == "ADMIN") { "هذا الإجراء متاح للمدير فقط" }
+    }
+
+    private fun requireActiveManager(userId: String) {
+        val valid = database.readableDatabase.rawQuery(
+            "SELECT 1 FROM users WHERE id=? AND role_key='ADMIN' AND is_active=1", arrayOf(userId)
+        ).use { it.moveToFirst() }
+        require(valid) { "يجب تسجيل الدخول بحساب مدير نشط لتنفيذ هذا الإجراء" }
     }
 
     private fun createUserInternal(
