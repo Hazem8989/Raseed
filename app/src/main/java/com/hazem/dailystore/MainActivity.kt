@@ -2071,10 +2071,6 @@ class MainActivity : Activity() {
             val index=receiptOptions.indexOfFirst{it.id==linkedId}
             if(index>=0) receipt.setSelection(index)
         }
-        service.onItemSelectedListener=object:android.widget.AdapterView.OnItemSelectedListener {
-            override fun onNothingSelected(parent:android.widget.AdapterView<*>?) {}
-            override fun onItemSelected(parent:android.widget.AdapterView<*>?,view:View?,position:Int,id:Long) { selectDefaultServiceWallet() }
-        }
         selectDefaultServiceWallet()
         val ref=fieldForDialog("رقم الزبون / مرجع التحويل / ملاحظة")
         val preview=label("أدخل مبلغ التحويل لاحتساب ربح المتجر وإجمالي المقبوض.",13f,green,true,Gravity.RIGHT)
@@ -2091,7 +2087,7 @@ class MainActivity : Activity() {
         }
         service.onItemSelectedListener=object:android.widget.AdapterView.OnItemSelectedListener{
             override fun onNothingSelected(parent:android.widget.AdapterView<*>?){}
-            override fun onItemSelected(parent:android.widget.AdapterView<*>?,view:View?,position:Int,id:Long){updatePreview()}
+            override fun onItemSelected(parent:android.widget.AdapterView<*>?,view:View?,position:Int,id:Long){selectDefaultServiceWallet();updatePreview()}
         }
         val watcher=object:TextWatcher{
             override fun beforeTextChanged(s:CharSequence?,start:Int,count:Int,after:Int){}
