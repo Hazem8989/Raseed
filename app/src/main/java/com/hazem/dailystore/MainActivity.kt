@@ -430,8 +430,13 @@ class MainActivity : Activity() {
             return
         }
         val customers = CustomerRepository(this).listActive()
-        val supplierRolloverAccountId = DailyBalanceRepository(this).currentSupplierRollover()?.accountId
-        val accounts = CashAccountRepository(this).listActive().filter { it.id != supplierRolloverAccountId }
+        val cashAccountRepository = CashAccountRepository(this)
+        val dailyDrawerId = cashAccountRepository.currentDayPrimaryDrawer()?.id
+        val accounts = cashAccountRepository.listActive().filter {
+            it.accountType == "WALLET" ||
+                (it.accountType == "CASH_BOX" &&
+                    (it.currencyCode == "USD" || (it.currencyCode == "SYP" && it.id == dailyDrawerId)))
+        }
         val totalUsd = cartTotalUsdCents()
         val content = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
