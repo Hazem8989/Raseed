@@ -149,22 +149,28 @@ class DailyBalanceRepository(context:Context) {
         } finally {db.endTransaction()}
     }
 
-    fun transferWalletToDrawer(actor:String,walletId:String,amount:Long,operationId:String,reference:String?=null,note:String?=null):AccountTransferResult {
+    fun transferWalletToDrawer(actor:String,walletId:String,destinationAccountId:String,amount:Long,operationId:String,reference:String?=null,note:String?=null):AccountTransferResult {
         require(amount>0L&&operationId.isNotBlank()){"بيانات التحويل غير مكتملة"}
+        require(destinationAccountId.isNotBlank()&&destinationAccountId!=walletId){"اختر صندوقاً نقدياً مختلفاً عن المحفظة"}
         val db=database.writableDatabase;manager(db,actor);db.beginTransaction()
         try {
-            val payload=hash(walletId+"|"+amount+"|"+reference.orEmpty()+"|"+note.orEmpty())
-            val old=db.rawQuery("SELECT id,source_account_id,amount_minor,payload_hash FROM cash_account_transfers WHERE operation_id=?",arrayOf(operationId)).use { if(it.moveToFirst())arrayOf(it.getString(0),it.getString(1),it.getLong(2).toString(),it.getString(3))else null }
-            if(old!=null){require(old[1]==walletId&&old[2]==amount.toString()&&old[3]==payload){"معرّف التحويل مستخدم لبيانات مختلفة"};db.setTransactionSuccessful();return AccountTransferResult(old[0]!!,true)}
+            val payload=hash(walletId+"|"+destinationAccountId+"|"+amount+"|"+reference.orEmpty()+"|"+note.orEmpty())
+            val old=db.rawQuery("SELECT id,source_account_id,destination_account_id,amount_minor,payload_hash FROM cash_account_transfers WHERE operation_id=?",arrayOf(operationId)).use { if(it.moveToFirst())arrayOf(it.getString(0),it.getString(1),it.getString(2),it.getLong(3).toString(),it.getString(4))else null }
+            if(old!=null){require(old[1]==walletId&&old[2]==destinationAccountId&&old[3]==amount.toString()&&old[4]==payload){"معرّف التحويل مستخدم لبيانات مختلفة"};db.setTransactionSuccessful();return AccountTransferResult(old[0]!!,true)}
             val w=account(db,walletId);require(w.type=="WALLET"&&w.active&&w.currency=="SYP"){"مصدر التحويل يجب أن يكون محفظة سورية نشطة"}
-            val drawer=db.rawQuery("SELECT a.id FROM daily_cash_sessions s JOIN cash_accounts a ON a.id=s.primary_cash_account_id WHERE s.operating_date=? AND a.is_active=1 AND a.account_type='CASH_BOX' AND a.currency_code='SYP'",arrayOf(today())).use { require(it.moveToFirst()){"لم يتم تعيين درج اليوم الرئيسي"};it.getString(0) }
+            val target=account(db,destinationAccountId)
+            require(target.type=="CASH_BOX"&&target.active&&target.currency=="SYP"){"وجهة التحويل يجب أن تكون صندوقاً نقدياً نشطاً بالليرة السورية"}
+            val rechargeAccount=db.rawQuery("SELECT setting_value FROM app_settings WHERE setting_key='service_recharge_cash_account_id'",null).use{if(it.moveToFirst())it.getString(0)else null}
+            require(destinationAccountId!=rechargeAccount){"لا يمكن تحويل المقبوضات إلى صندوق شراء رصيد الخدمات"}
+            val supplierAccount=db.rawQuery("SELECT account_id FROM daily_supplier_rollovers WHERE operating_date=?",arrayOf(today())).use{if(it.moveToFirst())it.getString(0)else null}
+            require(destinationAccountId!=supplierAccount){"لا يمكن تحويل المقبوضات إلى صندوق النقد المدور للموردين"}
             require(balance(db,walletId)>=amount){"رصيد المحفظة غير كافٍ"}
             val id=UUID.randomUUID().toString();val now=stamp()
-            val v=ContentValues().apply {put("id",id);put("operation_id",operationId);put("source_account_id",walletId);put("destination_account_id",drawer);put("amount_minor",amount);put("currency_code","SYP");put("reference",reference);put("note",note);put("payload_hash",payload);put("created_by",actor);put("created_at",now)}
+            val v=ContentValues().apply {put("id",id);put("operation_id",operationId);put("source_account_id",walletId);put("destination_account_id",destinationAccountId);put("amount_minor",amount);put("currency_code","SYP");put("reference",reference);put("note",note);put("payload_hash",payload);put("created_by",actor);put("created_at",now)}
             db.insertOrThrow("cash_account_transfers",null,v)
-            movement(db,walletId,"OUT",amount,"SYP","ACCOUNT_TRANSFER_OUT","ACCOUNT_TRANSFER",id,operationId+":OUT",actor,"تحويل داخلي – تصريف محفظة إلى درج الكاش",now)
-            movement(db,drawer,"IN",amount,"SYP","ACCOUNT_TRANSFER_IN","ACCOUNT_TRANSFER",id,operationId+":IN",actor,"تحويل داخلي – تصريف محفظة من "+w.name,now)
-            audit(db,actor,"WALLET_TO_CASH_TRANSFER","CASH_ACCOUNT_TRANSFER",id,null,"{\"source_account_id\":\""+walletId+"\",\"destination_account_id\":\""+drawer+"\",\"amount_minor\":"+amount+",\"currency\":\"SYP\"}",now)
+            movement(db,walletId,"OUT",amount,"SYP","ACCOUNT_TRANSFER_OUT","ACCOUNT_TRANSFER",id,operationId+":OUT",actor,"تحويل داخلي – تصريف محفظة إلى "+target.name,now)
+            movement(db,destinationAccountId,"IN",amount,"SYP","ACCOUNT_TRANSFER_IN","ACCOUNT_TRANSFER",id,operationId+":IN",actor,"تحويل داخلي – تصريف محفظة من "+w.name,now)
+            audit(db,actor,"WALLET_TO_CASH_TRANSFER","CASH_ACCOUNT_TRANSFER",id,null,"{\"source_account_id\":\""+walletId+"\",\"destination_account_id\":\""+destinationAccountId+"\",\"source_name\":\""+esc(w.name)+"\",\"destination_name\":\""+esc(target.name)+"\",\"amount_minor\":"+amount+",\"currency\":\"SYP\"}",now)
             db.setTransactionSuccessful();return AccountTransferResult(id,false)
         } finally {db.endTransaction()}
     }
