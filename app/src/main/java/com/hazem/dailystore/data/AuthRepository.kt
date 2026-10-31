@@ -61,18 +61,6 @@ class AuthRepository(context: Context) {
         }
     }
 
-    /** Restores a previously authenticated local session only for an active user. */
-    fun restoreActiveSession(userId: String): AuthenticatedUser? {
-        if (userId.isBlank()) return null
-        return database.readableDatabase.rawQuery(
-            "SELECT id,username,display_name,role_key FROM users WHERE id=? AND is_active=1",
-            arrayOf(userId)
-        ).use { c ->
-            if (!c.moveToFirst()) null
-            else AuthenticatedUser(c.getString(0), c.getString(1), c.getString(2), c.getString(3))
-        }
-    }
-
     fun createUser(
         actorRole: String, actorUserId: String, username: String, displayName: String,
         password: String, roleKey: String
