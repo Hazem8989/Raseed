@@ -13,6 +13,8 @@ import android.view.Gravity
 import android.view.View
 import android.view.WindowManager
 import android.widget.Button
+import android.widget.RadioButton
+import android.widget.RadioGroup
 import android.widget.ArrayAdapter
 import android.widget.CheckBox
 import android.widget.Spinner
@@ -57,6 +59,7 @@ class MainActivity : Activity() {
     private val cart = linkedMapOf<String, CartLine>()
     private var exchangeRateMilli = 0L
     private var searchQuery = ""
+    private var pendingCheckoutDraftId: String? = null
 
     private lateinit var productGrid: GridLayout
     private lateinit var cartContainer: LinearLayout
@@ -235,13 +238,7 @@ class MainActivity : Activity() {
             isAllCaps = false
             setTextColor(Color.WHITE)
             setBackgroundColor(green)
-            setOnClickListener {
-                Toast.makeText(
-                    this@MainActivity,
-                    "سنعمل على ربط الدفع وإصدار الفاتورة في المرحلة التالية",
-                    Toast.LENGTH_LONG
-                ).show()
-            }
+            setOnClickListener { showCheckoutDialog() }
         }
         content.addView(checkout, fieldParams(dp(54), dp(8)))
         body.addView(content)
@@ -250,6 +247,131 @@ class MainActivity : Activity() {
         setContentView(page)
         renderProducts()
         renderCart()
+    }
+
+    private fun cartTotalUsdCents(): Long = cart.values.fold(0L) { total, line ->
+        val lineTotal = BigDecimal.valueOf(line.product.priceUsdCents)
+            .multiply(BigDecimal.valueOf(line.quantity))
+            .setScale(0, RoundingMode.HALF_UP).longValueExact()
+        Math.addExact(total, lineTotal)
+    }
+
+    private fun showCheckoutDialog() {
+        if (cart.isEmpty()) {
+            Toast.makeText(this, "أضف صنفاً واحداً على الأقل قبل متابعة الدفع", Toast.LENGTH_SHORT).show()
+            return
+        }
+        val customers = CustomerRepository(this).listActive()
+        val accounts = CashAccountRepository(this).listActive()
+        if (customers.isEmpty() && accounts.isEmpty()) {
+            Toast.makeText(this, "أضف عميلاً أو صندوقاً/محفظة نشطة أولاً لإتمام البيع", Toast.LENGTH_LONG).show()
+            return
+        }
+        val totalUsd = cartTotalUsdCents()
+        val content = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(18), dp(8), dp(18), dp(4))
+        }
+        content.addView(label("إجمالي الفاتورة", 13f, mutedColor, false, Gravity.RIGHT))
+        content.addView(label(formatDualMoney(totalUsd, exchangeRateMilli), 17f, green, true, Gravity.RIGHT)
+            .apply { setPadding(0, dp(4), 0, dp(12)) })
+
+        val mode = RadioGroup(this).apply {
+            orientation = RadioGroup.HORIZONTAL
+            gravity = Gravity.CENTER
+        }
+        val cashMode = RadioButton(this).apply { id = View.generateViewId(); text = "بيع نقدي"; isChecked = accounts.isNotEmpty(); isEnabled = accounts.isNotEmpty() }
+        val creditMode = RadioButton(this).apply { id = View.generateViewId(); text = "بيع آجل"; isEnabled = customers.isNotEmpty() }
+        mode.addView(cashMode)
+        mode.addView(creditMode)
+        if (accounts.isEmpty() && customers.isNotEmpty()) creditMode.isChecked = true
+        content.addView(label("نوع البيع", 13f, mutedColor, true, Gravity.RIGHT))
+        content.addView(mode, fieldParams(dp(48), dp(8)))
+
+        val customerBlock = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+        customerBlock.addView(label("الزبون", 12f, mutedColor, false, Gravity.RIGHT))
+        val customerSpinner = Spinner(this)
+        customerSpinner.adapter = ArrayAdapter(this, android.R.layout.simple_spinner_dropdown_item,
+            customers.map { it.name })
+        customerBlock.addView(customerSpinner, fieldParams(dp(48), dp(8)))
+
+        val accountBlock = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+        accountBlock.addView(label("الصندوق أو المحفظة التي ستستلم قيمة البيع كاملة", 12f, mutedColor, false, Gravity.RIGHT))
+        val accountSpinner = Spinner(this)
+        accountSpinner.adapter = ArrayAdapter(this, android.R.layout.simple_spinner_dropdown_item,
+            accounts.map { it.name + " • " + it.currencyCode })
+        accountBlock.addView(accountSpinner, fieldParams(dp(48), dp(8)))
+        val receiptHint = label("", 11f, mutedColor, false, Gravity.RIGHT)
+        accountBlock.addView(receiptHint)
+        fun refreshMode() {
+            val isCredit = mode.checkedRadioButtonId == creditMode.id
+            customerBlock.visibility = if (isCredit) View.VISIBLE else View.GONE
+            accountBlock.visibility = if (isCredit) View.GONE else View.VISIBLE
+            val account = accounts.getOrNull(accountSpinner.selectedItemPosition)
+            receiptHint.text = if (account == null) "" else {
+                val amount = if (account.currencyCode == "USD") "$" + moneyText(totalUsd)
+                else if (exchangeRateMilli > 0L) formatSypAmount(CurrencyConverter.usdCentsToSyp(totalUsd, exchangeRateMilli)) + " ل.س"
+                else "يلزم تسجيل سعر الصرف أولاً"
+                "سيُسجّل قبض كامل بقيمة " + amount
+            }
+        }
+        accountSpinner.onItemSelectedListener = object : android.widget.AdapterView.OnItemSelectedListener {
+            override fun onNothingSelected(parent: android.widget.AdapterView<*>?) { refreshMode() }
+            override fun onItemSelected(parent: android.widget.AdapterView<*>?, view: View?, position: Int, id: Long) { refreshMode() }
+        }
+        mode.setOnCheckedChangeListener { _, _ -> refreshMode() }
+        content.addView(customerBlock, matchWidth())
+        content.addView(accountBlock, matchWidth())
+        refreshMode()
+
+        val dialog = AlertDialog.Builder(this).setTitle("إتمام عملية البيع")
+            .setView(content).setNegativeButton("رجوع", null)
+            .setPositiveButton("اعتماد الفاتورة", null).create()
+        dialog.setOnShowListener {
+            dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener {
+                try {
+                    val isCredit = mode.checkedRadioButtonId == creditMode.id
+                    val customerId = if (isCredit) customers.getOrNull(customerSpinner.selectedItemPosition)?.id
+                        ?: error("اختر الزبون الذي ستسجل الفاتورة على حسابه") else null
+                    val account = if (isCredit) null else accounts.getOrNull(accountSpinner.selectedItemPosition)
+                        ?: error("اختر الصندوق أو المحفظة التي ستستلم قيمة البيع")
+                    if (isCredit) require(exchangeRateMilli > 0L) { "سجّل سعر الصرف قبل اعتماد البيع الآجل" }
+                    if (account?.currencyCode == "SYP") require(exchangeRateMilli > 0L) {
+                        "سجّل سعر الصرف قبل قبض البيع بالليرة السورية"
+                    }
+                    val saleType = if (isCredit) "CREDIT" else "CASH"
+                    val date = SimpleDateFormat("yyyy-MM-dd", Locale.US).format(Date())
+                    val lines = cart.values.map { line ->
+                        InvoiceLineInput(line.product.id, BigDecimal.valueOf(line.quantity), line.product.priceUsdCents)
+                    }
+                    val saved = InvoiceRepository(this).saveSalesDraft(
+                        UUID.randomUUID().toString(), pendingCheckoutDraftId, customerId,
+                        date, 0L, null, lines, saleType
+                    )
+                    pendingCheckoutDraftId = saved.invoiceId
+                    val posted = if (isCredit) {
+                        InvoiceRepository(this).postSale(saved.invoiceId, UUID.randomUUID().toString())
+                    } else {
+                        InvoiceRepository(this).postCashSale(saved.invoiceId, UUID.randomUUID().toString(), account!!.id)
+                    }
+                    require(posted) { "الفاتورة مسجلة مسبقاً؛ حدّث الشاشة لمراجعة حالتها" }
+                    val invoiceNumber = saved.invoiceNumber
+                    pendingCheckoutDraftId = null
+                    cart.clear()
+                    dialog.dismiss()
+                    Toast.makeText(
+                        this,
+                        if (isCredit) "تم اعتماد البيع الآجل على حساب الزبون • فاتورة " + invoiceNumber
+                        else "تم البيع وقبض كامل القيمة وتحديث الصندوق • فاتورة " + invoiceNumber,
+                        Toast.LENGTH_LONG
+                    ).show()
+                    showPointOfSale()
+                } catch (e: Exception) {
+                    Toast.makeText(this, e.message ?: "تعذر إتمام البيع؛ لم يتم ترحيل المخزون أو قبض المبلغ", Toast.LENGTH_LONG).show()
+                }
+            }
+        }
+        dialog.show()
     }
 
     private fun loadCatalog() {

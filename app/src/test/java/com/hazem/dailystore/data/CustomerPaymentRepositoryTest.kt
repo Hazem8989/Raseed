@@ -102,7 +102,7 @@ class CustomerPaymentRepositoryTest {
             0L, null, listOf(InvoiceLineInput(productId, BigDecimal.ONE, 500L)),
             saleType = "CASH"
         )
-        invoices.postSale(draft.invoiceId, "customer-cash-post-" + UUID.randomUUID())
+        invoices.postCashSale(draft.invoiceId, "customer-cash-post-" + UUID.randomUUID(), accountId)
         try {
             payments.addPayment(draft.invoiceId, "customer-cash-payment", accountId, 100L)
             throw AssertionError("Cash sale must not be collected as customer credit")

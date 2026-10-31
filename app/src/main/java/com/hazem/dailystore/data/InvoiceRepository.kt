@@ -163,16 +163,31 @@ class InvoiceRepository(context: Context) {
         postInvoice("PURCHASE", invoiceId, operationId)
 
     fun postSale(invoiceId: String, operationId: String): Boolean =
-        postInvoice("SALE", invoiceId, operationId)
+        postInvoice("SALE", invoiceId, operationId, null)
 
-    private fun postInvoice(type: String, invoiceId: String, operationId: String): Boolean {
+    /**
+     * Completes a CASH sale and its full receipt in the same transaction as stock posting.
+     * A cash sale cannot be posted without choosing the account that receives the money.
+     */
+    fun postCashSale(invoiceId: String, operationId: String, cashAccountId: String): Boolean {
+        require(cashAccountId.isNotBlank()) { "يجب اختيار الصندوق أو المحفظة المستلمة" }
+        return postInvoice("SALE", invoiceId, operationId, cashAccountId)
+    }
+
+    private data class CashSaleReceipt(
+        val accountId: String, val currencyCode: String, val amountMinor: Long, val rateMilli: Long
+    )
+
+    private fun postInvoice(
+        type: String, invoiceId: String, operationId: String, cashAccountId: String? = null
+    ): Boolean {
         require(invoiceId.isNotBlank() && operationId.isNotBlank()) { "بيانات اعتماد الفاتورة غير مكتملة" }
         val db = database.writableDatabase
         val table = if (type == "PURCHASE") "purchase_invoices" else "sales_invoices"
         val itemTable = if (type == "PURCHASE") "purchase_items" else "sales_items"
         val invoiceForeignKey = if (type == "PURCHASE") "purchase_invoice_id" else "sales_invoice_id"
         val operationType = "POST_${type}_INVOICE"
-        val payloadHash = hash("$type|$invoiceId")
+        val payloadHash = hash(if (cashAccountId == null) "$type|$invoiceId" else "$type|$invoiceId|$cashAccountId")
         db.beginTransaction()
         try {
             findOperation(db, operationId)?.let { existing ->
@@ -190,16 +205,48 @@ class InvoiceRepository(context: Context) {
                 return false
             }
             require(status == "DRAFT") { "لا يمكن اعتماد فاتورة بهذه الحالة: $status" }
+            var cashReceipt: CashSaleReceipt? = null
             if (type == "SALE") {
-                db.rawQuery(
-                    "SELECT sale_type,customer_id,exchange_rate_syp_per_usd_milli FROM sales_invoices WHERE id=?",
+                val saleHeader = db.rawQuery(
+                    """SELECT sale_type,customer_id,exchange_rate_syp_per_usd_milli,
+                              total_usd_cents FROM sales_invoices WHERE id=?""".trimIndent(),
                     arrayOf(invoiceId)
                 ).use { c ->
                     require(c.moveToFirst()) { "فاتورة البيع غير موجودة" }
-                    if (c.getString(0) == "CREDIT") {
-                        require(!c.isNull(1)) { "البيع الآجل يتطلب زبوناً محدداً" }
-                        require(c.getLong(2) > 0L) { "لا يمكن اعتماد بيع آجل دون سعر صرف محفوظ" }
+                    arrayOf(c.getString(0), if (c.isNull(1)) null else c.getString(1),
+                        c.getLong(2).toString(), c.getLong(3).toString())
+                }
+                val saleType = saleHeader[0] as String
+                val customerId = saleHeader[1] as String?
+                val rate = (saleHeader[2] as String).toLong()
+                val totalUsdCents = (saleHeader[3] as String).toLong()
+                if (saleType == "CREDIT") {
+                    require(cashAccountId == null) { "لا يجوز ربط البيع الآجل بتحصيل نقدي عند الاعتماد" }
+                    require(!customerId.isNullOrBlank()) { "البيع الآجل يتطلب زبوناً محدداً" }
+                    require(rate > 0L) { "لا يمكن اعتماد بيع آجل دون سعر صرف محفوظ" }
+                } else {
+                    require(saleType == "CASH") { "نوع البيع غير معروف" }
+                    val selectedAccountId = cashAccountId
+                        ?: throw IllegalArgumentException("لا يمكن اعتماد البيع النقدي دون تسجيل قبض كامل في صندوق أو محفظة")
+                    val account = db.rawQuery(
+                        "SELECT currency_code,is_active FROM cash_accounts WHERE id=?",
+                        arrayOf(selectedAccountId)
+                    ).use { c ->
+                        require(c.moveToFirst()) { "الحساب المالي غير موجود" }
+                        require(c.getInt(1) == 1) { "لا يمكن قبض قيمة البيع في حساب موقوف" }
+                        c.getString(0)
                     }
+                    require(account == "USD" || account == "SYP") { "عملة حساب القبض غير مدعومة" }
+                    val amount = when (account) {
+                        "USD" -> totalUsdCents
+                        "SYP" -> {
+                            require(rate > 0L) { "يجب تسجيل سعر الصرف قبل البيع النقدي بالليرة السورية" }
+                            CurrencyConverter.usdCentsToSyp(totalUsdCents, rate)
+                        }
+                        else -> error("عملة حساب غير مدعومة")
+                    }
+                    if (totalUsdCents > 0L) require(amount > 0L) { "قيمة البيع أصغر من أصغر وحدة نقدية" }
+                    cashReceipt = CashSaleReceipt(selectedAccountId, account, amount, rate)
                 }
             }
             val warehouseId = invoiceWarehouse(db, table, invoiceId)
@@ -237,7 +284,44 @@ class InvoiceRepository(context: Context) {
                     }
                 }
             }
-            db.execSQL("UPDATE $table SET status='POSTED',updated_at=? WHERE id=? AND status='DRAFT'", arrayOf(now, invoiceId))
+            if (cashReceipt != null && cashReceipt.amountMinor > 0L) {
+                val receipt = cashReceipt
+                val invoiceNumber = db.rawQuery(
+                    "SELECT invoice_number FROM sales_invoices WHERE id=?", arrayOf(invoiceId)
+                ).use { c -> require(c.moveToFirst()); c.getString(0) }
+                val cashTransactionId = UUID.randomUUID().toString()
+                val cash = ContentValues().apply {
+                    put("id", cashTransactionId)
+                    put("account_id", receipt.accountId)
+                    put("direction", "IN")
+                    put("amount_minor", receipt.amountMinor)
+                    put("currency_code", receipt.currencyCode)
+                    if (receipt.rateMilli > 0L) put("exchange_rate_syp_per_usd_milli", receipt.rateMilli)
+                    else putNull("exchange_rate_syp_per_usd_milli")
+                    put("transaction_type", "SALE_RECEIPT")
+                    put("source_type", "SALES_INVOICE")
+                    put("source_id", invoiceId)
+                    put("operation_id", operationId)
+                    put("description", "قبض قيمة فاتورة البيع " + invoiceNumber)
+                    put("created_at", now)
+                }
+                db.insertOrThrow("cash_transactions", null, cash)
+                val payment = ContentValues().apply {
+                    put("id", UUID.randomUUID().toString())
+                    put("invoice_type", "SALE")
+                    put("invoice_id", invoiceId)
+                    put("cash_transaction_id", cashTransactionId)
+                    put("amount_minor", receipt.amountMinor)
+                    put("currency_code", receipt.currencyCode)
+                    if (receipt.rateMilli > 0L) put("exchange_rate_syp_per_usd_milli", receipt.rateMilli)
+                    else putNull("exchange_rate_syp_per_usd_milli")
+                    put("created_at", now)
+                }
+                db.insertOrThrow("invoice_payments", null, payment)
+            }
+            val finalStatus = if (type == "SALE" && cashReceipt != null) "PAID" else "POSTED"
+            db.execSQL("UPDATE $table SET status=?,updated_at=? WHERE id=? AND status='DRAFT'",
+                arrayOf(finalStatus, now, invoiceId))
             registerOperation(db, operationId, operationType, payloadHash, invoiceId, now)
             db.setTransactionSuccessful()
             return true

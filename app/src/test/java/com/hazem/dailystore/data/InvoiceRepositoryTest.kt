@@ -18,6 +18,7 @@ class InvoiceRepositoryTest {
     private lateinit var store: StoreRepository
     private lateinit var invoices: InvoiceRepository
     private lateinit var productId: String
+    private lateinit var cashAccountId: String
 
     @Before
     fun setUp() {
@@ -32,6 +33,9 @@ class InvoiceRepositoryTest {
             null, "منتج فواتير اختباري", null, null, category.id, unit.id,
             100, 250, true, 10.0
         )
+        cashAccountId = CashAccountRepository(context).create(
+            "صندوق اختبار البيع", "CASH_BOX", "USD", 0L
+        ).id
     }
 
     @After
@@ -68,9 +72,15 @@ class InvoiceRepositoryTest {
             "sale-draft-op-1", null, null, "2026-10-31",
             0, null, listOf(InvoiceLineInput(productId, BigDecimal("4"), 250))
         )
-        assertTrue(invoices.postSale(draft.invoiceId, "sale-post-op-1"))
-        assertFalse(invoices.postSale(draft.invoiceId, "sale-post-op-1"))
+        assertTrue(invoices.postCashSale(draft.invoiceId, "sale-post-op-1", cashAccountId))
+        assertFalse(invoices.postCashSale(draft.invoiceId, "sale-post-op-1", cashAccountId))
         assertEquals(6.0, stock(), 0.000001)
+        assertEquals("PAID", invoices.listSalesInvoices().first { it.id == draft.invoiceId }.status)
+        assertEquals(1000L, CashAccountRepository(RuntimeEnvironment.getApplication()).balance(cashAccountId))
+        database.readableDatabase.rawQuery(
+            "SELECT COUNT(*) FROM invoice_payments WHERE invoice_type='SALE' AND invoice_id=?",
+            arrayOf(draft.invoiceId)
+        ).use { c -> assertTrue(c.moveToFirst()); assertEquals(1, c.getInt(0)) }
     }
 
     @Test
@@ -80,7 +90,7 @@ class InvoiceRepositoryTest {
             0, null, listOf(InvoiceLineInput(productId, BigDecimal("11"), 250))
         )
         try {
-            invoices.postSale(draft.invoiceId, "sale-post-op-2")
+            invoices.postCashSale(draft.invoiceId, "sale-post-op-2", cashAccountId)
             throw AssertionError("Posting should reject a sale above available stock")
         } catch (_: IllegalArgumentException) {
             // Expected validation failure.
