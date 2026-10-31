@@ -1265,7 +1265,8 @@ class MainActivity : Activity() {
                 card.addView(label("سجل الدفعات", 12f, gold.toInt(), true, Gravity.RIGHT)
                     .apply { setPadding(0, dp(8), 0, dp(3)) })
                 history.forEach { payment ->
-                    val amount = formatSypAmount(payment.amountMinor) + " ل.س"
+                    val amount = if (payment.currencyCode == "SYP")
+                        formatSypAmount(payment.amountMinor) + " ل.س" else "$" + moneyText(payment.amountMinor)
                     val channel = if (payment.accountType == "WALLET") "محفظة إلكترونية" else "درج نقدي"
                     card.addView(label(
                         amount + " • " + channel + ": " + payment.accountName + " • " + payment.createdAt,
