@@ -88,7 +88,9 @@ class CashAccountRepository(context: Context) {
             }
             val hasHistory = db.rawQuery(
                 "SELECT 1 FROM cash_transactions WHERE account_id=? LIMIT 1", arrayOf(accountId)
-            ).use { it.moveToFirst() }
+            ).use { it.moveToFirst() } || db.rawQuery(
+                "SELECT opening_balance_minor FROM cash_accounts WHERE id=?", arrayOf(accountId)
+            ).use { it.moveToFirst() && it.getLong(0) != 0L }
             if (hasHistory) {
                 require(accountType == old.second && currency == old.third) {
                     "لا يمكن تغيير نوع الحساب أو عملته بعد تسجيل حركات عليه؛ يمكن تعديل الاسم فقط حفاظاً على سلامة السجلات"
