@@ -215,6 +215,26 @@ class AppDatabase private constructor(context: Context) :
                 db.endTransaction()
             }
         }
+        if (version < 6) {
+            db.beginTransaction()
+            try {
+                db.execSQL("""
+                    CREATE TABLE service_wallet_account_links (
+                        service_key TEXT PRIMARY KEY NOT NULL,
+                        account_id TEXT NOT NULL UNIQUE,
+                        linked_at TEXT NOT NULL,
+                        FOREIGN KEY(service_key) REFERENCES service_wallets(service_key)
+                            ON UPDATE RESTRICT ON DELETE RESTRICT,
+                        FOREIGN KEY(account_id) REFERENCES cash_accounts(id)
+                            ON UPDATE RESTRICT ON DELETE RESTRICT
+                    )
+                """.trimIndent())
+                db.setTransactionSuccessful()
+                version = 6
+            } finally {
+                db.endTransaction()
+            }
+        }
         if (version != newVersion) {
             throw IllegalStateException("Missing database migration from version $version to $newVersion")
         }
@@ -222,7 +242,7 @@ class AppDatabase private constructor(context: Context) :
 
     companion object {
         const val DATABASE_NAME = "the_daily_shop.db"
-        const val DATABASE_VERSION = 5
+        const val DATABASE_VERSION = 6
 
         @Volatile
         private var INSTANCE: AppDatabase? = null
@@ -584,6 +604,18 @@ class AppDatabase private constructor(context: Context) :
                 service_key TEXT PRIMARY KEY NOT NULL,
                 name TEXT NOT NULL,
                 created_at TEXT NOT NULL
+            )
+            """.trimIndent(),
+
+            """
+            CREATE TABLE service_wallet_account_links (
+                service_key TEXT PRIMARY KEY NOT NULL,
+                account_id TEXT NOT NULL UNIQUE,
+                linked_at TEXT NOT NULL,
+                FOREIGN KEY(service_key) REFERENCES service_wallets(service_key)
+                    ON UPDATE RESTRICT ON DELETE RESTRICT,
+                FOREIGN KEY(account_id) REFERENCES cash_accounts(id)
+                    ON UPDATE RESTRICT ON DELETE RESTRICT
             )
             """.trimIndent(),
 
