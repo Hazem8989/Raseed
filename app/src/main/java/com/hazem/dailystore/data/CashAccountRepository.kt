@@ -162,7 +162,9 @@ class CashAccountRepository(context: Context) {
             """SELECT 1 FROM cash_transactions WHERE account_id=?
                UNION ALL
                SELECT 1 FROM cash_accounts WHERE id=? AND opening_balance_minor<>0
-               LIMIT 1""".trimIndent(), arrayOf(accountId, accountId)
+               UNION ALL
+               SELECT 1 FROM service_wallet_account_links WHERE account_id=?
+               LIMIT 1""".trimIndent(), arrayOf(accountId, accountId, accountId)
         ).use { it.moveToFirst() }
 
     fun updateDetails(
@@ -194,7 +196,9 @@ class CashAccountRepository(context: Context) {
                 "SELECT 1 FROM cash_transactions WHERE account_id=? LIMIT 1", arrayOf(accountId)
             ).use { it.moveToFirst() } || db.rawQuery(
                 "SELECT opening_balance_minor FROM cash_accounts WHERE id=?", arrayOf(accountId)
-            ).use { it.moveToFirst() && it.getLong(0) != 0L }
+            ).use { it.moveToFirst() && it.getLong(0) != 0L } || db.rawQuery(
+                "SELECT 1 FROM service_wallet_account_links WHERE account_id=? LIMIT 1", arrayOf(accountId)
+            ).use { it.moveToFirst() }
             if (hasHistory) {
                 require(accountType == old.second && currency == old.third) {
                     "لا يمكن تغيير نوع الحساب أو عملته بعد تسجيل حركات عليه؛ يمكن تعديل الاسم فقط حفاظاً على سلامة السجلات"
