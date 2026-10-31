@@ -17,9 +17,107 @@ data class CashAccountSummary(
 class CashAccountRepository(context: Context) {
     private val database = AppDatabase.getInstance(context)
 
-    fun listActive(): List<CashAccountSummary> = listAccounts(true)
+    fun listActive(): List<CashAccountSummary> {
+        ensureSystemCashAccounts()
+        return listAccounts(true)
+    }
+
+    fun ensureSystemCashAccounts() {
+        val db=database.writableDatabase
+        db.beginTransaction()
+        try {
+            ensureSystemCashAccounts(db)
+            db.setTransactionSuccessful()
+        } finally { db.endTransaction() }
+    }
+
+    fun systemRoleAccountId(roleKey:String):String? {
+        ensureSystemCashAccounts()
+        return database.readableDatabase.rawQuery(
+            "SELECT account_id FROM system_cash_account_roles WHERE role_key=?",arrayOf(roleKey)
+        ).use { if(it.moveToFirst())it.getString(0)else null }
+    }
+
+    private fun ensureSystemCashAccounts(db:android.database.sqlite.SQLiteDatabase) {
+        val date=operatingDate()
+        val existingPrimary=db.rawQuery("SELECT primary_cash_account_id FROM daily_cash_sessions WHERE operating_date=?",arrayOf(date)).use {
+            if(it.moveToFirst())it.getString(0)else null
+        }
+        val dailyId=existingPrimary ?: ensureRoleAccount(db,"DAILY_DRAWER","system_cash_daily_drawer","درج البيع اليومي",
+            listOf("درج البيع اليومي","صندوق البيع اليومي","الدرج الرئيسي","درج المبيعات","صندوق المبيعات اليومي"))
+        if(existingPrimary==null) {
+            val values=ContentValues().apply {
+                put("operating_date",date);put("primary_cash_account_id",dailyId);putNull("created_by");put("created_at",timestamp())
+            }
+            db.insertOrThrow("daily_cash_sessions",null,values)
+        }
+        setSystemRole(db,"DAILY_DRAWER",dailyId)
+
+        val currentSupplier=db.rawQuery("SELECT account_id FROM daily_supplier_rollovers WHERE operating_date=?",arrayOf(date)).use {
+            if(it.moveToFirst())it.getString(0)else null
+        }
+        val supplierId=currentSupplier ?: ensureRoleAccount(db,"SUPPLIER_ROLLOVER","system_cash_supplier_rollover",
+            "صندوق النقد المدور للبضاعة",
+            listOf("صندوق النقد المدور للبضاعة","صندوق نقدي مدور للبضاعة","صندوق الموردين المدور","النقد المدور للموردين","صندوق البضاعة"))
+        setSystemRole(db,"SUPPLIER_ROLLOVER",supplierId)
+
+        val configuredRecharge=db.rawQuery(
+            "SELECT setting_value FROM app_settings WHERE setting_key='service_recharge_cash_account_id'",null
+        ).use { if(it.moveToFirst())it.getString(0)else null }
+        val validConfigured=configuredRecharge?.let { id ->
+            db.rawQuery("SELECT 1 FROM cash_accounts WHERE id=? AND account_type='CASH_BOX' AND currency_code='SYP' AND is_active=1",arrayOf(id)).use{it.moveToFirst()}
+        } ?: false
+        val rechargeId=if(validConfigured) configuredRecharge!! else ensureRoleAccount(db,"SERVICE_RECHARGE",
+            "system_cash_service_recharge","صندوق شراء رصيد الخدمات",
+            listOf("صندوق رصيد خدمات نقدي","صندوق شراء رصيد الخدمات","صندوق رصيد الخدمات","صندوق تعبئة رصيد الخدمات"))
+        if(!validConfigured) {
+            val values=ContentValues().apply {
+                put("setting_key","service_recharge_cash_account_id");put("setting_value",rechargeId);put("updated_at",timestamp())
+            }
+            db.insertWithOnConflict("app_settings",null,values,android.database.sqlite.SQLiteDatabase.CONFLICT_REPLACE)
+        }
+        setSystemRole(db,"SERVICE_RECHARGE",rechargeId)
+    }
+
+    private fun ensureRoleAccount(
+        db:android.database.sqlite.SQLiteDatabase,role:String,systemId:String,defaultName:String,aliases:List<String>
+    ):String {
+        val linked=db.rawQuery("SELECT account_id FROM system_cash_account_roles WHERE role_key=?",arrayOf(role)).use {
+            if(it.moveToFirst())it.getString(0)else null
+        }
+        if(linked!=null) {
+            val valid=db.rawQuery("SELECT 1 FROM cash_accounts WHERE id=? AND account_type='CASH_BOX' AND currency_code='SYP' AND is_active=1",arrayOf(linked)).use{it.moveToFirst()}
+            require(valid) { "الحساب الأساسي المرتبط بالدور $role غير نشط أو تغير نوعه" }
+            return linked
+        }
+        val placeholders=aliases.joinToString(","){"?"}
+        val existing=db.rawQuery(
+            "SELECT id FROM cash_accounts WHERE account_type='CASH_BOX' AND currency_code='SYP' AND is_active=1 AND lower(trim(name)) IN ($placeholders) ORDER BY created_at,id LIMIT 1",
+            aliases.map{it.lowercase(Locale.ROOT)}.toTypedArray()
+        ).use { if(it.moveToFirst())it.getString(0)else null }
+        var accountId=existing
+        if(accountId==null) {
+            accountId=systemId
+            if(db.rawQuery("SELECT 1 FROM cash_accounts WHERE id=?",arrayOf(accountId)).use{it.moveToFirst()}) {
+                accountId=UUID.randomUUID().toString()
+            }
+            val values=ContentValues().apply {
+                put("id",accountId);put("name",defaultName);put("account_type","CASH_BOX")
+                put("currency_code","SYP");put("opening_balance_minor",0L);put("is_active",1);put("created_at",timestamp())
+            }
+            db.insertOrThrow("cash_accounts",null,values)
+        }
+        setSystemRole(db,role,accountId)
+        return accountId
+    }
+
+    private fun setSystemRole(db:android.database.sqlite.SQLiteDatabase,role:String,accountId:String) {
+        val values=ContentValues().apply{put("role_key",role);put("account_id",accountId);put("linked_at",timestamp())}
+        db.insertWithOnConflict("system_cash_account_roles",null,values,android.database.sqlite.SQLiteDatabase.CONFLICT_REPLACE)
+    }
 
     fun currentDayPrimaryDrawer(): CashAccountSummary? {
+        ensureSystemCashAccounts()
         val date = operatingDate()
         return database.readableDatabase.rawQuery(
             """SELECT a.id,a.name,a.account_type,a.currency_code,a.opening_balance_minor,a.is_active
@@ -66,8 +164,15 @@ class CashAccountRepository(context: Context) {
                 "SELECT 1 FROM app_settings WHERE setting_key='service_recharge_cash_account_id' AND setting_value=?",
                 arrayOf(accountId)
             ).use { it.moveToFirst() }
+            val isSupplierDefaultAccount = db.rawQuery(
+                "SELECT 1 FROM system_cash_account_roles WHERE role_key='SUPPLIER_ROLLOVER' AND account_id=?",
+                arrayOf(accountId)
+            ).use { it.moveToFirst() }
             require(!isServiceRechargeAccount) {
                 "هذا الصندوق مخصص لشراء رصيد الخدمات ولا يمكن تعيينه كدرج المبيعات والتحصيل"
+            }
+            require(!isSupplierDefaultAccount) {
+                "هذا الصندوق مخصص للنقد المدور للموردين ولا يمكن تعيينه كدرج المبيعات والتحصيل"
             }
             val before = db.rawQuery(
                 "SELECT primary_cash_account_id FROM daily_cash_sessions WHERE operating_date=?",
@@ -103,6 +208,7 @@ class CashAccountRepository(context: Context) {
                 put("created_at", now)
             }
             db.insertOrThrow("audit_log", null, audit)
+            setSystemRole(db,"DAILY_DRAWER",accountId)
             db.setTransactionSuccessful()
         } finally {
             db.endTransaction()
