@@ -22,6 +22,7 @@ class PurchasePaymentRepositoryTest {
     private lateinit var supplierId: String
     private lateinit var invoiceId: String
     private lateinit var accountId: String
+    private lateinit var adminId: String
 
     @Before
     fun setUp() {
@@ -32,6 +33,9 @@ class PurchasePaymentRepositoryTest {
         invoices = InvoiceRepository(context)
         payments = PurchasePaymentRepository(context)
         cashAccounts = CashAccountRepository(context)
+        val auth = AuthRepository(context)
+        auth.ensureInitialAdmin()
+        adminId = auth.authenticate("admin", "1234")!!.id
 
         supplierId = SupplierRepository(context).create("مورد دفع ${UUID.randomUUID()}").id
         val unit = store.getUnits().first()
@@ -147,6 +151,43 @@ class PurchasePaymentRepositoryTest {
             assertTrue(it.moveToFirst())
             assertEquals(rate, it.getLong(0))
         }
+    }
+
+    @Test
+    fun managerCanCorrectPaymentAmountAndAccountAtomically() {
+        val payment = payments.addPayment(invoiceId, "pay-edit-${UUID.randomUUID()}", accountId, 4000L, "قبل التصحيح")
+        val replacement = cashAccounts.create("صندوق بديل ${UUID.randomUUID()}", "CASH_BOX", "USD", 10000L)
+
+        val corrected = payments.editPayment(
+            "ADMIN", adminId, payment.paymentId, replacement.id, 3500L, "تصحيح دفعة"
+        )
+
+        assertEquals(3500L, corrected.paidUsdCents)
+        assertEquals(6500L, corrected.outstandingUsdCents)
+        assertEquals("PARTIALLY_PAID", corrected.paymentStatus)
+        assertEquals(50000L, cashAccounts.balance(accountId))
+        assertEquals(6500L, cashAccounts.balance(replacement.id))
+        val history = payments.listPayments(invoiceId).single()
+        assertEquals(3500L, history.amountMinor)
+        assertEquals(replacement.id, history.cashAccountId)
+        database.readableDatabase.rawQuery(
+            "SELECT COUNT(*) FROM audit_log WHERE entity_type='PURCHASE_PAYMENT' AND entity_id=?",
+            arrayOf(payment.paymentId)
+        ).use {
+            assertTrue(it.moveToFirst())
+            assertEquals(1, it.getInt(0))
+        }
+    }
+
+    @Test
+    fun cashierCannotCorrectSupplierPayment() {
+        val payment = payments.addPayment(invoiceId, "pay-edit-denied-${UUID.randomUUID()}", accountId, 2000L)
+        try {
+            payments.editPayment("CASHIER", "cashier-id", payment.paymentId, accountId, 1000L, "غير مسموح")
+            throw AssertionError("Cashier must not edit supplier payments")
+        } catch (_: IllegalArgumentException) { }
+        assertEquals(48000L, cashAccounts.balance(accountId))
+        assertEquals(2000L, payments.listPayments(invoiceId).single().amountMinor)
     }
 
     @Test
