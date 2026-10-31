@@ -77,6 +77,10 @@ class CashAccountRepository(context: Context) {
         require(accountType in setOf("CASH_BOX", "WALLET", "BANK", "OTHER")) { "نوع الحساب غير صالح" }
         require(currency in setOf("USD", "SYP")) { "العملة يجب أن تكون USD أو SYP" }
         val db = database.writableDatabase
+        val managerExists = db.rawQuery(
+            "SELECT 1 FROM users WHERE id=? AND role_key='ADMIN' AND is_active=1", arrayOf(actorUserId)
+        ).use { it.moveToFirst() }
+        require(managerExists) { "يجب تسجيل الدخول بحساب مدير نشط لتعديل الحسابات المالية" }
         db.beginTransaction()
         try {
             val old = db.rawQuery(
