@@ -60,6 +60,65 @@ class CashAccountRepository(context: Context) {
         return CashAccountSummary(id, cleanName, accountType, currency, openingBalanceMinor, true)
     }
 
+    fun hasTransactions(accountId: String): Boolean =
+        database.readableDatabase.rawQuery(
+            "SELECT 1 FROM cash_transactions WHERE account_id=? LIMIT 1", arrayOf(accountId)
+        ).use { it.moveToFirst() }
+
+    fun updateDetails(
+        actorRole: String, actorUserId: String, accountId: String,
+        name: String, accountType: String, currencyCode: String
+    ) {
+        require(actorRole == "ADMIN") { "تعديل الحسابات المالية متاح للمدير فقط" }
+        require(actorUserId.isNotBlank()) { "جلسة المدير غير صالحة" }
+        val cleanName = name.trim()
+        val currency = currencyCode.trim().uppercase(Locale.US)
+        require(cleanName.isNotEmpty()) { "اسم الحساب مطلوب" }
+        require(accountType in setOf("CASH_BOX", "WALLET", "BANK", "OTHER")) { "نوع الحساب غير صالح" }
+        require(currency in setOf("USD", "SYP")) { "العملة يجب أن تكون USD أو SYP" }
+        val db = database.writableDatabase
+        db.beginTransaction()
+        try {
+            val old = db.rawQuery(
+                "SELECT name,account_type,currency_code FROM cash_accounts WHERE id=?",
+                arrayOf(accountId)
+            ).use {
+                require(it.moveToFirst()) { "الحساب المالي غير موجود" }
+                Triple(it.getString(0), it.getString(1), it.getString(2))
+            }
+            val hasHistory = db.rawQuery(
+                "SELECT 1 FROM cash_transactions WHERE account_id=? LIMIT 1", arrayOf(accountId)
+            ).use { it.moveToFirst() }
+            if (hasHistory) {
+                require(accountType == old.second && currency == old.third) {
+                    "لا يمكن تغيير نوع الحساب أو عملته بعد تسجيل حركات عليه؛ يمكن تعديل الاسم فقط حفاظاً على سلامة السجلات"
+                }
+            }
+            val now = timestamp()
+            val values = ContentValues().apply {
+                put("name", cleanName); put("account_type", accountType); put("currency_code", currency)
+            }
+            require(db.update("cash_accounts", values, "id=?", arrayOf(accountId)) == 1) {
+                "تعذر تعديل الحساب المالي"
+            }
+            val beforeJson = "{\"name\":" + jsonString(old.first) + ",\"type\":" +
+                jsonString(old.second) + ",\"currency\":" + jsonString(old.third) + "}"
+            val afterJson = "{\"name\":" + jsonString(cleanName) + ",\"type\":" +
+                jsonString(accountType) + ",\"currency\":" + jsonString(currency) + "}"
+            val audit = ContentValues().apply {
+                put("id", UUID.randomUUID().toString()); put("user_id", actorUserId)
+                put("action", "UPDATE"); put("entity_type", "CASH_ACCOUNT"); put("entity_id", accountId)
+                put("before_json", beforeJson); put("after_json", afterJson); put("created_at", now)
+            }
+            db.insertOrThrow("audit_log", null, audit)
+            db.setTransactionSuccessful()
+        } finally { db.endTransaction() }
+    }
+
+    private fun jsonString(value: String): String =
+        "\"" + value.replace("\\\\", "\\\\\\\\").replace("\"", "\\\\"")
+            .replace("\\n", "\\\\n").replace("\\r", "\\\\r") + "\""
+
     fun balance(accountId: String): Long {
         val opening = database.readableDatabase.rawQuery(
             "SELECT opening_balance_minor FROM cash_accounts WHERE id=?", arrayOf(accountId)
