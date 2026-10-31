@@ -283,7 +283,7 @@ class PurchasePaymentRepository(context: Context) {
             ).use {
                 require(it.moveToFirst()) { "الحساب المالي غير موجود" }
                 require(it.getInt(3) == 1) { "لا يمكن نقل الدفعة إلى حساب موقوف" }
-                SupplierPaymentAccount(it.getString(0),it.getString(1),it.getString(2),it.getLong(4))
+                AccountForPayment(it.getString(0),it.getString(1),it.getString(2),it.getLong(4))
             }
             require(target.currencyCode == old.currencyCode) {
                 "يجب اختيار حساب بنفس عملة الدفعة؛ لا يمكن تغيير العملة التاريخية أثناء التصحيح"
