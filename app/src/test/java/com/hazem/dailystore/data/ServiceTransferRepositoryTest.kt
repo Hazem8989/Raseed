@@ -23,8 +23,8 @@ class ServiceTransferRepositoryTest {
         database = AppDatabase.getInstance(context)
         database.writableDatabase.execSQL("DELETE FROM service_transfers")
         database.writableDatabase.execSQL("DELETE FROM service_wallet_transactions")
-        database.writableDatabase.execSQL("DELETE FROM cash_transactions WHERE transaction_type IN ('SERVICE_TRANSFER_RECEIPT','SERVICE_RECHARGE','SERVICE_TRANSFER_REVERSAL','SERVICE_FLOAT_OPENING','SERVICE_RECHARGE_IN','SERVICE_TRANSFER_OUT','SERVICE_TRANSFER_REVERSAL_IN')")
-        database.writableDatabase.execSQL("DELETE FROM wallet_daily_openings")
+        database.writableDatabase.execSQL("DELETE FROM cash_transactions WHERE account_id IN (SELECT account_id FROM service_wallet_account_links)")
+        database.writableDatabase.execSQL("DELETE FROM wallet_daily_openings WHERE account_id IN (SELECT account_id FROM service_wallet_account_links)")
         database.writableDatabase.execSQL("UPDATE cash_accounts SET opening_balance_minor=0 WHERE id IN (SELECT account_id FROM service_wallet_account_links)")
         StoreRepository(context).ensureBaseSetup()
         val auth = AuthRepository(context)
@@ -35,6 +35,18 @@ class ServiceTransferRepositoryTest {
     }
 
     @After fun tearDown() { database.close() }
+
+    @Test fun builtInServiceWalletsAreRealCashAccountsAndCanBeUsedForElectronicReceipts() {
+        val wallets = repo.listWallets()
+        assertEquals(2, wallets.size)
+        wallets.forEach { wallet ->
+            val account = accounts.listAll().single { it.id == wallet.accountId }
+            assertEquals("WALLET", account.accountType)
+            assertEquals("SYP", account.currencyCode)
+        }
+        assertTrue(wallets.any { it.name.contains("سيرياتيل") })
+        assertTrue(wallets.any { it.name.contains("شام كاش") })
+    }
 
     @Test fun syriatelBalanceAndCashShareFloatAndReceiptIsCreditedInFull() {
         val drawer = accounts.create("درج خدمة " + UUID.randomUUID(), "CASH_BOX", "SYP", 0L)
