@@ -50,6 +50,15 @@ class ServiceTransferRepositoryTest {
             20_000L, 0L, drawer.id, "svc-cash-" + UUID.randomUUID())
         assertEquals(2_000L, second.profitMinor)
         assertEquals(70_000L, repo.listWallets().single { it.serviceKey == ServiceTransferRepository.SYRIATEL_SHARED }.balanceMinor)
+        val daily = repo.dailySummary()
+        val normal = daily.single { it.serviceType == ServiceTransferRepository.SYRIATEL_BALANCE }
+        val cash = daily.single { it.serviceType == ServiceTransferRepository.SYRIATEL_CASH }
+        assertEquals(2_000L, normal.profitMinor)
+        assertEquals(2_000L, cash.profitMinor)
+        assertEquals(10_000L, normal.customerReceiptsMinor)
+        assertEquals(20_000L, cash.customerReceiptsMinor)
+        assertEquals(10_200L, normal.rechargeReserveMinor)
+        assertEquals(20_400L, cash.rechargeReserveMinor)
     }
 
     @Test fun shamCashUsesIndependentFloatAndFivePercentProfit() {
