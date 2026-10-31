@@ -1607,6 +1607,13 @@ class MainActivity : Activity() {
             report.physicalCashReceiptsByCurrency.entries.joinToString(" • ") { formatAccountBalance(it.value, it.key) }
         list.addView(label("إجمالي المقبوضات الإلكترونية القابلة للتصريف: " + electronicText, 17f, green, true, Gravity.RIGHT).apply { setPadding(0, dp(8), 0, dp(4)) })
         list.addView(label("إجمالي المقبوضات النقدية الفعلية: " + physicalText, 15f, textColor, true, Gravity.RIGHT).apply { setPadding(0, dp(2), 0, dp(12)) })
+        report.supplierRollover?.let { r ->
+            list.addView(label("النقد المدور للموردين: " + formatSypAmount(r.allocatedMinor) +
+                " ل.س • دفعات الموردين: " + formatSypAmount(r.supplierPaymentsMinor) +
+                " • المسحوبات: " + formatSypAmount(r.personalWithdrawalsMinor) +
+                " • المتاح: " + formatSypAmount(r.availableMinor) + " ل.س",
+                14f, green, true, Gravity.RIGHT).apply { setPadding(0, dp(4), 0, dp(12)) })
+        }
         report.accounts.forEach { a ->
             val card = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(dp(12), dp(10), dp(12), dp(10)); background = cardBackground() }
             card.addView(label(a.accountName + " • " + a.currencyCode, 15f, green, true, Gravity.RIGHT))
