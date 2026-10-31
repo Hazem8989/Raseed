@@ -292,7 +292,9 @@ class StoreRepository(context: Context) {
                     row.salePriceSyp != null -> CurrencyConverter.sypToUsdCents(row.salePriceSyp, exchangeRateMilli)
                     else -> 0L
                 }
-                require(costUsd >= 0L && saleUsd > 0L) { "تكلفة أو سعر بيع غير صالح للصنف: $cleanName" }
+                require(costUsd > 0L && saleUsd > 0L) {
+                    "يجب تسجيل تكلفة شراء موجبة وسعر بيع موجب للصنف: $cleanName؛ لا يمكن إدخاله ضمن المخزون دون تكلفة قابلة للتقييم"
+                }
 
                 val product = ContentValues().apply {
                     put("id", UUID.randomUUID().toString())
