@@ -1727,7 +1727,7 @@ class MainActivity : Activity() {
             val options = when (selected) {
                 0 -> all.filter { it.accountType == "CASH_BOX" && it.currencyCode == "SYP" && it.id != CashAccountRepository(this).currentDayPrimaryDrawer()?.id }
                 1 -> all.filter { it.accountType == "CASH_BOX" && it.currencyCode == "SYP" && it.id == repo.currentSupplierRollover()?.accountId }
-                2, 3 -> all.filter { it.accountType == "WALLET" }
+                2 -> all.filter { it.accountType == "WALLET" }
                 else -> all.filter { it.accountType == "WALLET" && it.currencyCode == "SYP" }
             }
             availableAccounts = options
