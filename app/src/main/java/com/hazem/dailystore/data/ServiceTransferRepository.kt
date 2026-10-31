@@ -291,7 +291,7 @@ class ServiceTransferRepository(context:Context) {
         val accountId=serviceAccountId(db,key)
         val accountOpening=db.rawQuery("SELECT opening_balance_minor FROM cash_accounts WHERE id=?",arrayOf(accountId)).use{it.moveToFirst();it.getLong(0)}
         val hasManualDailyOpening=db.rawQuery(
-            "SELECT 1 FROM cash_transactions WHERE account_id=? AND transaction_type='WALLET_DAILY_OPENING_ADJUSTMENT' LIMIT 1",
+            "SELECT 1 FROM cash_transactions WHERE account_id=? AND transaction_type IN ('WALLET_DAILY_OPENING_ADJUSTMENT','WALLET_TOP_UP') LIMIT 1",
             arrayOf(accountId)
         ).use{it.moveToFirst()}
         db.rawQuery(
