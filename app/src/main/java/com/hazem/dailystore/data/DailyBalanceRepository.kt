@@ -16,7 +16,7 @@ data class DailyAccountSummary(
     val supplierPaymentsMinor:Long,val personalWithdrawalsMinor:Long,val transferInMinor:Long,val transferOutMinor:Long,
     val otherOutflowsMinor:Long,val closingMinor:Long
 ) { val electronicReceiptsMinor:Long get()=Math.addExact(salesReceiptsMinor,debtCollectionsMinor) }
-data class DailyCashReport(val operatingDate:String,val accounts:List<DailyAccountSummary>,val electronicReceiptsMinor:Long,val physicalCashReceiptsMinor:Long)
+data class DailyCashReport(val operatingDate:String,val accounts:List<DailyAccountSummary>,val electronicReceiptsByCurrency:Map<String,Long>,val physicalCashReceiptsByCurrency:Map<String,Long>)
 data class SupplierRolloverSummary(
     val operatingDate:String,val accountId:String,val accountName:String,val allocatedMinor:Long,
     val supplierPaymentsMinor:Long,val personalWithdrawalsMinor:Long
@@ -37,6 +37,15 @@ class DailyBalanceRepository(context:Context) {
             require(amount>=used.first+used.second){"المبلغ الجديد أقل من دفعات الموردين والمسحوبات المسجلة اليوم"}
             val old=db.rawQuery("SELECT account_id,allocated_minor FROM daily_supplier_rollovers WHERE operating_date=?",arrayOf(date)).use {
                 if(it.moveToFirst()) Pair(it.getString(0),it.getLong(1)) else null
+            }
+            require(old == null || old.first == accountId || usage(db, date, old.first).let { it.first == 0L && it.second == 0L }) {
+                "لا يمكن تبديل صندوق النقد المدور بعد تسجيل دفعات أو مسحوبات عليه اليوم"
+            }
+            val primary = db.rawQuery("SELECT primary_cash_account_id FROM daily_cash_sessions WHERE operating_date=?", arrayOf(date)).use {
+                if (it.moveToFirst()) it.getString(0) else null
+            }
+            require(primary == null || primary != accountId) {
+                "يجب فصل صندوق الموردين المدور عن درج الكاش الرئيسي اليومي"
             }
             val now=stamp();val v=ContentValues().apply {
                 put("operating_date",date);put("account_id",accountId);put("allocated_minor",amount)
@@ -139,8 +148,8 @@ class DailyBalanceRepository(context:Context) {
                 rows.add(DailyAccountSummary(id,c.getString(1),c.getString(2),c.getString(3),opening,s[0],s[1],s[2],s[3],s[4],s[5],s[6],s[7],Math.addExact(opening,s.sum())))
             }
         }
-        val electronic=rows.filter{it.accountType=="WALLET"}.sumOf{it.electronicReceiptsMinor}
-        val cash=rows.filter{it.accountType=="CASH_BOX"}.sumOf{Math.addExact(it.salesReceiptsMinor,it.debtCollectionsMinor)}
+        val electronic=rows.filter{it.accountType=="WALLET"}.groupBy{it.currencyCode}.mapValues { entry -> entry.value.sumOf { it.electronicReceiptsMinor } }
+        val cash=rows.filter{it.accountType=="CASH_BOX"}.groupBy{it.currencyCode}.mapValues { entry -> entry.value.sumOf { Math.addExact(it.salesReceiptsMinor,it.debtCollectionsMinor) } }
         return DailyCashReport(date,rows,electronic,cash)
     }
 
