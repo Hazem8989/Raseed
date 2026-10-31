@@ -35,7 +35,7 @@ Main branch is protected from this work and must not be modified.
 - SYP sale price is derived from the USD reference price and the current exchange rate.
 - Changing the current rate updates derived SYP sale prices without changing the USD reference price or historical invoices.
 - Cash sale and credit sale are distinct. Cash checkout requires a selected active cash account and full receipt; credit checkout requires a customer.
-- Customer credit FX revaluation applies only to the unpaid eligible credit merchandise balance, with the original sale-time SYP value as the floor. It does not apply to supplier balances.
+- Customer credit FX revaluation applies only to the unpaid eligible credit merchandise balance, with the original sale-time SYP value as the floor. The SYP-only collection and revaluation ledger are implemented in code; supplier balances remain separate.
 
 ### Supplier payable rules
 - Supplier invoice SYP liability is fixed at the purchase invoice's saved exchange rate.
@@ -76,7 +76,7 @@ This section distinguishes code present from features that are merely planned. B
 
 ### Approved but not yet implemented
 - FIFO cost layers and FIFO COGS/profit calculations.
-- Customer credit FX revaluation ledger and account display.
+- Customer credit FX revaluation ledger and account display (implemented; phone acceptance pending).
 - Full supplier and customer running statements with all adjustments.
 - Daily purchase/expense/personal-withdrawal balance workflow.
 - Cash transfers between accounts, deposits, withdrawals, and operating/personal expenses.
@@ -105,7 +105,7 @@ This section distinguishes code present from features that are merely planned. B
 
 ### Gate B — Accounting correctness
 - [ ] Implement FIFO inventory cost layers and COGS.
-- [ ] Implement customer credit FX revaluation according to its approved policy.
+- [x] Implement customer credit FX revaluation according to its approved policy (automated tests/build passed; phone acceptance pending).
 - [ ] Complete customer and supplier running statements.
 - [ ] Implement returns/refunds and provider-fee rules.
 - [ ] Implement daily purchase/expense/personal-withdrawal balance workflow.
@@ -154,12 +154,12 @@ This section distinguishes code present from features that are merely planned. B
 - Outstanding SYP valuation uses `max(current exchange rate, original invoice exchange rate)`: increases in the rate increase the SYP debt; decreases never take it below the original-rate floor for the remaining balance.
 - A SYP payment reduces the USD reference using `max(collection-time rate, original invoice rate)`, calculated separately for each invoice allocation. This prevents a below-original exchange rate from reducing the USD debt by too much and breaching the SYP floor.
 - Preserve the SYP received, collection-time/original/effective rates, USD reference reduction, invoice allocation, and linked cash movement in an immutable idempotent audit trail.
-- This is an approved specification only. SYP-only collection conversion, revaluation ledger, UI, migration safeguards, and tests remain pending implementation.
+- SYP-only collection conversion, revaluation ledger, UI, migration safeguards, and automated tests are implemented on the development branch. Phone acceptance remains pending.
 
 
 ### Customer debt collections — daily drawer and e-wallet routing (approved 2026-10-31)
 
-- Cash SYP collection of an old customer credit debt must increase the designated current-day primary cash drawer automatically and count in today's cash receipts/closing totals as **customer debt collection**.
+- Cash SYP collection of an old customer credit debt posts to the designated current-day primary cash drawer. It is classified as **customer debt collection** (`CUSTOMER_CREDIT_COLLECTION`), not a sale. The dedicated daily closing/report UI remains pending.
 - This is not a new sale: do not create a sales invoice or include the receipt in today's sales revenue/profit.
 - The current-day primary drawer must be explicitly identifiable/configurable and separate from the carried-over cash box used for supplier payments. Do not route collections to that rollover box by default. If the primary drawer is missing or inactive, block cash collection safely.
 - For electronic payment, the operator selects the receiving active wallet; increase that wallet only and show the receipt in its wallet statement, not physical cash.
