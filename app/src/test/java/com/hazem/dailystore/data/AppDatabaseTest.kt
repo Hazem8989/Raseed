@@ -89,6 +89,8 @@ class AppDatabaseTest {
         // The current onCreate schema is v8, so changing only user_version would
         // incorrectly leave the v8 column in place and make ALTER TABLE fail.
         db.execSQL("ALTER TABLE users DROP COLUMN must_change_password")
+        db.execSQL("DROP INDEX idx_sales_posted_at")
+        db.execSQL("ALTER TABLE sales_invoices DROP COLUMN posted_at")
         db.execSQL("DROP TABLE sales_item_cost_allocations")
         db.execSQL("DROP TABLE inventory_cost_layers")
         db.execSQL("ALTER TABLE sales_items DROP COLUMN cogs_usd_cents")
@@ -101,7 +103,7 @@ class AppDatabaseTest {
         database = AppDatabase.getInstance(context)
         val upgraded = database.writableDatabase
 
-        assertEquals(9, upgraded.version)
+        assertEquals(10, upgraded.version)
         upgraded.rawQuery(
             """SELECT username,display_name,password_hash,password_salt,role_key,is_active,
                       must_change_password,created_at,updated_at
@@ -131,6 +133,15 @@ class AppDatabaseTest {
             while (c.moveToNext()) if (c.getString(1) == "cogs_usd_cents") hasCogs = true
             assertTrue("FIFO migration must add the sale COGS snapshot", hasCogs)
         }
+        upgraded.rawQuery("PRAGMA table_info(sales_invoices)", null).use { c ->
+            var hasPostedAt = false
+            while (c.moveToNext()) if (c.getString(1) == "posted_at") hasPostedAt = true
+            assertTrue("Posting timestamp migration must add posted_at", hasPostedAt)
+        }
+        upgraded.rawQuery(
+            "SELECT COUNT(*) FROM sqlite_master WHERE type='index' AND name='idx_sales_posted_at'",
+            null
+        ).use { c -> assertTrue(c.moveToFirst()); assertEquals(1, c.getInt(0)) }
         upgraded.rawQuery(
             "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name IN ('inventory_cost_layers','sales_item_cost_allocations')",
             null
