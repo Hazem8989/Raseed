@@ -31,6 +31,7 @@ class ServiceTransferRepositoryTest {
         val auth = AuthRepository(context)
         auth.ensureInitialAdmin()
         actor = auth.authenticate("admin", "1234")!!.id
+        auth.changePassword(actor, "1234", "TestAdmin123")
         accounts = CashAccountRepository(context)
         repo = ServiceTransferRepository(context)
     }
@@ -50,7 +51,7 @@ class ServiceTransferRepositoryTest {
     }
 
     @Test fun syriatelBalanceAndCashShareFloatAndReceiptIsCreditedInFull() {
-        val drawer = accounts.create("درج خدمة " + UUID.randomUUID(), "CASH_BOX", "SYP", 0L)
+        val drawer = accounts.create(actor, "درج خدمة " + UUID.randomUUID(), "CASH_BOX", "SYP", 0L)
         accounts.setCurrentDayPrimaryDrawer("ADMIN", actor, drawer.id)
         repo.setOpeningBalance(actor, ServiceTransferRepository.SYRIATEL_SHARED, 100_000L)
         val first = repo.executeTransfer(actor, ServiceTransferRepository.SYRIATEL_BALANCE,
@@ -77,7 +78,7 @@ class ServiceTransferRepositoryTest {
     }
 
     @Test fun shamCashUsesIndependentFloatAndFivePercentProfit() {
-        val drawer = accounts.create("درج شام " + UUID.randomUUID(), "CASH_BOX", "SYP", 0L)
+        val drawer = accounts.create(actor, "درج شام " + UUID.randomUUID(), "CASH_BOX", "SYP", 0L)
         accounts.setCurrentDayPrimaryDrawer("ADMIN", actor, drawer.id)
         repo.setOpeningBalance(actor, ServiceTransferRepository.SYRIATEL_SHARED, 50_000L)
         repo.setOpeningBalance(actor, ServiceTransferRepository.SHAM_CASH, 30_000L)
@@ -110,7 +111,7 @@ class ServiceTransferRepositoryTest {
     }
 
     @Test fun rechargeDeductsFromDedicatedCashBoxAndAppliesTwoPercentOnlyOnExternalRecharge() {
-        val source = accounts.create("صندوق شراء رصيد " + UUID.randomUUID(), "CASH_BOX", "SYP", 100_000L)
+        val source = accounts.create(actor, "صندوق شراء رصيد " + UUID.randomUUID(), "CASH_BOX", "SYP", 100_000L)
         repo.setRechargeAccount(actor, source.id)
         val syriatelFee = repo.recharge(actor, ServiceTransferRepository.SYRIATEL_SHARED, source.id,
             50_000L, "recharge-syr-" + UUID.randomUUID())
@@ -129,7 +130,7 @@ class ServiceTransferRepositoryTest {
 
 
     @Test fun electronicServiceReceiptCanBeMovedToCashAndBothBalancesReconcile() {
-        val drawer = accounts.create("درج تصريف خدمة " + UUID.randomUUID(), "CASH_BOX", "SYP", 0L)
+        val drawer = accounts.create(actor, "درج تصريف خدمة " + UUID.randomUUID(), "CASH_BOX", "SYP", 0L)
         val walletId = repo.serviceAccountId(ServiceTransferRepository.SYRIATEL_SHARED)
         repo.setOpeningBalance(actor, ServiceTransferRepository.SYRIATEL_SHARED, 40_000L)
         repo.executeTransfer(actor, ServiceTransferRepository.SYRIATEL_BALANCE,
@@ -150,7 +151,7 @@ class ServiceTransferRepositoryTest {
     }
 
     @Test fun managerCanReverseTransferWithAuditedOppositeMovements() {
-        val drawer = accounts.create("درج عكس " + UUID.randomUUID(), "CASH_BOX", "SYP", 0L)
+        val drawer = accounts.create(actor, "درج عكس " + UUID.randomUUID(), "CASH_BOX", "SYP", 0L)
         accounts.setCurrentDayPrimaryDrawer("ADMIN", actor, drawer.id)
         repo.setOpeningBalance(actor, ServiceTransferRepository.SYRIATEL_SHARED, 5_000L)
         val transfer = repo.executeTransfer(actor, ServiceTransferRepository.SYRIATEL_BALANCE,
@@ -163,7 +164,7 @@ class ServiceTransferRepositoryTest {
     }
 
     @Test fun transferIsIdempotentAndInsufficientFloatDoesNotCreateReceipt() {
-        val drawer = accounts.create("درج تكرار " + UUID.randomUUID(), "CASH_BOX", "SYP", 0L)
+        val drawer = accounts.create(actor, "درج تكرار " + UUID.randomUUID(), "CASH_BOX", "SYP", 0L)
         accounts.setCurrentDayPrimaryDrawer("ADMIN", actor, drawer.id)
         repo.setOpeningBalance(actor, ServiceTransferRepository.SYRIATEL_SHARED, 10_000L)
         val op = "svc-idempotent-" + UUID.randomUUID()
