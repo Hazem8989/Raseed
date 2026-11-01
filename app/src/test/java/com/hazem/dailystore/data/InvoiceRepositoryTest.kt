@@ -135,6 +135,36 @@ class InvoiceRepositoryTest {
     }
 
     @Test
+    fun fractionalFifoAllocationsRoundOnceAcrossLayers() {
+        val kgUnit = store.getUnits().first { it.decimalPlaces == 3 }
+        val fractionalProduct = store.saveProduct(
+            null, "منتج كسري FIFO", null, null, store.getCategories().first().id,
+            kgUnit.id, 1L, 250L, true, 0.0
+        )
+        val purchase = invoices.savePurchaseDraft(
+            "fractional-fifo-purchase", null, null, "2026-10-31", 0, null,
+            listOf(
+                InvoiceLineInput(fractionalProduct, BigDecimal("0.5"), 1L),
+                InvoiceLineInput(fractionalProduct, BigDecimal("0.5"), 1L)
+            )
+        )
+        assertTrue(invoices.postPurchase(purchase.invoiceId, "fractional-fifo-purchase-post"))
+        val sale = invoices.saveSalesDraft(
+            "fractional-fifo-sale", null, null, "2026-10-31", 0, null,
+            listOf(InvoiceLineInput(fractionalProduct, BigDecimal("1.0"), 250L))
+        )
+        assertTrue(invoices.postCashSale(sale.invoiceId, "fractional-fifo-sale-post", cashAccountId))
+        database.readableDatabase.rawQuery(
+            "SELECT cogs_usd_cents FROM sales_items WHERE sales_invoice_id=?",
+            arrayOf(sale.invoiceId)
+        ).use { c -> assertTrue(c.moveToFirst()); assertEquals(1L, c.getLong(0)) }
+        database.readableDatabase.rawQuery(
+            "SELECT SUM(cost_usd_cents) FROM sales_item_cost_allocations WHERE sales_invoice_id=?",
+            arrayOf(sale.invoiceId)
+        ).use { c -> assertTrue(c.moveToFirst()); assertEquals(1L, c.getLong(0)) }
+    }
+
+    @Test
     fun versionEightMigrationRebuildsFifoLayersAndHistoricalSaleCogs() {
         val sale = invoices.saveSalesDraft(
             "legacy-fifo-sale-draft", null, null, "2026-10-31", 0, null,
