@@ -324,6 +324,30 @@ class AppDatabase private constructor(context: Context) :
                 db.endTransaction()
             }
         }
+        if (version < 11) {
+            db.beginTransaction()
+            try {
+                var hasOperatingDate = false
+                db.rawQuery("PRAGMA table_info(sales_invoices)", null).use { c ->
+                    while (c.moveToNext()) if (c.getString(1) == "posted_operating_date") hasOperatingDate = true
+                }
+                if (!hasOperatingDate) db.execSQL("ALTER TABLE sales_invoices ADD COLUMN posted_operating_date TEXT")
+                db.execSQL("""
+                    UPDATE sales_invoices
+                    SET posted_operating_date = COALESCE(
+                        strftime('%Y-%m-%d', posted_at, 'localtime'),
+                        substr(posted_at,1,10)
+                    )
+                    WHERE status IN ('POSTED','PARTIALLY_PAID','PAID')
+                      AND posted_operating_date IS NULL AND posted_at IS NOT NULL
+                """.trimIndent())
+                db.execSQL("CREATE INDEX IF NOT EXISTS idx_sales_posted_operating_date ON sales_invoices(posted_operating_date)")
+                db.setTransactionSuccessful()
+                version = 11
+            } finally {
+                db.endTransaction()
+            }
+        }
         if (version != newVersion) {
             throw IllegalStateException("Missing database migration from version $version to $newVersion")
         }
@@ -418,7 +442,7 @@ class AppDatabase private constructor(context: Context) :
 
     companion object {
         const val DATABASE_NAME = "the_daily_shop.db"
-        const val DATABASE_VERSION = 10
+        const val DATABASE_VERSION = 11
 
         @Volatile
         private var INSTANCE: AppDatabase? = null
@@ -686,6 +710,7 @@ class AppDatabase private constructor(context: Context) :
                 created_at TEXT NOT NULL,
                 updated_at TEXT NOT NULL,
                 posted_at TEXT,
+                posted_operating_date TEXT,
                 FOREIGN KEY(customer_id) REFERENCES customers(id)
                     ON UPDATE RESTRICT ON DELETE RESTRICT,
                 FOREIGN KEY(warehouse_id) REFERENCES warehouses(id)
@@ -1065,6 +1090,7 @@ class AppDatabase private constructor(context: Context) :
             "CREATE INDEX idx_inventory_movements_product_date ON inventory_movements(product_id, created_at)",
             "CREATE INDEX idx_sales_date ON sales_invoices(invoice_date)",
             "CREATE INDEX idx_sales_posted_at ON sales_invoices(posted_at)",
+            "CREATE INDEX idx_sales_posted_operating_date ON sales_invoices(posted_operating_date)",
             "CREATE INDEX idx_sales_customer_date ON sales_invoices(customer_id, invoice_date)",
             "CREATE INDEX idx_purchase_date ON purchase_invoices(invoice_date)",
             "CREATE INDEX idx_cash_transactions_account_date ON cash_transactions(account_id, created_at)",
