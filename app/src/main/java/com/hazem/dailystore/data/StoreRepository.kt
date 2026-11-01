@@ -109,6 +109,7 @@ class StoreRepository(context: Context) {
         val now = timestamp()
         db.beginTransaction()
         try {
+            requireManager(db, actorUserId)
             val old = getCurrentExchangeRateMilli()
             val values = ContentValues().apply {
                 put("id", UUID.randomUUID().toString())
@@ -134,6 +135,7 @@ class StoreRepository(context: Context) {
         val now = timestamp()
         db.beginTransaction()
         try {
+            requireManager(db, actorUserId)
             val values = ContentValues().apply {
                 put("name", clean)
                 put("created_at", now)
@@ -283,6 +285,7 @@ class StoreRepository(context: Context) {
         val now = timestamp()
         db.beginTransaction()
         try {
+            requireManager(db, actorUserId)
             rows.forEach { row ->
                 val cleanName = row.name.trim()
                 val existsName = db.rawQuery(
@@ -561,7 +564,7 @@ class StoreRepository(context: Context) {
     }
 
     private fun jsonEscape(value: String): String = value.replace("\\", "\\\\")
-        .replace("\\\"", "\\\\\"").replace("\\n", "\\\\n").replace("\\r", "\\\\r")
+        .replace("\"", "\\\"").replace("\n", "\\n").replace("\r", "\\r")
 
     private fun ContentValues.putNullable(key: String, value: String?) {
         if (value == null) putNull(key) else put(key, value)
