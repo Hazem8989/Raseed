@@ -34,7 +34,7 @@ class SalesProfitRepository(context: Context) {
         val where = StringBuilder(" WHERE status IN ('POSTED','PARTIALLY_PAID','PAID')")
         val args = mutableListOf<String>()
         if (fromDate != null) {
-            where.append(" AND substr(updated_at,1,10)>=? AND substr(updated_at,1,10)<=?")
+            where.append(" AND substr(posted_at,1,10)>=? AND substr(posted_at,1,10)<=?")
             args.add(fromDate)
             args.add(throughDate!!)
         }
