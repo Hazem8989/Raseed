@@ -142,7 +142,7 @@ class StoreRepository(context: Context) {
             }
             val id = db.insertOrThrow("categories", null, values)
             insertAudit(db, actorUserId, "CREATE_CATEGORY", "CATEGORY", id.toString(), null,
-                "{\\"name\\":\\""+jsonEscape(clean)+"\\"}", now)
+                """{"name":"${jsonEscape(clean)}"}""", now)
             db.setTransactionSuccessful()
             return id
         } finally { db.endTransaction() }
@@ -188,7 +188,7 @@ class StoreRepository(context: Context) {
                 "SELECT name,purchase_cost_usd_cents,sale_price_usd_cents,track_inventory FROM products WHERE id=?",
                 arrayOf(productId)
             ).use { c ->
-                if (c.moveToFirst()) "{\\"name\\":\\""+jsonEscape(c.getString(0))+"\\",\\"purchase_cost_usd_cents\\":"+c.getLong(1)+",\\"sale_price_usd_cents\\":"+c.getLong(2)+",\\"track_inventory\\":"+c.getInt(3)+"}"
+                if (c.moveToFirst()) """{"name":"${jsonEscape(c.getString(0))}","purchase_cost_usd_cents":${c.getLong(1)},"sale_price_usd_cents":${c.getLong(2)},"track_inventory":${c.getInt(3)}}"""
                 else null
             } else null
             if (id != null) {
@@ -262,7 +262,7 @@ class StoreRepository(context: Context) {
                         purchaseCostUsdCents,"PRODUCT_SETUP",productId,now)
                 }
             }
-            val after = "{\\"name\\":\\""+jsonEscape(cleanName)+"\\",\\"purchase_cost_usd_cents\\":"+purchaseCostUsdCents+",\\"sale_price_usd_cents\\":"+salePriceUsdCents+",\\"track_inventory\\":"+(if (tracksInventory) 1 else 0)+",\\"opening_quantity\\":"+openingQuantity+"}"
+            val after = """{"name":"${jsonEscape(cleanName)}","purchase_cost_usd_cents":$purchaseCostUsdCents,"sale_price_usd_cents":$salePriceUsdCents,"track_inventory":${if (tracksInventory) 1 else 0},"opening_quantity":$openingQuantity}"""
             insertAudit(db, actorUserId, if (id == null) "CREATE_PRODUCT" else "UPDATE_PRODUCT",
                 "PRODUCT", productId, before, after, now)
             db.setTransactionSuccessful()
@@ -550,8 +550,8 @@ class StoreRepository(context: Context) {
             }
             require(db.update("products", values, "id=?", arrayOf(id)) == 1) { "المنتج المطلوب غير موجود" }
             insertAudit(db, actorUserId, if (active) "ACTIVATE_PRODUCT" else "DEACTIVATE_PRODUCT",
-                "PRODUCT", id, "{\\"name\\":\\""+jsonEscape(old.first)+"\\",\\"is_active\\":"+old.second+"}",
-                "{\\"name\\":\\""+jsonEscape(old.first)+"\\",\\"is_active\\":"+(if (active) 1 else 0)+"}", now)
+                "PRODUCT", id, """{"name":"${jsonEscape(old.first)}","is_active":${old.second}}""",
+                """{"name":"${jsonEscape(old.first)}","is_active":${if (active) 1 else 0}}""", now)
             db.setTransactionSuccessful()
         } finally { db.endTransaction() }
     }
