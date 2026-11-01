@@ -10,6 +10,7 @@ import java.io.DataOutputStream
 import java.io.File
 import java.io.FileInputStream
 import java.io.FileOutputStream
+import java.io.FilterOutputStream
 import java.io.InputStream
 import java.io.OutputStream
 import java.security.SecureRandom
@@ -113,9 +114,15 @@ class BackupRestoreManager(private val context: Context) {
         FileOutputStream(target).use { fileOut ->
             val buffered = BufferedOutputStream(fileOut)
             buffered.write(headerBytes)
-            CipherOutputStream(buffered, cipher).use { encryptedOut ->
+            val nonClosing = object : FilterOutputStream(buffered) {
+                override fun close() {
+                    flush()
+                }
+            }
+            CipherOutputStream(nonClosing, cipher).use { encryptedOut ->
                 FileInputStream(snapshot).use { input -> input.copyTo(encryptedOut) }
             }
+            buffered.flush()
             fileOut.fd.sync()
         }
     }
