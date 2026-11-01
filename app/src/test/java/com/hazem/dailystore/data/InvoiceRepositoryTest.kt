@@ -135,6 +135,27 @@ class InvoiceRepositoryTest {
     }
 
     @Test
+    fun fifoProfitReportUsesPostedRevenueAndCogsWithoutDoubleCountingCollections() {
+        val purchase = invoices.savePurchaseDraft(
+            "profit-fifo-purchase", null, null, "2026-10-31", 0, null,
+            listOf(InvoiceLineInput(productId, BigDecimal("5"), 200))
+        )
+        assertTrue(invoices.postPurchase(purchase.invoiceId, "profit-fifo-purchase-post"))
+        val sale = invoices.saveSalesDraft(
+            "profit-fifo-sale", null, null, "2026-10-31", 0, null,
+            listOf(InvoiceLineInput(productId, BigDecimal("12"), 250))
+        )
+        assertTrue(invoices.postCashSale(sale.invoiceId, "profit-fifo-sale-post", cashAccountId))
+        val report = SalesProfitRepository(RuntimeEnvironment.getApplication()).allTime()
+        assertTrue(report.isComplete)
+        assertEquals(1, report.invoiceCount)
+        assertEquals(3_000L, report.revenueUsdCents)
+        assertEquals(1_400L, report.cogsUsdCents)
+        assertEquals(1_600L, report.grossProfitUsdCents)
+        assertEquals(0, report.uncostedInvoiceCount)
+    }
+
+    @Test
     fun insufficientStockLeavesSaleDraftAndInventoryUnchanged() {
         val draft = invoices.saveSalesDraft(
             "sale-draft-op-2", null, null, "2026-10-31",
