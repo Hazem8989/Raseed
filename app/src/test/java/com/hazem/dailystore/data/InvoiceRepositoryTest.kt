@@ -180,7 +180,7 @@ class InvoiceRepositoryTest {
         AppDatabase.resetForTests(RuntimeEnvironment.getApplication(), deleteExisting = false)
         database = AppDatabase.getInstance(RuntimeEnvironment.getApplication())
         val upgraded = database.writableDatabase
-        assertEquals(9, upgraded.version)
+        assertEquals(11, upgraded.version)
         upgraded.rawQuery(
             "SELECT remaining_quantity FROM inventory_cost_layers WHERE product_id=?",
             arrayOf(productId)
