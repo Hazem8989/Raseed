@@ -99,31 +99,59 @@ class StoreRepository(context: Context) {
             "SELECT rate_syp_per_usd_milli FROM exchange_rates ORDER BY effective_at DESC, created_at DESC LIMIT 1", null
         ).use { c -> if (c.moveToFirst()) c.getLong(0) else 0L }
 
-    fun saveExchangeRate(rateSypPerUsd: BigDecimal): Long {
+    fun saveExchangeRate(rateSypPerUsd: BigDecimal, actorUserId: String): Long {
         require(rateSypPerUsd.signum() > 0) { "سعر الصرف يجب أن يكون أكبر من صفر" }
         val milli = rateSypPerUsd.multiply(BigDecimal.valueOf(1000))
             .setScale(0, RoundingMode.HALF_UP).longValueExact()
         require(milli > 0L) { "سعر الصرف غير صالح" }
+        val db = helper.writableDatabase
+        requireManager(db, actorUserId)
         val now = timestamp()
-        val values = ContentValues().apply {
-            put("id", UUID.randomUUID().toString())
-            put("currency_code", "USD")
-            put("rate_syp_per_usd_milli", milli)
-            put("effective_at", now)
-            put("created_at", now)
-        }
-        helper.writableDatabase.insertOrThrow("exchange_rates", null, values)
+        db.beginTransaction()
+        try {
+            val old = getCurrentExchangeRateMilli()
+            val values = ContentValues().apply {
+                put("id", UUID.randomUUID().toString())
+                put("currency_code", "USD")
+                put("rate_syp_per_usd_milli", milli)
+                put("effective_at", now)
+                put("created_at", now)
+            }
+            db.insertOrThrow("exchange_rates", null, values)
+            insertAudit(db, actorUserId, "UPDATE_EXCHANGE_RATE", "EXCHANGE_RATE", milli.toString(),
+                if (old > 0L) "{\\"rate_syp_per_usd_milli\\":$old}" else null,
+                "{\\"rate_syp_per_usd_milli\\":$milli}", now)
+            db.setTransactionSuccessful()
+        } finally { db.endTransaction() }
         return milli
     }
 
-    fun addCategory(name: String): Long {
+    fun addCategory(name: String, actorUserId: String): Long {
         val clean = name.trim()
         require(clean.isNotEmpty()) { "اسم التصنيف مطلوب" }
-        val values = ContentValues().apply {
-            put("name", clean)
-            put("created_at", timestamp())
-        }
-        return helper.writableDatabase.insertOrThrow("categories", null, values)
+        val db = helper.writableDatabase
+        requireManager(db, actorUserId)
+        val now = timestamp()
+        db.beginTransaction()
+        try {
+            requireManager(db, actorUserId)
+            val before = if (id != null) db.rawQuery(
+                "SELECT name,purchase_cost_usd_cents,sale_price_usd_cents,track_inventory FROM products WHERE id=?",
+                arrayOf(productId)
+            ).use { c ->
+                if (c.moveToFirst()) "{\\"name\\":\\""+jsonEscape(c.getString(0))+"\\",\\"purchase_cost_usd_cents\\":"+c.getLong(1)+",\\"sale_price_usd_cents\\":"+c.getLong(2)+",\\"track_inventory\\":"+c.getInt(3)+"}"
+                else null
+            } else null
+            val values = ContentValues().apply {
+                put("name", clean)
+                put("created_at", now)
+            }
+            val id = db.insertOrThrow("categories", null, values)
+            insertAudit(db, actorUserId, "CREATE_CATEGORY", "CATEGORY", id.toString(), null,
+                "{\\"name\\":\\""+jsonEscape(clean)+"\\"}", now)
+            db.setTransactionSuccessful()
+            return id
+        } finally { db.endTransaction() }
     }
 
     @Throws(SQLiteConstraintException::class, IllegalArgumentException::class)
@@ -137,7 +165,8 @@ class StoreRepository(context: Context) {
         purchaseCostUsdCents: Long,
         salePriceUsdCents: Long,
         tracksInventory: Boolean,
-        openingQuantity: Double
+        openingQuantity: Double,
+        actorUserId: String
     ): String {
         val cleanName = name.trim()
         require(cleanName.isNotEmpty()) { "اسم المنتج مطلوب" }
@@ -196,6 +225,9 @@ class StoreRepository(context: Context) {
                         purchaseCostUsdCents,"PRODUCT_SETUP",productId,now)
                 }
             }
+            val after = "{\\"name\\":\\""+jsonEscape(cleanName)+"\\",\\"purchase_cost_usd_cents\\":"+purchaseCostUsdCents+",\\"sale_price_usd_cents\\":"+salePriceUsdCents+",\\"track_inventory\\":"+(if (tracksInventory) 1 else 0)+",\\"opening_quantity\\":"+openingQuantity+"}"
+            insertAudit(db, actorUserId, if (id == null) "CREATE_PRODUCT" else "UPDATE_PRODUCT",
+                "PRODUCT", productId, before, after, now)
             db.setTransactionSuccessful()
         } finally {
             db.endTransaction()
@@ -209,6 +241,7 @@ class StoreRepository(context: Context) {
      */
     fun importProducts(rows: List<ProductImportRow>, exchangeRateMilli: Long, actorUserId: String): Int {
         require(actorUserId.isNotBlank()) { "جلسة المستخدم غير صالحة لتسجيل عملية الاستيراد" }
+        requireManager(helper.readableDatabase, actorUserId)
         require(rows.isNotEmpty()) { "لا توجد أصناف للاستيراد" }
         if (rows.any { it.usesSypPrices }) {
             require(exchangeRateMilli > 0L) {
@@ -370,6 +403,7 @@ class StoreRepository(context: Context) {
         val now = timestamp()
         db.beginTransaction()
         try {
+            requireManager(db, actorUserId)
             val product = db.rawQuery(
                 """SELECT p.track_inventory,p.purchase_cost_usd_cents,u.decimal_places
                    FROM products p JOIN units u ON u.id=p.unit_id WHERE p.id=?""".trimIndent(),
@@ -462,13 +496,26 @@ class StoreRepository(context: Context) {
             arrayOf(productId)
         ).use { it.moveToFirst() }
 
-    fun setProductActive(id: String, active: Boolean) {
-        val values = ContentValues().apply {
-            put("is_active", if (active) 1 else 0)
-            put("updated_at", timestamp())
-        }
-        val changed = helper.writableDatabase.update("products", values, "id=?", arrayOf(id))
-        require(changed == 1) { "المنتج المطلوب غير موجود" }
+    fun setProductActive(id: String, active: Boolean, actorUserId: String) {
+        val db = helper.writableDatabase
+        requireManager(db, actorUserId)
+        db.beginTransaction()
+        try {
+            val old = db.rawQuery("SELECT name,is_active FROM products WHERE id=?", arrayOf(id)).use {
+                require(it.moveToFirst()) { "المنتج المطلوب غير موجود" }
+                it.getString(0) to it.getInt(1)
+            }
+            val now = timestamp()
+            val values = ContentValues().apply {
+                put("is_active", if (active) 1 else 0)
+                put("updated_at", now)
+            }
+            require(db.update("products", values, "id=?", arrayOf(id)) == 1) { "المنتج المطلوب غير موجود" }
+            insertAudit(db, actorUserId, if (active) "ACTIVATE_PRODUCT" else "DEACTIVATE_PRODUCT",
+                "PRODUCT", id, "{\\"name\\":\\""+jsonEscape(old.first)+"\\",\\"is_active\\":"+old.second+"}",
+                "{\\"name\\":\\""+jsonEscape(old.first)+"\\",\\"is_active\\":"+(if (active) 1 else 0)+"}", now)
+            db.setTransactionSuccessful()
+        } finally { db.endTransaction() }
     }
 
     fun listProducts(): List<StoreProduct> {
@@ -490,6 +537,31 @@ class StoreRepository(context: Context) {
         }
         return result
     }
+
+    private fun requireManager(db: android.database.sqlite.SQLiteDatabase, actorUserId: String) {
+        require(actorUserId.isNotBlank()) { "جلسة المدير غير صالحة" }
+        val allowed = db.rawQuery(
+            "SELECT 1 FROM users WHERE id=? AND role_key='ADMIN' AND is_active=1 AND must_change_password=0",
+            arrayOf(actorUserId)
+        ).use { it.moveToFirst() }
+        require(allowed) { "هذا الإجراء متاح لمدير نشط أكمل تغيير كلمة المرور فقط" }
+    }
+
+    private fun insertAudit(
+        db: android.database.sqlite.SQLiteDatabase, actor: String, action: String,
+        entityType: String, entityId: String, before: String?, after: String, now: String
+    ) {
+        val values = ContentValues().apply {
+            put("id", UUID.randomUUID().toString()); put("user_id", actor)
+            put("action", action); put("entity_type", entityType); put("entity_id", entityId)
+            if (before == null) putNull("before_json") else put("before_json", before)
+            put("after_json", after); put("created_at", now)
+        }
+        db.insertOrThrow("audit_log", null, values)
+    }
+
+    private fun jsonEscape(value: String): String = value.replace("\\", "\\\\")
+        .replace("\\\"", "\\\\\"").replace("\\n", "\\\\n").replace("\\r", "\\\\r")
 
     private fun ContentValues.putNullable(key: String, value: String?) {
         if (value == null) putNull(key) else put(key, value)
