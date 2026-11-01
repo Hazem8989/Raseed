@@ -353,8 +353,15 @@ class InvoiceRepository(context: Context) {
                 db.insertOrThrow("invoice_payments", null, payment)
             }
             val finalStatus = if (type == "SALE" && cashReceipt != null) "PAID" else "POSTED"
-            db.execSQL("UPDATE $table SET status=?,updated_at=? WHERE id=? AND status='DRAFT'",
-                arrayOf(finalStatus, now, invoiceId))
+            if (type == "SALE") {
+                db.execSQL(
+                    "UPDATE sales_invoices SET status=?,updated_at=?,posted_at=? WHERE id=? AND status='DRAFT'",
+                    arrayOf(finalStatus, now, now, invoiceId)
+                )
+            } else {
+                db.execSQL("UPDATE purchase_invoices SET status=?,updated_at=? WHERE id=? AND status='DRAFT'",
+                    arrayOf(finalStatus, now, invoiceId))
+            }
             registerOperation(db, operationId, operationType, payloadHash, invoiceId, now)
             db.setTransactionSuccessful()
             return true
