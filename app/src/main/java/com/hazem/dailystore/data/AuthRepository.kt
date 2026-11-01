@@ -147,7 +147,9 @@ class AuthRepository(context: Context) {
         val cleanDisplayName = displayName.trim()
         require(cleanUsername.length >= 3) { "اسم المستخدم يجب ألا يقل عن 3 أحرف" }
         require(cleanDisplayName.isNotEmpty()) { "اسم العرض مطلوب" }
-        require(isStrongPassword(password)) { "كلمة المرور يجب أن تتكون من 10 أحرف على الأقل وتتضمن حرفاً ورقماً" }
+        require(if (mustChangePassword && actorUserId == null) password.length >= 4 else isStrongPassword(password)) {
+            "كلمة المرور يجب أن تتكون من 10 أحرف على الأقل وتتضمن حرفاً ورقماً"
+        }
         require(roleKey in setOf("ADMIN", "CASHIER")) { "صلاحية المستخدم غير صالحة" }
         val saltBytes = ByteArray(16).also { SecureRandom().nextBytes(it) }
         val salt = Base64.encodeToString(saltBytes, Base64.NO_WRAP)
