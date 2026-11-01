@@ -39,6 +39,7 @@ class AuthRepositoryTest {
 
     @Test fun managerCanCreateCashierButCashierCannotCreateUsers() {
         val admin = auth.authenticate("admin", "1234")!!
+        auth.changePassword(admin.id, "1234", "ManagerPass2026")
         val cashierId = auth.createUser(admin.roleKey, admin.id,
             "cashier1", "موظف الصندوق", "Cashier5678", "CASHIER")
         assertEquals("CASHIER", auth.authenticate("cashier1", "Cashier5678")!!.roleKey)
@@ -63,6 +64,7 @@ class AuthRepositoryTest {
 
     @Test fun weakPasswordsAreRejected() {
         val admin = auth.authenticate("admin", "1234")!!
+        auth.changePassword(admin.id, "1234", "ManagerPass2026")
         try {
             auth.createUser(admin.roleKey, admin.id, "weakuser", "مستخدم ضعيف", "123456", "CASHIER")
             fail("Weak password must be rejected")
