@@ -178,8 +178,9 @@ class StoreRepository(context: Context) {
                         put("updated_at", now)
                     }
                     db.insertOrThrow("inventory_balances", null, balance)
+                    val movementId = UUID.randomUUID().toString()
                     val movement = ContentValues().apply {
-                        put("id", UUID.randomUUID().toString())
+                        put("id", movementId)
                         put("product_id", productId)
                         put("warehouse_id", warehouseId)
                         put("movement_type", "OPENING")
@@ -191,6 +192,8 @@ class StoreRepository(context: Context) {
                         put("created_at", now)
                     }
                     db.insertOrThrow("inventory_movements", null, movement)
+                    FifoCosting.addLayer(db,movementId,productId,warehouseId,openingQuantity,
+                        purchaseCostUsdCents,"PRODUCT_SETUP",productId,now)
                 }
             }
             db.setTransactionSuccessful()
@@ -416,8 +419,9 @@ class StoreRepository(context: Context) {
                 }
                 db.insertOrThrow("inventory_balances", null, balance)
             }
+            val movementId = UUID.randomUUID().toString()
             val movement = ContentValues().apply {
-                put("id", UUID.randomUUID().toString())
+                put("id", movementId)
                 put("product_id", productId)
                 put("warehouse_id", warehouseId)
                 put("movement_type", "OPENING")
@@ -431,6 +435,8 @@ class StoreRepository(context: Context) {
                 put("created_at", now)
             }
             db.insertOrThrow("inventory_movements", null, movement)
+            FifoCosting.addLayer(db,movementId,productId,warehouseId,quantity,
+                product.second,"STOCKTAKE_OPENING",productId,now)
             val audit = ContentValues().apply {
                 put("id", UUID.randomUUID().toString())
                 put("user_id", actorUserId)
