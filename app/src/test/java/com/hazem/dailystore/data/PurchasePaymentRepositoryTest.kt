@@ -37,6 +37,7 @@ class PurchasePaymentRepositoryTest {
         val auth = AuthRepository(context)
         auth.ensureInitialAdmin()
         adminId = auth.authenticate("admin", "1234")!!.id
+        auth.changePassword(adminId, "1234", "TestAdmin123")
         // Keep this test fixture independent from exchange-rate rows left by other tests.
         database.writableDatabase.delete("exchange_rates", null, null)
         val invoiceFx = ContentValues().apply {
