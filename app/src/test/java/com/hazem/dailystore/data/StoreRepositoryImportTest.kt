@@ -39,7 +39,9 @@ class StoreRepositoryImportTest {
             put("display_name", "Import test")
             put("password_hash", "test-hash")
             put("password_salt", "test-salt")
-            put("role_key", "MANAGER")
+            put("role_key", "ADMIN")
+            put("is_active", 1)
+            put("must_change_password", 0)
             put("created_at", now)
             put("updated_at", now)
         }
