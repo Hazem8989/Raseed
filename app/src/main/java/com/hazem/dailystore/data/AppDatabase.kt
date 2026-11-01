@@ -43,6 +43,7 @@ class AppDatabase private constructor(context: Context) :
         db.beginTransaction()
         try {
             SCHEMA.forEach(db::execSQL)
+            ensureFifoSchema(db)
             db.execSQL(
                 """INSERT INTO app_settings(setting_key, setting_value, updated_at)
                    VALUES('base_currency', 'USD', strftime('%Y-%m-%dT%H:%M:%fZ','now'))"""
@@ -285,14 +286,106 @@ class AppDatabase private constructor(context: Context) :
                 db.endTransaction()
             }
         }
+        if (version < 9) {
+            db.beginTransaction()
+            try {
+                ensureFifoSchema(db)
+                backfillFifoCostLayers(db)
+                db.setTransactionSuccessful()
+                version = 9
+            } finally {
+                db.endTransaction()
+            }
+        }
         if (version != newVersion) {
             throw IllegalStateException("Missing database migration from version $version to $newVersion")
         }
     }
 
+    private fun ensureFifoSchema(db: SQLiteDatabase) {
+        var hasCogsColumn = false
+        db.rawQuery("PRAGMA table_info(sales_items)", null).use { c ->
+            while (c.moveToNext()) if (c.getString(1) == "cogs_usd_cents") hasCogsColumn = true
+        }
+        if (!hasCogsColumn) {
+            db.execSQL("ALTER TABLE sales_items ADD COLUMN cogs_usd_cents INTEGER CHECK(cogs_usd_cents IS NULL OR cogs_usd_cents >= 0)")
+        }
+        db.execSQL("""
+            CREATE TABLE IF NOT EXISTS inventory_cost_layers (
+                id TEXT PRIMARY KEY NOT NULL,
+                product_id TEXT NOT NULL,
+                warehouse_id TEXT NOT NULL,
+                source_movement_id TEXT NOT NULL UNIQUE,
+                source_type TEXT,
+                source_id TEXT,
+                received_quantity REAL NOT NULL CHECK(received_quantity > 0),
+                remaining_quantity REAL NOT NULL CHECK(remaining_quantity >= 0 AND remaining_quantity <= received_quantity),
+                unit_cost_usd_cents INTEGER CHECK(unit_cost_usd_cents IS NULL OR unit_cost_usd_cents > 0),
+                purchase_exchange_rate_syp_per_usd_milli INTEGER,
+                received_at TEXT NOT NULL,
+                FOREIGN KEY(product_id) REFERENCES products(id) ON UPDATE RESTRICT ON DELETE RESTRICT,
+                FOREIGN KEY(warehouse_id) REFERENCES warehouses(id) ON UPDATE RESTRICT ON DELETE RESTRICT,
+                FOREIGN KEY(source_movement_id) REFERENCES inventory_movements(id) ON UPDATE RESTRICT ON DELETE RESTRICT
+            )
+        """.trimIndent())
+        db.execSQL("""
+            CREATE TABLE IF NOT EXISTS sales_item_cost_allocations (
+                id TEXT PRIMARY KEY NOT NULL,
+                sales_invoice_id TEXT NOT NULL,
+                sales_item_id TEXT,
+                cost_layer_id TEXT NOT NULL,
+                quantity REAL NOT NULL CHECK(quantity > 0),
+                unit_cost_usd_cents INTEGER CHECK(unit_cost_usd_cents IS NULL OR unit_cost_usd_cents > 0),
+                cost_usd_cents INTEGER CHECK(cost_usd_cents IS NULL OR cost_usd_cents >= 0),
+                created_at TEXT NOT NULL,
+                FOREIGN KEY(sales_invoice_id) REFERENCES sales_invoices(id) ON UPDATE RESTRICT ON DELETE RESTRICT,
+                FOREIGN KEY(sales_item_id) REFERENCES sales_items(id) ON UPDATE RESTRICT ON DELETE RESTRICT,
+                FOREIGN KEY(cost_layer_id) REFERENCES inventory_cost_layers(id) ON UPDATE RESTRICT ON DELETE RESTRICT
+            )
+        """.trimIndent())
+        db.execSQL("CREATE INDEX IF NOT EXISTS idx_fifo_layers_available ON inventory_cost_layers(product_id,warehouse_id,received_at)")
+        db.execSQL("CREATE INDEX IF NOT EXISTS idx_fifo_allocations_invoice ON sales_item_cost_allocations(sales_invoice_id,sales_item_id)")
+    }
+
+    private fun backfillFifoCostLayers(db: SQLiteDatabase) {
+        data class Movement(
+            val id: String, val productId: String, val warehouseId: String,
+            val type: String, val delta: Double, val unitCost: Long,
+            val sourceType: String?, val sourceId: String?,
+            val operationId: String?, val createdAt: String
+        )
+        val movements = mutableListOf<Movement>()
+        db.rawQuery(
+            """SELECT id,product_id,warehouse_id,movement_type,quantity_delta,
+                      unit_cost_usd_cents,source_type,source_id,operation_id,created_at
+               FROM inventory_movements ORDER BY created_at ASC,rowid ASC""".trimIndent(), null
+        ).use { c ->
+            while (c.moveToNext()) movements.add(
+                Movement(c.getString(0),c.getString(1),c.getString(2),c.getString(3),
+                    c.getDouble(4),c.getLong(5),if(c.isNull(6)) null else c.getString(6),
+                    if(c.isNull(7)) null else c.getString(7),
+                    if(c.isNull(8)) null else c.getString(8),c.getString(9))
+            )
+        }
+        movements.forEach { movement ->
+            if (movement.delta > 0.0) {
+                FifoCosting.addLayer(db,movement.id,movement.productId,movement.warehouseId,
+                    movement.delta,movement.unitCost,movement.sourceType,movement.sourceId,movement.createdAt)
+            } else {
+                val salesItemId = if (movement.type == "SALE") {
+                    movement.operationId?.substringAfterLast(':')?.takeIf { it.isNotBlank() }
+                } else null
+                FifoCosting.consumeForSale(
+                    db,movement.sourceId ?: error("حركة مخزون سالبة بلا مرجع مصدر: ${movement.id}"),
+                    salesItemId,movement.productId,movement.warehouseId,-movement.delta,movement.createdAt
+                )
+            }
+        }
+    }
+
     companion object {
         const val DATABASE_NAME = "the_daily_shop.db"
-        const val DATABASE_VERSION = 8
+        const val DATABASE_VERSION = 9
 
         @Volatile
         private var INSTANCE: AppDatabase? = null
