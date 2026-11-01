@@ -19,16 +19,17 @@ Main branch is protected from this work and must not be modified.
 - Keep warehouse identifiers and stock movement design compatible with multiple warehouses later.
 - Do not introduce multi-warehouse UI or transfer workflows in the current phase unless separately approved.
 
-### Offline-first and synchronization
-- The app must remain fully usable for supported local workflows while offline.
-- Prepare the synchronization architecture now; do not defer the data model and operation semantics until a later release.
-- A synchronization-ready local architecture is not the same as a live cloud sync service. Server deployment/provider and multi-device rollout remain separate decisions.
-- Use stable globally unique entity and operation IDs, an outbox/sync queue, retry-safe idempotency, per-entity versions or equivalent concurrency tokens, sync cursors, and explicit conflict records.
-- Keep local business transactions atomic. A committed local operation should enqueue its sync event in the same local database transaction.
-- Define deterministic conflict policies by entity type. Never silently overwrite financial, invoice, inventory, or audit history.
-- Support retry with backoff, resumable sync, duplicate delivery, partial failure, and device clock differences. Prefer server-issued ordering/versions where available; local timestamps alone must not decide financial conflicts.
-- Keep credentials and server secrets out of the client app. Plan authenticated transport and authorization before enabling remote sync.
-- Sync must preserve operation provenance, actor/device identity, and audit history.
+### Offline-first synchronization — owner-phone primary, no hosted store
+- The owner's Android phone is the single authoritative primary node and holds the canonical SQLite database. Staff phones are enrolled client nodes with local offline queues.
+- No hosted database, cloud file storage, hosted business API, or third-party data repository is approved. Business records, credentials, and backups must remain on owner-controlled devices/storage.
+- The primary phone may use Wi-Fi or mobile data. Staff devices may use any internet connection. The store ADSL router is an optional local-network path only; it is not the server and does not hold business data.
+- Prefer authenticated direct peer-to-peer transport. Do not silently introduce a cloud relay. Any minimal rendezvous/STUN assistance, if later required for NAT traversal, must be separately disclosed and approved; it must not carry or store business payloads.
+- Direct reachability over mobile networks is not guaranteed: carrier CGNAT, symmetric NAT, changing IP addresses, Android background limits, battery optimization, and the primary phone being offline can prevent live connections. In those cases devices queue operations locally and synchronize only when the primary is reachable. Do not claim real-time multi-device operation while it is unreachable.
+- The primary phone is authoritative for final financial posting, stock allocation, device enrollment, role/permission changes, and conflict decisions. Client-side provisional transactions must be clearly pending until acknowledged by the primary.
+- Use stable globally unique operation/entity/device IDs, atomic outbox enqueue, idempotent replay, per-entity versions, primary-issued sequence numbers, sync cursors, retry/backoff, and explicit conflict records.
+- Never resolve financial, invoice, inventory, wallet, or audit conflicts by last-write-wins. Preserve both payloads and require deterministic validation or owner review.
+- Keep credentials and cryptographic keys out of source control. Use authenticated encrypted transport and per-device revocation.
+- Sync must preserve actor/device provenance and audit history. See SYNC_ARCHITECTURE_DECISION.md for the staged implementation and network constraints.
 
 ### Sales and exchange-rate rules
 - Product sale price in USD is the manually maintained reference price.
