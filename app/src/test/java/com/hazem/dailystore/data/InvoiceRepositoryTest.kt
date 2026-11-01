@@ -95,6 +95,46 @@ class InvoiceRepositoryTest {
     }
 
     @Test
+    fun saleConsumesOldestFifoLayersAndPersistsExactCogsAllocations() {
+        val purchase = invoices.savePurchaseDraft(
+            "fifo-purchase-draft", null, null, "2026-10-31", 0, null,
+            listOf(InvoiceLineInput(productId, BigDecimal("5"), 200))
+        )
+        assertTrue(invoices.postPurchase(purchase.invoiceId, "fifo-purchase-post"))
+
+        val sale = invoices.saveSalesDraft(
+            "fifo-sale-draft", null, null, "2026-10-31", 0, null,
+            listOf(InvoiceLineInput(productId, BigDecimal("12"), 250))
+        )
+        assertTrue(invoices.postCashSale(sale.invoiceId, "fifo-sale-post", cashAccountId))
+        // The product starts with 10 units at 100 cents, then receives 5 at 200 cents.
+        // Selling 12 therefore consumes 10*100 + 2*200 = 1,400 cents.
+        database.readableDatabase.rawQuery(
+            "SELECT cogs_usd_cents FROM sales_items WHERE sales_invoice_id=?",
+            arrayOf(sale.invoiceId)
+        ).use { c -> assertTrue(c.moveToFirst()); assertEquals(1_400L, c.getLong(0)) }
+        database.readableDatabase.rawQuery(
+            "SELECT COUNT(*),SUM(quantity),SUM(cost_usd_cents) FROM sales_item_cost_allocations WHERE sales_invoice_id=?",
+            arrayOf(sale.invoiceId)
+        ).use { c ->
+            assertTrue(c.moveToFirst())
+            assertEquals(2, c.getInt(0))
+            assertEquals(12.0, c.getDouble(1), 0.000001)
+            assertEquals(1_400L, c.getLong(2))
+        }
+        database.readableDatabase.rawQuery(
+            "SELECT remaining_quantity FROM inventory_cost_layers WHERE source_type='PURCHASE_INVOICE' AND source_id=?",
+            arrayOf(purchase.invoiceId)
+        ).use { c -> assertTrue(c.moveToFirst()); assertEquals(3.0, c.getDouble(0), 0.000001) }
+        // A retry must not consume the same FIFO layers a second time.
+        assertFalse(invoices.postCashSale(sale.invoiceId, "fifo-sale-post", cashAccountId))
+        database.readableDatabase.rawQuery(
+            "SELECT SUM(remaining_quantity) FROM inventory_cost_layers WHERE product_id=?",
+            arrayOf(productId)
+        ).use { c -> assertTrue(c.moveToFirst()); assertEquals(3.0, c.getDouble(0), 0.000001) }
+    }
+
+    @Test
     fun insufficientStockLeavesSaleDraftAndInventoryUnchanged() {
         val draft = invoices.saveSalesDraft(
             "sale-draft-op-2", null, null, "2026-10-31",
