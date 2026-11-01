@@ -38,6 +38,8 @@ class DailyBalanceRepositoryTest {
     @After fun tearDown() { database.close() }
 
     @Test fun walletSalesAndDebtCollectionsBothAppearInLiquidatableElectronicReceipts() {
+        // The report groups physical receipts by currencies that have an active cash box.
+        accounts.create("درج تقرير " + UUID.randomUUID(), "CASH_BOX", "SYP", 0L)
         val wallet = accounts.create("محفظة تقرير " + UUID.randomUUID(), "WALLET", "SYP", 0L)
         insertMovement(wallet.id, "SALE_RECEIPT", 40_000L, "sale-report")
         insertMovement(wallet.id, "CUSTOMER_CREDIT_COLLECTION", 20_000L, "debt-report")
