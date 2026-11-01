@@ -377,7 +377,8 @@ class AppDatabase private constructor(context: Context) :
                 } else null
                 FifoCosting.consumeForSale(
                     db,movement.sourceId ?: error("حركة مخزون سالبة بلا مرجع مصدر: ${movement.id}"),
-                    salesItemId,movement.productId,movement.warehouseId,-movement.delta,movement.createdAt
+                    salesItemId,movement.productId,movement.warehouseId,-movement.delta,movement.createdAt,
+                    recordSaleAllocation = movement.type == "SALE"
                 )
             }
         }
