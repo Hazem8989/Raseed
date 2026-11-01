@@ -23,13 +23,14 @@ class CashAccountRepositoryTest {
         val auth = AuthRepository(context)
         auth.ensureInitialAdmin()
         adminId = auth.authenticate("admin", "1234")!!.id
+        auth.changePassword(adminId, "1234", "TestAdmin123")
         accounts = CashAccountRepository(context)
     }
 
     @After fun tearDown() { database.close() }
 
     @Test fun managerCanRenameAccountAndAuditChange() {
-        val account = accounts.create("محفظة قديمة ${UUID.randomUUID()}", "WALLET", "USD", 1200L)
+        val account = accounts.create(adminId, "محفظة قديمة ${UUID.randomUUID()}", "WALLET", "USD", 1200L)
         accounts.updateDetails("ADMIN", adminId, account.id, "المحفظة الرئيسية", "WALLET", "USD")
         assertEquals("المحفظة الرئيسية", accounts.listAll().first { it.id == account.id }.name)
         database.readableDatabase.rawQuery(
@@ -45,7 +46,7 @@ class CashAccountRepositoryTest {
     }
 
     @Test fun accountCurrencyCannotChangeAfterOpeningBalanceExists() {
-        val account = accounts.create("محفظة برصيد ${UUID.randomUUID()}", "WALLET", "USD", 1000L)
+        val account = accounts.create(adminId, "محفظة برصيد ${UUID.randomUUID()}", "WALLET", "USD", 1000L)
         try {
             accounts.updateDetails("ADMIN", adminId, account.id, account.name, "WALLET", "SYP")
             fail("Currency change must be rejected because opening balance is non-zero")
@@ -54,7 +55,7 @@ class CashAccountRepositoryTest {
     }
 
     @Test fun supplierRolloverAccountCannotAlsoBeTheDailySalesDrawer() {
-        val supplierCash = accounts.create("صندوق موردين " + UUID.randomUUID(), "CASH_BOX", "SYP", 50000L)
+        val supplierCash = accounts.create(adminId, "صندوق موردين " + UUID.randomUUID(), "CASH_BOX", "SYP", 50000L)
         DailyBalanceRepository(RuntimeEnvironment.getApplication())
             .setSupplierRollover(adminId, supplierCash.id, 30000L, "فصل الصناديق")
         try {
@@ -67,7 +68,7 @@ class CashAccountRepositoryTest {
     }
 
     @Test fun nonManagerCannotEditAccount() {
-        val account = accounts.create("محفظة اختبار ${UUID.randomUUID()}", "WALLET", "USD", 0L)
+        val account = accounts.create(adminId, "محفظة اختبار ${UUID.randomUUID()}", "WALLET", "USD", 0L)
         try {
             accounts.updateDetails("CASHIER", "cashier-id", account.id, "اسم جديد", "WALLET", "USD")
             fail("Cashier must not edit accounts")
