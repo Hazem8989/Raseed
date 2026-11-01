@@ -61,8 +61,21 @@ jobs:
           echo "sdk.dir=$ANDROID_SDK_ROOT" > local.properties
           /tmp/gradle-8.9/bin/gradle --no-daemon clean testDebugUnitTest
 
+      - name: Detect configured release signing
+        env:
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          if [[ -n "$ANDROID_KEYSTORE_BASE64" && -n "$ANDROID_KEYSTORE_PASSWORD" && -n "$ANDROID_KEY_ALIAS" && -n "$ANDROID_KEY_PASSWORD" ]]; then
+            echo "HAS_RELEASE_SIGNING=true" >> "$GITHUB_ENV"
+          else
+            echo "HAS_RELEASE_SIGNING=false" >> "$GITHUB_ENV"
+          fi
+
       - name: Build permanently signed release APK
-        if: ${{ secrets.ANDROID_KEYSTORE_BASE64 != '' && secrets.ANDROID_KEYSTORE_PASSWORD != '' && secrets.ANDROID_KEY_ALIAS != '' && secrets.ANDROID_KEY_PASSWORD != '' }}
+        if: ${{ env.HAS_RELEASE_SIGNING == 'true' }}
         env:
           ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
           ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
@@ -83,7 +96,7 @@ jobs:
           echo "APK_KIND=stable-release-signed" >> "$GITHUB_ENV"
 
       - name: Build development debug APK (not suitable for upgrading release installs)
-        if: ${{ !(secrets.ANDROID_KEYSTORE_BASE64 != '' && secrets.ANDROID_KEYSTORE_PASSWORD != '' && secrets.ANDROID_KEY_ALIAS != '' && secrets.ANDROID_KEY_PASSWORD != '') }}
+        if: ${{ env.HAS_RELEASE_SIGNING != 'true' }}
         env:
           APP_VERSION_NAME: ${{ vars.APP_VERSION_NAME }}
         run: |
