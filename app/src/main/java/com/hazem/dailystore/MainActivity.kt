@@ -30,6 +30,7 @@ import android.widget.Toast
 import android.content.ContentValues
 import com.hazem.dailystore.data.AppDatabase
 import com.hazem.dailystore.data.AuthRepository
+import com.hazem.dailystore.data.SecureSessionStore
 import com.hazem.dailystore.data.CurrencyConverter
 import com.hazem.dailystore.data.StoreRepository
 import com.hazem.dailystore.data.InvoiceRepository
@@ -173,7 +174,6 @@ class MainActivity : Activity() {
 
     override fun onSaveInstanceState(outState: Bundle) {
         persistSessionState()
-        outState.putString(STATE_USER_ID, currentUserId)
         outState.putString(STATE_SCREEN, activeScreenKey)
         outState.putString(STATE_SCREEN_ARGUMENT, activeScreenArgument)
         outState.putString(STATE_CART, serializeCart())
@@ -203,8 +203,7 @@ class MainActivity : Activity() {
             .putString(SESSION_SCREEN, activeScreenKey)
             .putString(SESSION_SCREEN_ARGUMENT, activeScreenArgument)
             .putString(SESSION_CART, serializeCart())
-        if (!currentUserId.isNullOrBlank()) editor.putString(SESSION_USER_ID, currentUserId)
-        else editor.remove(SESSION_USER_ID)
+        SecureSessionStore.save(this, currentUserId)
         if (pendingCheckoutDraftId != null) editor.putString(SESSION_CHECKOUT_DRAFT, pendingCheckoutDraftId)
         else editor.remove(SESSION_CHECKOUT_DRAFT)
         editor.apply()
@@ -219,7 +218,7 @@ class MainActivity : Activity() {
     }
 
     private fun restoreSession(state: Bundle?): Boolean {
-        val userId = state?.getString(STATE_USER_ID) ?: sessionPrefs.getString(SESSION_USER_ID, null) ?: return false
+        val userId = SecureSessionStore.load(this) ?: return false
         val user = AuthRepository(this).restoreActiveSession(userId) ?: return false
         if (user.mustChangePassword) return false
         currentUserId = user.id
@@ -293,6 +292,7 @@ class MainActivity : Activity() {
         activeScreenArgument = null
         cart.clear()
         sessionPrefs.edit().clear().apply()
+        SecureSessionStore.clear(this)
     }
 
     private fun showLoginScreen() {
@@ -344,8 +344,9 @@ class MainActivity : Activity() {
                     } else {
                         currentUserId = authenticated.id
                         currentUserRole = authenticated.roleKey
-                        sessionPrefs.edit().putString(SESSION_USER_ID, authenticated.id)
-                            .putString(SESSION_SCREEN, "POS").putString(SESSION_CART, "[]").apply()
+                        SecureSessionStore.save(this@MainActivity, authenticated.id)
+                        sessionPrefs.edit().putString(SESSION_SCREEN, "POS")
+                            .putString(SESSION_CART, "[]").apply()
                         showPointOfSale()
                     }
                 } else Toast.makeText(
@@ -407,8 +408,9 @@ class MainActivity : Activity() {
                     AuthRepository(this).changePassword(user.id, currentPassword, proposed)
                     currentUserId = user.id
                     currentUserRole = user.roleKey
-                    sessionPrefs.edit().putString(SESSION_USER_ID, user.id)
-                        .putString(SESSION_SCREEN, "POS").putString(SESSION_CART, "[]").apply()
+                    SecureSessionStore.save(this@MainActivity, user.id)
+                    sessionPrefs.edit().putString(SESSION_SCREEN, "POS")
+                        .putString(SESSION_CART, "[]").apply()
                     dialog.dismiss()
                     showPointOfSale()
                 } catch (e: IllegalArgumentException) {
@@ -3281,7 +3283,6 @@ class MainActivity : Activity() {
         }
 
     companion object {
-        private const val SESSION_USER_ID = "user_id"
         private const val SESSION_SCREEN = "screen_key"
         private const val SESSION_SCREEN_ARGUMENT = "screen_argument"
         private const val SESSION_CART = "pos_cart"
