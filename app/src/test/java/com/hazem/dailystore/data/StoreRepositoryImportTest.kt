@@ -111,4 +111,28 @@ class StoreRepositoryImportTest {
         assertTrue("An uncosted tracked product must not be imported", rejected)
         assertFalse(repository.listProducts().any { it.name == productName })
     }
+    @Test
+    fun allowsZeroCostOnlyForProductsThatDoNotTrackInventory() {
+        val row = ProductImportRow(
+            rowNumber = 2,
+            name = productName,
+            category = categoryName,
+            unit = "قطعة",
+            purchaseCostSyp = 0L,
+            salePriceSyp = 22_500L,
+            purchaseCostUsdCents = null,
+            salePriceUsdCents = null,
+            sku = null,
+            barcode = null,
+            tracksInventory = false
+        )
+
+        assertEquals(1, repository.importProducts(listOf(row), 15_000_000L, actorId))
+        val imported = repository.listProducts().single { it.name == productName }
+        assertEquals(0L, imported.purchaseCostUsdCents)
+        assertEquals(150L, imported.salePriceUsdCents)
+        assertFalse(imported.tracksInventory)
+        assertEquals(0.0, imported.stock, 0.000001)
+    }
+
 }
