@@ -25,6 +25,7 @@ class AuthRepositoryTest {
         val user = auth.authenticate("admin", "1234")
         assertNotNull(user)
         assertEquals("ADMIN", user!!.roleKey)
+        assertTrue(user.mustChangePassword)
         database.readableDatabase.rawQuery(
             "SELECT password_hash,password_salt FROM users WHERE id=?", arrayOf(user.id)
         ).use {
@@ -39,11 +40,32 @@ class AuthRepositoryTest {
     @Test fun managerCanCreateCashierButCashierCannotCreateUsers() {
         val admin = auth.authenticate("admin", "1234")!!
         val cashierId = auth.createUser(admin.roleKey, admin.id,
-            "cashier1", "موظف الصندوق", "5678", "CASHIER")
-        assertEquals("CASHIER", auth.authenticate("cashier1", "5678")!!.roleKey)
+            "cashier1", "موظف الصندوق", "Cashier5678", "CASHIER")
+        assertEquals("CASHIER", auth.authenticate("cashier1", "Cashier5678")!!.roleKey)
         try {
-            auth.createUser("CASHIER", cashierId, "cashier2", "موظف آخر", "6789", "CASHIER")
+            auth.createUser("CASHIER", cashierId, "cashier2", "موظف آخر", "Cashier6789", "CASHIER")
             fail("Cashier must not create users")
+        } catch (_: IllegalArgumentException) { }
+    }
+
+    @Test fun temporaryAdminPasswordMustBeChangedBeforeSessionCanBeRestored() {
+        val admin = auth.authenticate("admin", "1234")!!
+        assertTrue(admin.mustChangePassword)
+        try {
+            auth.changePassword(admin.id, "wrong", "SecurePass2026")
+            fail("Wrong current password must be rejected")
+        } catch (_: IllegalArgumentException) { }
+        auth.changePassword(admin.id, "1234", "SecurePass2026")
+        val updated = auth.authenticate("admin", "SecurePass2026")!!
+        assertFalse(updated.mustChangePassword)
+        assertNull(auth.authenticate("admin", "1234"))
+    }
+
+    @Test fun weakPasswordsAreRejected() {
+        val admin = auth.authenticate("admin", "1234")!!
+        try {
+            auth.createUser(admin.roleKey, admin.id, "weakuser", "مستخدم ضعيف", "123456", "CASHIER")
+            fail("Weak password must be rejected")
         } catch (_: IllegalArgumentException) { }
     }
 
