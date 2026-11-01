@@ -1893,12 +1893,14 @@ class MainActivity : Activity() {
         content.addView(label("الحسابات المالية", 22f, green, true, Gravity.RIGHT))
         content.addView(label("الحسابات الأساسية تُنشأ وتُربط تلقائياً: درج البيع اليومي، صندوق الموردين المدور، صندوق شراء رصيد الخدمات، ومحفظتا سيرياتيل وشام كاش. يمكنك إضافة حسابات أخرى عند الحاجة.",
             13f, mutedColor, false, Gravity.RIGHT).apply { setPadding(0, dp(5), 0, dp(12)) })
-        val add = Button(this).apply {
-            text = "+ إضافة صندوق أو محفظة"; isAllCaps = false
-            setTextColor(Color.WHITE); setBackgroundColor(green)
-            setOnClickListener { showCreateCashAccountDialog() }
+        if (isManager()) {
+            val add = Button(this).apply {
+                text = "+ إضافة صندوق أو محفظة"; isAllCaps = false
+                setTextColor(Color.WHITE); setBackgroundColor(green)
+                setOnClickListener { showCreateCashAccountDialog() }
+            }
+            content.addView(add, fieldParams(dp(50), dp(12)))
         }
-        content.addView(add, fieldParams(dp(50), dp(12)))
         content.addView(smallButton("إدارة الأرصدة والتحويلات اليومية") { showDailyOperationsDialog() }, fieldParams(dp(46), dp(6)))
         content.addView(smallButton("كشف المقبوضات والحركات اليومية") { showDailyCashReport() }, fieldParams(dp(46), dp(10)))
         repository.listAll().forEach { account ->
