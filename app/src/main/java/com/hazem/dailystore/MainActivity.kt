@@ -221,6 +221,7 @@ class MainActivity : Activity() {
     private fun restoreSession(state: Bundle?): Boolean {
         val userId = state?.getString(STATE_USER_ID) ?: sessionPrefs.getString(SESSION_USER_ID, null) ?: return false
         val user = AuthRepository(this).restoreActiveSession(userId) ?: return false
+        if (user.mustChangePassword) return false
         currentUserId = user.id
         currentUserRole = user.roleKey
         activeScreenKey = state?.getString(STATE_SCREEN)
@@ -338,11 +339,15 @@ class MainActivity : Activity() {
                     username.text.toString(), password.text.toString()
                 )
                 if (authenticated != null) {
-                    currentUserId = authenticated.id
-                    currentUserRole = authenticated.roleKey
-                    sessionPrefs.edit().putString(SESSION_USER_ID, authenticated.id)
-                        .putString(SESSION_SCREEN, "POS").putString(SESSION_CART, "[]").apply()
-                    showPointOfSale()
+                    if (authenticated.mustChangePassword) {
+                        showForcedPasswordChange(authenticated, password.text.toString())
+                    } else {
+                        currentUserId = authenticated.id
+                        currentUserRole = authenticated.roleKey
+                        sessionPrefs.edit().putString(SESSION_USER_ID, authenticated.id)
+                            .putString(SESSION_SCREEN, "POS").putString(SESSION_CART, "[]").apply()
+                        showPointOfSale()
+                    }
                 } else Toast.makeText(
                     this@MainActivity, "اسم المستخدم أو كلمة المرور غير صحيحة", Toast.LENGTH_SHORT
                 ).show()
@@ -359,6 +364,61 @@ class MainActivity : Activity() {
         page.addView(login, fieldParams(dp(52), 0))
         page.addView(footer, matchWidth())
         setContentView(page)
+    }
+
+    private fun showForcedPasswordChange(user: com.hazem.dailystore.data.AuthenticatedUser, currentPassword: String) {
+        val content = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(22), dp(12), dp(22), dp(4))
+        }
+        val newPassword = EditText(this).apply {
+            hint = "كلمة المرور الجديدة (10 أحرف على الأقل)"
+            inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_PASSWORD
+            setSingleLine(true)
+        }
+        val confirmPassword = EditText(this).apply {
+            hint = "تأكيد كلمة المرور الجديدة"
+            inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_PASSWORD
+            setSingleLine(true)
+        }
+        content.addView(newPassword, fieldParams(dp(54), dp(8)))
+        content.addView(confirmPassword, fieldParams(dp(54), dp(12)))
+        val dialog = AlertDialog.Builder(this)
+            .setTitle("تغيير كلمة المرور إلزامي")
+            .setMessage("لأمان المتجر، يجب تعيين كلمة مرور قوية قبل الدخول.")
+            .setView(content)
+            .setCancelable(false)
+            .setPositiveButton("حفظ كلمة المرور", null)
+            .setNegativeButton("تسجيل خروج", null)
+            .create()
+        dialog.setOnShowListener {
+            dialog.getButton(AlertDialog.BUTTON_NEGATIVE).setOnClickListener {
+                clearSessionState()
+                dialog.dismiss()
+                showLoginScreen()
+            }
+            dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener {
+                val proposed = newPassword.text.toString()
+                if (proposed != confirmPassword.text.toString()) {
+                    confirmPassword.error = "كلمتا المرور غير متطابقتين"
+                    return@setOnClickListener
+                }
+                try {
+                    AuthRepository(this).changePassword(user.id, currentPassword, proposed)
+                    currentUserId = user.id
+                    currentUserRole = user.roleKey
+                    sessionPrefs.edit().putString(SESSION_USER_ID, user.id)
+                        .putString(SESSION_SCREEN, "POS").putString(SESSION_CART, "[]").apply()
+                    dialog.dismiss()
+                    showPointOfSale()
+                } catch (e: IllegalArgumentException) {
+                    newPassword.error = e.message ?: "تعذر تغيير كلمة المرور"
+                } catch (e: Exception) {
+                    Toast.makeText(this, e.message ?: "تعذر تغيير كلمة المرور", Toast.LENGTH_LONG).show()
+                }
+            }
+        }
+        dialog.show()
     }
 
     private fun showPointOfSale(preserveCart: Boolean = false) {
