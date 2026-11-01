@@ -29,6 +29,7 @@ import android.widget.TextView
 import android.widget.Toast
 import android.content.ContentValues
 import com.hazem.dailystore.data.AppDatabase
+import com.hazem.dailystore.data.BackupRestoreManager
 import com.hazem.dailystore.data.AuthRepository
 import com.hazem.dailystore.data.SecureSessionStore
 import com.hazem.dailystore.data.CurrencyConverter
@@ -76,6 +77,9 @@ class MainActivity : Activity() {
     private var activeScreenKey: String = "POS"
     private var activeScreenArgument: String? = null
     private val productImportRequestCode = 7101
+    private val backupCreateRequestCode = 7110
+    private val backupRestoreRequestCode = 7111
+    private var pendingBackupPassword: CharArray? = null
     private val sessionPrefs by lazy { getSharedPreferences("the_daily_shop_session", MODE_PRIVATE) }
 
     private lateinit var productGrid: GridLayout
@@ -100,6 +104,41 @@ class MainActivity : Activity() {
     @Deprecated("Using the document picker keeps compatibility with the app's current Activity-based navigation.")
     override fun onActivityResult(requestCode: Int, resultCode: Int, data: android.content.Intent?) {
         super.onActivityResult(requestCode, resultCode, data)
+        if (requestCode == backupCreateRequestCode || requestCode == backupRestoreRequestCode) {
+            val password = pendingBackupPassword
+            pendingBackupPassword = null
+            val uri = data?.data
+            if (resultCode != RESULT_OK || uri == null || password == null) {
+                password?.fill('\\u0000')
+                return
+            }
+            try {
+                if (requestCode == backupCreateRequestCode) {
+                    val output = contentResolver.openOutputStream(uri, "w")
+                        ?: error("تعذر فتح ملف النسخة للحفظ")
+                    output.use { BackupRestoreManager(this).createBackup(password, it) }
+                    Toast.makeText(this, "تم إنشاء نسخة احتياطية مشفّرة بنجاح", Toast.LENGTH_LONG).show()
+                } else {
+                    val input = contentResolver.openInputStream(uri)
+                        ?: error("تعذر فتح ملف النسخة المحدد")
+                    input.use { BackupRestoreManager(this).restoreBackup(password, it) }
+                    clearSessionState()
+                    currentUserId = null
+                    cart.clear()
+                    showLoginScreen()
+                    Toast.makeText(this, "تمت الاستعادة والتحقق من قاعدة البيانات. سجّل الدخول مجدداً.", Toast.LENGTH_LONG).show()
+                }
+            } catch (e: Exception) {
+                AlertDialog.Builder(this)
+                    .setTitle(if (requestCode == backupCreateRequestCode) "تعذر إنشاء النسخة الاحتياطية" else "لم تتم الاستعادة")
+                    .setMessage(e.message ?: "حدث خطأ غير متوقع. لم يتم اعتماد بيانات غير متحقق منها.")
+                    .setPositiveButton("حسناً", null)
+                    .show()
+            } finally {
+                password.fill('\\u0000')
+            }
+            return
+        }
         if (requestCode != productImportRequestCode || resultCode != RESULT_OK) return
         val uri = data?.data ?: return
         try {
@@ -838,6 +877,82 @@ class MainActivity : Activity() {
             Toast.makeText(this, "لا توجد كمية إضافية كافية في المخزون", Toast.LENGTH_SHORT).show()
         } else line.quantity = updated
         renderCart()
+    }
+
+    private fun showBackupRestoreOptions() {
+        AlertDialog.Builder(this)
+            .setTitle("النسخ الاحتياطي والاستعادة")
+            .setItems(arrayOf("إنشاء نسخة احتياطية مشفّرة", "استعادة نسخة احتياطية")) { _, choice ->
+                if (choice == 0) requestBackupPassword(restore = false)
+                else AlertDialog.Builder(this)
+                    .setTitle("تنبيه قبل الاستعادة")
+                    .setMessage("ستستبدل الاستعادة بيانات المتجر الموجودة على هذا الهاتف ببيانات النسخة المختارة. لن يبدأ الاستبدال إلا بعد فك التشفير والتحقق من سلامة قاعدة البيانات، مع الاحتفاظ بنسخة تراجع مؤقتة.")
+                    .setNegativeButton("إلغاء", null)
+                    .setPositiveButton("متابعة") { _, _ -> requestBackupPassword(restore = true) }
+                    .show()
+            }
+            .setNegativeButton("إغلاق", null)
+            .show()
+    }
+
+    private fun requestBackupPassword(restore: Boolean) {
+        val passwordField = EditText(this).apply {
+            hint = "كلمة مرور النسخة (10 أحرف على الأقل)"
+            inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_PASSWORD
+            setSingleLine(true)
+            setPadding(dp(14), dp(10), dp(14), dp(10))
+        }
+        val content = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(20), dp(8), dp(20), dp(4))
+            addView(passwordField, matchWidth())
+            addView(label(
+                if (restore) "أدخل كلمة المرور التي استُخدمت عند إنشاء هذه النسخة."
+                else "احتفظ بكلمة المرور في مكان آمن؛ لا يمكن استعادة النسخة دونها.",
+                12f, mutedColor, false, Gravity.RIGHT
+            ))
+        }
+        val dialog = AlertDialog.Builder(this)
+            .setTitle(if (restore) "كلمة مرور النسخة" else "حماية النسخة الاحتياطية")
+            .setView(content)
+            .setNegativeButton("إلغاء", null)
+            .setPositiveButton(if (restore) "اختيار ملف النسخة" else "حفظ النسخة") { _, _ -> }
+            .create()
+        dialog.setOnShowListener {
+            dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener {
+                val password = passwordField.text.toString()
+                if (password.length < 10) {
+                    passwordField.error = "استخدم 10 أحرف على الأقل"
+                    return@setOnClickListener
+                }
+                pendingBackupPassword?.fill('\\u0000')
+                pendingBackupPassword = password.toCharArray()
+                val intent = if (restore) {
+                    android.content.Intent(android.content.Intent.ACTION_OPEN_DOCUMENT).apply {
+                        addCategory(android.content.Intent.CATEGORY_OPENABLE)
+                        type = "application/octet-stream"
+                    }
+                } else {
+                    android.content.Intent(android.content.Intent.ACTION_CREATE_DOCUMENT).apply {
+                        addCategory(android.content.Intent.CATEGORY_OPENABLE)
+                        type = "application/octet-stream"
+                        putExtra(
+                            android.content.Intent.EXTRA_TITLE,
+                            "The_Daily_Shop_${SimpleDateFormat("yyyyMMdd_HHmm", Locale.US).format(Date())}.tdsbackup"
+                        )
+                    }
+                }
+                try {
+                    startActivityForResult(intent, if (restore) backupRestoreRequestCode else backupCreateRequestCode)
+                    dialog.dismiss()
+                } catch (e: Exception) {
+                    pendingBackupPassword?.fill('\\u0000')
+                    pendingBackupPassword = null
+                    Toast.makeText(this, "لا يتوفر مدير ملفات لاختيار موقع النسخة", Toast.LENGTH_LONG).show()
+                }
+            }
+        }
+        dialog.show()
     }
 
     private fun showNavigationMenu(anchor: View) {
