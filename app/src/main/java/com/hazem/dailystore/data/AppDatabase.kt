@@ -318,6 +318,7 @@ class AppDatabase private constructor(context: Context) :
                 source_movement_id TEXT NOT NULL UNIQUE,
                 source_type TEXT,
                 source_id TEXT,
+                source_item_id TEXT,
                 received_quantity REAL NOT NULL CHECK(received_quantity > 0),
                 remaining_quantity REAL NOT NULL CHECK(remaining_quantity >= 0 AND remaining_quantity <= received_quantity),
                 unit_cost_usd_cents INTEGER CHECK(unit_cost_usd_cents IS NULL OR unit_cost_usd_cents > 0),
@@ -325,7 +326,8 @@ class AppDatabase private constructor(context: Context) :
                 received_at TEXT NOT NULL,
                 FOREIGN KEY(product_id) REFERENCES products(id) ON UPDATE RESTRICT ON DELETE RESTRICT,
                 FOREIGN KEY(warehouse_id) REFERENCES warehouses(id) ON UPDATE RESTRICT ON DELETE RESTRICT,
-                FOREIGN KEY(source_movement_id) REFERENCES inventory_movements(id) ON UPDATE RESTRICT ON DELETE RESTRICT
+                FOREIGN KEY(source_movement_id) REFERENCES inventory_movements(id) ON UPDATE RESTRICT ON DELETE RESTRICT,
+                FOREIGN KEY(source_item_id) REFERENCES purchase_items(id) ON UPDATE RESTRICT ON DELETE RESTRICT
             )
         """.trimIndent())
         db.execSQL("""
@@ -370,13 +372,16 @@ class AppDatabase private constructor(context: Context) :
         movements.forEach { movement ->
             if (movement.delta > 0.0) {
                 FifoCosting.addLayer(db,movement.id,movement.productId,movement.warehouseId,
-                    movement.delta,movement.unitCost,movement.sourceType,movement.sourceId,movement.createdAt)
+                    movement.delta,movement.unitCost,movement.sourceType,movement.sourceId,movement.createdAt,
+                    movement.operationId?.substringAfterLast(':')?.takeIf { movement.sourceType == "PURCHASE_INVOICE" })
             } else {
                 val salesItemId = if (movement.type == "SALE") {
                     movement.operationId?.substringAfterLast(':')?.takeIf { it.isNotBlank() }
                 } else null
                 FifoCosting.consumeForSale(
-                    db,movement.sourceId ?: error("حركة مخزون سالبة بلا مرجع مصدر: ${movement.id}"),
+                    db,movement.sourceId ?: if (movement.type == "SALE") {
+                        error("حركة بيع سالبة بلا مرجع فاتورة: ${movement.id}")
+                    } else "LEGACY_MOVEMENT:${movement.id}",
                     salesItemId,movement.productId,movement.warehouseId,-movement.delta,movement.createdAt,
                     recordSaleAllocation = movement.type == "SALE"
                 )
