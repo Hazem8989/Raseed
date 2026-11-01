@@ -21,6 +21,7 @@ class InvoiceRepositoryTest {
     private lateinit var invoices: InvoiceRepository
     private lateinit var productId: String
     private lateinit var cashAccountId: String
+    private lateinit var adminId: String
 
     @Before
     fun setUp() {
@@ -30,6 +31,11 @@ class InvoiceRepositoryTest {
         store = StoreRepository(context)
         invoices = InvoiceRepository(context)
         store.ensureBaseSetup()
+        val auth = AuthRepository(context)
+        auth.ensureInitialAdmin()
+        val admin = auth.authenticate("admin", "1234")!!
+        auth.changePassword(admin.id, "1234", "TestAdmin123")
+        adminId = admin.id
         val fx = ContentValues().apply {
             put("id", UUID.randomUUID().toString())
             put("currency_code", "USD")
@@ -42,10 +48,10 @@ class InvoiceRepositoryTest {
         val category = store.getCategories().first()
         productId = store.saveProduct(
             null, "منتج فواتير اختباري", null, null, category.id, unit.id,
-            100, 250, true, 10.0
+            100, 250, true, 10.0, adminId
         )
         cashAccountId = CashAccountRepository(context).create(
-            "صندوق اختبار البيع", "CASH_BOX", "USD", 0L
+            adminId, "صندوق اختبار البيع", "CASH_BOX", "USD", 0L
         ).id
     }
 
@@ -177,8 +183,7 @@ class InvoiceRepositoryTest {
         val kgUnit = store.getUnits().first { it.decimalPlaces == 3 }
         val fractionalProduct = store.saveProduct(
             null, "منتج كسري FIFO", null, null, store.getCategories().first().id,
-            kgUnit.id, 1L, 250L, true, 0.0
-        )
+            kgUnit.id, 1L, 250L, true, 0.0, adminId
         val purchase = invoices.savePurchaseDraft(
             "fractional-fifo-purchase", null, null, "2026-10-31", 0, null,
             listOf(
