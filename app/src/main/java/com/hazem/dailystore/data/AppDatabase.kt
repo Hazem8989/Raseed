@@ -22,6 +22,23 @@ class AppDatabase private constructor(context: Context) :
         db.setForeignKeyConstraintsEnabled(true)
     }
 
+    /**
+     * Flushes committed WAL frames and closes SQLite before a consistent file snapshot.
+     * The helper instance remains reusable; the next database access reopens it.
+     */
+    @Synchronized
+    internal fun checkpointAndCloseForBackup() {
+        val db = writableDatabase
+        db.rawQuery("PRAGMA wal_checkpoint(FULL)", null).use { cursor ->
+            if (cursor.moveToFirst()) {
+                check(cursor.getInt(0) == 0) {
+                    "قاعدة البيانات مشغولة؛ تعذر تجهيز نسخة احتياطية آمنة"
+                }
+            }
+        }
+        close()
+    }
+
     override fun onCreate(db: SQLiteDatabase) {
         db.beginTransaction()
         try {
