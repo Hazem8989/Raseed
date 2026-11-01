@@ -91,6 +91,11 @@ class BackupRestoreManager(private val context: Context) {
                         restoreFailure
                     )
                 }
+            } catch (error: Exception) {
+                if (liveWasMoved && rollback.exists() && !live.exists()) {
+                    check(rollback.renameTo(live)) { "تعذر إعادة قاعدة البيانات السابقة بعد فشل الاستعادة" }
+                }
+                throw error
             } finally {
                 staged.delete()
                 if (rollback.exists() && live.exists()) rollback.delete()
@@ -119,7 +124,7 @@ class BackupRestoreManager(private val context: Context) {
         val header = ByteArray(HEADER_BYTES)
         data.readFully(header)
         val parsed = parseHeader(header)
-        val cipher = cipher(Cipher.DECRYPT_MODE, password, parsed.first, parsed.second)
+        val cipher = cipher(Cipher.DECRYPT_MODE, password, parsed.salt, parsed.iv, parsed.iterations)
         cipher.updateAAD(header)
         try {
             FileOutputStream(target).use { fileOut ->
@@ -158,7 +163,9 @@ class BackupRestoreManager(private val context: Context) {
             }
         }.toByteArray()
 
-    private fun parseHeader(header: ByteArray): Pair<ByteArray, ByteArray> {
+    private data class ParsedHeader(val salt: ByteArray, val iv: ByteArray, val iterations: Int)
+
+    private fun parseHeader(header: ByteArray): ParsedHeader {
         val input = DataInputStream(header.inputStream())
         val magic = ByteArray(MAGIC.size).also(input::readFully)
         require(magic.contentEquals(MAGIC)) { "الملف ليس نسخة احتياطية معروفة من The Daily Shop" }
@@ -169,11 +176,14 @@ class BackupRestoreManager(private val context: Context) {
         }
         val salt = ByteArray(SALT_BYTES).also(input::readFully)
         val iv = ByteArray(IV_BYTES).also(input::readFully)
-        return salt to iv
+        return ParsedHeader(salt, iv, iterations)
     }
 
-    private fun cipher(mode: Int, password: CharArray, salt: ByteArray, iv: ByteArray): Cipher {
-        val spec = PBEKeySpec(password, salt, PBKDF2_ITERATIONS, KEY_BITS)
+    private fun cipher(
+        mode: Int, password: CharArray, salt: ByteArray, iv: ByteArray,
+        iterations: Int = PBKDF2_ITERATIONS
+    ): Cipher {
+        val spec = PBEKeySpec(password, salt, iterations, KEY_BITS)
         val keyBytes = try {
             SecretKeyFactory.getInstance("PBKDF2WithHmacSHA1").generateSecret(spec).encoded
         } finally {
