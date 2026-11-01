@@ -354,9 +354,10 @@ class InvoiceRepository(context: Context) {
             }
             val finalStatus = if (type == "SALE" && cashReceipt != null) "PAID" else "POSTED"
             if (type == "SALE") {
+                val operatingDate = SimpleDateFormat("yyyy-MM-dd", Locale.US).format(Date())
                 db.execSQL(
-                    "UPDATE sales_invoices SET status=?,updated_at=?,posted_at=? WHERE id=? AND status='DRAFT'",
-                    arrayOf(finalStatus, now, now, invoiceId)
+                    "UPDATE sales_invoices SET status=?,updated_at=?,posted_at=?,posted_operating_date=? WHERE id=? AND status='DRAFT'",
+                    arrayOf(finalStatus, now, now, operatingDate, invoiceId)
                 )
             } else {
                 db.execSQL("UPDATE purchase_invoices SET status=?,updated_at=? WHERE id=? AND status='DRAFT'",
