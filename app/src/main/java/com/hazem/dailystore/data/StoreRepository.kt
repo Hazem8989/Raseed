@@ -196,7 +196,7 @@ class StoreRepository(context: Context) {
                     "SELECT track_inventory,unit_id FROM products WHERE id=?", arrayOf(productId)
                 ).use { c ->
                     require(c.moveToFirst()) { "المنتج المطلوب تعديله غير موجود" }
-                    c.getInt(0) to c.getLong(1)
+                    (c.getInt(0) == 1) to c.getLong(1)
                 }
                 val hasMovementHistory = db.rawQuery(
                     "SELECT 1 FROM inventory_movements WHERE product_id=? LIMIT 1", arrayOf(productId)
