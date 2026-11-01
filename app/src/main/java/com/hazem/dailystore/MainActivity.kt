@@ -2300,6 +2300,38 @@ class MainActivity : Activity() {
                 12f, green, true, Gravity.RIGHT
             ).apply { setPadding(0, dp(2), 0, dp(12)) })
         }
+        content.addView(sectionHeading("ملخص ربح المبيعات وفق تكلفة FIFO"))
+        val profitRepo = SalesProfitRepository(this)
+        val todayProfit = profitRepo.today()
+        val profitCard = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(14), dp(12), dp(14), dp(12))
+            background = cardBackground()
+        }
+        profitCard.addView(label("نتيجة المبيعات المسجلة اليوم", 15f, green, true, Gravity.RIGHT))
+        profitCard.addView(label("عدد الفواتير: ${todayProfit.invoiceCount}", 12f, mutedColor, false, Gravity.RIGHT))
+        profitCard.addView(label("إجمالي المبيعات: ${formatDualMoney(todayProfit.revenueUsdCents, rate)}", 13f, textColor, false, Gravity.RIGHT))
+        profitCard.addView(label("تكلفة البضاعة المباعة FIFO: ${formatDualMoney(todayProfit.cogsUsdCents, rate)}", 13f, textColor, false, Gravity.RIGHT))
+        if (todayProfit.isComplete) {
+            profitCard.addView(label("مجمل الربح قبل المصاريف والمرتجعات: ${formatDualMoney(todayProfit.grossProfitUsdCents, rate)}",
+                15f, green, true, Gravity.RIGHT).apply { setPadding(0, dp(5), 0, 0) })
+        } else {
+            profitCard.addView(label("الربح غير محسوب: توجد ${todayProfit.uncostedInvoiceCount} فاتورة دون تكلفة FIFO مكتملة. راجعها قبل الاعتماد.",
+                12f, Color.rgb(170, 80, 45), true, Gravity.RIGHT).apply { setPadding(0, dp(5), 0, 0) })
+        }
+        val allProfit = profitRepo.allTime()
+        profitCard.addView(label("منذ بداية التشغيل • المبيعات: ${formatDualMoney(allProfit.revenueUsdCents, rate)} • تكلفة FIFO: ${formatDualMoney(allProfit.cogsUsdCents, rate)}",
+            11f, mutedColor, false, Gravity.RIGHT).apply { setPadding(0, dp(8), 0, 0) })
+        if (allProfit.isComplete) {
+            profitCard.addView(label("مجمل الربح التراكمي قبل المصاريف والمرتجعات: ${formatDualMoney(allProfit.grossProfitUsdCents, rate)}",
+                13f, green, true, Gravity.RIGHT))
+        } else {
+            profitCard.addView(label("الربح التراكمي غير مكتمل؛ فواتير بلا تكلفة: ${allProfit.uncostedInvoiceCount}",
+                11f, Color.rgb(170, 80, 45), true, Gravity.RIGHT))
+        }
+        content.addView(profitCard, fieldParams(-2, dp(12)))
+        content.addView(label("ملاحظة محاسبية: هذا مجمل ربح البضاعة فقط، وليس صافي ربح المتجر. لا يشمل المصاريف التشغيلية أو أثر المرتجعات حتى تُربط بسجلها المحاسبي.",
+            11f, mutedColor, false, Gravity.RIGHT).apply { setPadding(0, 0, 0, dp(12)) })
         content.addView(sectionHeading("ملخص المخزون"))
         content.addView(label("عدد الأصناف التي تتبع المخزون: ${products.size}", 15f, textColor, true, Gravity.RIGHT)
             .apply { setPadding(0, dp(5), 0, dp(3)) })
