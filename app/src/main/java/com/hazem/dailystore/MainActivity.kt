@@ -971,7 +971,8 @@ class MainActivity : Activity() {
             "العملاء والديون" to "ملفات العملاء والأرصدة",
             "الصناديق والمحافظ" to "الحركة النقدية والحسابات",
             "تحويل رصيد" to "سيرياتيل العادي وكاش وشام كاش",
-            "التقارير" to "المبيعات والأرباح والمخزون"
+            "التقارير" to "المبيعات والأرباح والمخزون",
+            "النسخ الاحتياطي والاستعادة" to "حفظ بيانات المتجر واستعادتها بأمان"
         )
         lateinit var popup: PopupWindow
         entries.forEach { (title, description) ->
@@ -990,6 +991,7 @@ class MainActivity : Activity() {
                         "الصناديق والمحافظ" -> showCashAccounts()
                         "تحويل رصيد" -> showServiceTransfers()
                         "التقارير" -> showGeneralReports()
+                        "النسخ الاحتياطي والاستعادة" -> showBackupRestoreOptions()
                         else -> Toast.makeText(this@MainActivity, "قسم $title سيُفعّل في مرحلته", Toast.LENGTH_SHORT).show()
                     }
                 }
