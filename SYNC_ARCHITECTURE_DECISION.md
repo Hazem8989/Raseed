@@ -80,11 +80,13 @@ Therefore:
 - Verify exactly-once financial effect under retries, offline periods, primary unavailability, and app restarts.
 - Only then enable multi-device production use.
 
-## 6. Current verified baseline
+## 6. Current verified baseline (audited 2026-11-02)
 
-- AppDatabase.DATABASE_VERSION is 7.
+- AppDatabase.DATABASE_VERSION is 11.
 - The schema contains operation_registry, sync_queue, sync_conflicts, and audit_log.
-- The existing queue schema does not yet provide the full device enrollment, authoritative sequencing, acknowledgement/cursor, or transport engine described above.
-- AndroidManifest.xml currently has no INTERNET or network-state permissions and declares no sync service.
-- app/build.gradle.kts currently has no networking, coroutine, or WorkManager dependency.
-- Therefore live synchronization is not implemented. These findings are a starting baseline, not a completed feature.
+- A per-installation stable device UUID helper exists, but it is not a pairing credential and does not implement device enrollment or authentication.
+- The existing queue/conflict schema does not yet provide the full device enrollment, authoritative sequencing, acknowledgement/cursor, or transport engine described above.
+- AndroidManifest.xml has no INTERNET/network-state permissions and declares no sync service.
+- app/build.gradle.kts has no networking, coroutine, or WorkManager dependency.
+- Therefore live synchronization is not implemented and no network listener is enabled. This is intentional until the approved security gates are completed.
+- The current comprehensive source/CI audit is recorded in COMPREHENSIVE_AUDIT_2026-11-02.md.
