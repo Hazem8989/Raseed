@@ -71,7 +71,8 @@ internal object FifoCosting {
         productId: String,
         warehouseId: String,
         quantity: Double,
-        createdAt: String
+        createdAt: String,
+        recordSaleAllocation: Boolean = true
     ): Long? {
         require(quantity > 0.0 && quantity.isFinite())
         var toConsume = BigDecimal.valueOf(quantity)
@@ -112,17 +113,19 @@ internal object FifoCosting {
             }
             if (allocationCost == null) costKnown = false else totalCost = totalCost.add(BigDecimal.valueOf(allocationCost))
 
-            val allocation = ContentValues().apply {
-                put("id", UUID.randomUUID().toString())
-                put("sales_invoice_id", invoiceId)
-                if (salesItemId == null) putNull("sales_item_id") else put("sales_item_id", salesItemId)
-                put("cost_layer_id", layer.id)
-                put("quantity", consumed.toDouble())
-                if (layer.unitCost == null) putNull("unit_cost_usd_cents") else put("unit_cost_usd_cents", layer.unitCost)
-                if (allocationCost == null) putNull("cost_usd_cents") else put("cost_usd_cents", allocationCost)
-                put("created_at", createdAt)
+            if (recordSaleAllocation) {
+                val allocation = ContentValues().apply {
+                    put("id", UUID.randomUUID().toString())
+                    put("sales_invoice_id", invoiceId)
+                    if (salesItemId == null) putNull("sales_item_id") else put("sales_item_id", salesItemId)
+                    put("cost_layer_id", layer.id)
+                    put("quantity", consumed.toDouble())
+                    if (layer.unitCost == null) putNull("unit_cost_usd_cents") else put("unit_cost_usd_cents", layer.unitCost)
+                    if (allocationCost == null) putNull("cost_usd_cents") else put("cost_usd_cents", allocationCost)
+                    put("created_at", createdAt)
+                }
+                db.insertOrThrow("sales_item_cost_allocations", null, allocation)
             }
-            db.insertOrThrow("sales_item_cost_allocations", null, allocation)
             toConsume = toConsume.subtract(consumed)
         }
         check(toConsume.signum() == 0) { "تعذر استهلاك كامل الكمية من طبقات FIFO" }
