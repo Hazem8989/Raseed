@@ -27,6 +27,7 @@ class CustomerPaymentRepositoryTest {
     private lateinit var walletId: String
     private lateinit var usdAccountId: String
     private lateinit var productId: String
+    private lateinit var adminId: String
 
     @Before
     fun setUp() {
@@ -35,6 +36,11 @@ class CustomerPaymentRepositoryTest {
         database = AppDatabase.getInstance(context)
         val store = StoreRepository(context)
         store.ensureBaseSetup()
+        val auth = AuthRepository(context)
+        auth.ensureInitialAdmin()
+        val admin = auth.authenticate("admin", "1234")!!
+        auth.changePassword(admin.id, "1234", "TestAdmin123")
+        adminId = admin.id
         customers = CustomerRepository(context)
         invoices = InvoiceRepository(context)
         payments = CustomerPaymentRepository(context)
@@ -44,7 +50,7 @@ class CustomerPaymentRepositoryTest {
         val unit = store.getUnits().first()
         val category = store.getCategories().first()
         productId = store.saveProduct(null, "صنف تحصيل " + UUID.randomUUID(), null, null,
-            category.id, unit.id, 100L, 500L, true, 20.0)
+            category.id, unit.id, 100L, 500L, true, 20.0, adminId)
         insertRate(15_000_000L, "2026-10-31T00:00:00.000Z")
         cashDrawerId = insertAccount("درج اليوم", "CASH_BOX", "SYP")
         walletId = insertAccount("محفظة اختبار", "WALLET", "SYP")
