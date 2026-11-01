@@ -102,7 +102,7 @@ class CustomerPaymentRepositoryTest {
         val invoiceId = createCreditInvoice()
         val db = database.writableDatabase
         db.execSQL(
-            "UPDATE sales_invoices SET posted_at='2026-10-31T10:00:00.000Z',updated_at='2026-10-31T10:00:00.000Z' WHERE id=?",
+            "UPDATE sales_invoices SET posted_at='2026-10-31T10:00:00.000Z',posted_operating_date='2026-10-31',updated_at='2026-10-31T10:00:00.000Z' WHERE id=?",
             arrayOf(invoiceId)
         )
         // Simulate a later collection that updates the invoice's mutable updated_at field.
