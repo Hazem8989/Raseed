@@ -169,7 +169,7 @@ class CashAccountRepository(context: Context) {
         db.beginTransaction()
         try {
             val managerExists = db.rawQuery(
-                "SELECT 1 FROM users WHERE id=? AND role_key='ADMIN' AND is_active=1",
+                "SELECT 1 FROM users WHERE id=? AND role_key='ADMIN' AND is_active=1 AND must_change_password=0",
                 arrayOf(actorUserId)
             ).use { it.moveToFirst() }
             require(managerExists) { "جلسة المدير غير صالحة" }
@@ -273,7 +273,8 @@ class CashAccountRepository(context: Context) {
     }
 
     fun create(
-        name: String, accountType: String, currencyCode: String, openingBalanceMinor: Long = 0L
+        actorUserId: String, name: String, accountType: String, currencyCode: String,
+        openingBalanceMinor: Long = 0L
     ): CashAccountSummary {
         val cleanName = name.trim()
         val currency = currencyCode.trim().uppercase(Locale.US)
@@ -283,14 +284,28 @@ class CashAccountRepository(context: Context) {
         }
         require(currency in setOf("USD", "SYP")) { "العملة يجب أن تكون USD أو SYP" }
         require(openingBalanceMinor >= 0L) { "الرصيد الافتتاحي لا يمكن أن يكون سالباً" }
+        val db = database.writableDatabase
+        requireManager(db, actorUserId)
         val id = UUID.randomUUID().toString()
         val now = timestamp()
-        val values = ContentValues().apply {
-            put("id", id); put("name", cleanName); put("account_type", accountType)
-            put("currency_code", currency); put("opening_balance_minor", openingBalanceMinor)
-            put("is_active", 1); put("created_at", now)
-        }
-        database.writableDatabase.insertOrThrow("cash_accounts", null, values)
+        db.beginTransaction()
+        try {
+            requireManager(db, actorUserId)
+            val values = ContentValues().apply {
+                put("id", id); put("name", cleanName); put("account_type", accountType)
+                put("currency_code", currency); put("opening_balance_minor", openingBalanceMinor)
+                put("is_active", 1); put("created_at", now)
+            }
+            db.insertOrThrow("cash_accounts", null, values)
+            val after = "{\\"name\\":\\""+jsonEscape(cleanName)+"\\",\\"account_type\\":\\""+accountType+"\\",\\"currency_code\\":\\""+currency+"\\",\\"opening_balance_minor\\":"+openingBalanceMinor+"}"
+            val audit = ContentValues().apply {
+                put("id", UUID.randomUUID().toString()); put("user_id", actorUserId)
+                put("action", "CREATE"); put("entity_type", "CASH_ACCOUNT"); put("entity_id", id)
+                put("after_json", after); put("created_at", now)
+            }
+            db.insertOrThrow("audit_log", null, audit)
+            db.setTransactionSuccessful()
+        } finally { db.endTransaction() }
         return CashAccountSummary(id, cleanName, accountType, currency, openingBalanceMinor, true)
     }
 
@@ -319,7 +334,7 @@ class CashAccountRepository(context: Context) {
         require(currency in setOf("USD", "SYP")) { "العملة يجب أن تكون USD أو SYP" }
         val db = database.writableDatabase
         val managerExists = db.rawQuery(
-            "SELECT 1 FROM users WHERE id=? AND role_key='ADMIN' AND is_active=1", arrayOf(actorUserId)
+            "SELECT 1 FROM users WHERE id=? AND role_key='ADMIN' AND is_active=1 AND must_change_password=0", arrayOf(actorUserId)
         ).use { it.moveToFirst() }
         require(managerExists) { "يجب تسجيل الدخول بحساب مدير نشط لتعديل الحسابات المالية" }
         db.beginTransaction()
@@ -365,6 +380,18 @@ class CashAccountRepository(context: Context) {
             db.setTransactionSuccessful()
         } finally { db.endTransaction() }
     }
+
+    private fun requireManager(db: android.database.sqlite.SQLiteDatabase, actorUserId: String) {
+        require(actorUserId.isNotBlank()) { "جلسة المدير غير صالحة" }
+        val valid = db.rawQuery(
+            "SELECT 1 FROM users WHERE id=? AND role_key='ADMIN' AND is_active=1 AND must_change_password=0",
+            arrayOf(actorUserId)
+        ).use { it.moveToFirst() }
+        require(valid) { "إنشاء الحسابات المالية متاح لمدير نشط أكمل تغيير كلمة المرور فقط" }
+    }
+
+    private fun jsonEscape(value: String): String = value.replace("\\", "\\\\")
+        .replace("\\"", "\\\\\"").replace("\n", "\\\\n").replace("\r", "\\\\r")
 
     private fun jsonString(value: String): String =
         "\"" + value.replace("\\", "\\\\").replace("\"", "\\\"")
