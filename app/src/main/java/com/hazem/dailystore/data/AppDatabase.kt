@@ -297,6 +297,33 @@ class AppDatabase private constructor(context: Context) :
                 db.endTransaction()
             }
         }
+        if (version < 10) {
+            db.beginTransaction()
+            try {
+                var hasPostedAt = false
+                db.rawQuery("PRAGMA table_info(sales_invoices)", null).use { c ->
+                    while (c.moveToNext()) if (c.getString(1) == "posted_at") hasPostedAt = true
+                }
+                if (!hasPostedAt) db.execSQL("ALTER TABLE sales_invoices ADD COLUMN posted_at TEXT")
+                db.execSQL("""
+                    UPDATE sales_invoices
+                    SET posted_at = COALESCE(
+                        (SELECT MIN(op.created_at) FROM operation_registry op
+                         WHERE op.operation_type='POST_SALE_INVOICE'
+                           AND op.result_reference=sales_invoices.id),
+                        (SELECT MIN(m.created_at) FROM inventory_movements m
+                         WHERE m.source_id=sales_invoices.id AND m.movement_type='SALE'),
+                        updated_at
+                    )
+                    WHERE status IN ('POSTED','PARTIALLY_PAID','PAID') AND posted_at IS NULL
+                """.trimIndent())
+                db.execSQL("CREATE INDEX IF NOT EXISTS idx_sales_posted_at ON sales_invoices(posted_at)")
+                db.setTransactionSuccessful()
+                version = 10
+            } finally {
+                db.endTransaction()
+            }
+        }
         if (version != newVersion) {
             throw IllegalStateException("Missing database migration from version $version to $newVersion")
         }
@@ -391,7 +418,7 @@ class AppDatabase private constructor(context: Context) :
 
     companion object {
         const val DATABASE_NAME = "the_daily_shop.db"
-        const val DATABASE_VERSION = 9
+        const val DATABASE_VERSION = 10
 
         @Volatile
         private var INSTANCE: AppDatabase? = null
@@ -658,6 +685,7 @@ class AppDatabase private constructor(context: Context) :
                 created_by TEXT,
                 created_at TEXT NOT NULL,
                 updated_at TEXT NOT NULL,
+                posted_at TEXT,
                 FOREIGN KEY(customer_id) REFERENCES customers(id)
                     ON UPDATE RESTRICT ON DELETE RESTRICT,
                 FOREIGN KEY(warehouse_id) REFERENCES warehouses(id)
@@ -1036,6 +1064,7 @@ class AppDatabase private constructor(context: Context) :
             "CREATE INDEX idx_products_barcode ON products(barcode)",
             "CREATE INDEX idx_inventory_movements_product_date ON inventory_movements(product_id, created_at)",
             "CREATE INDEX idx_sales_date ON sales_invoices(invoice_date)",
+            "CREATE INDEX idx_sales_posted_at ON sales_invoices(posted_at)",
             "CREATE INDEX idx_sales_customer_date ON sales_invoices(customer_id, invoice_date)",
             "CREATE INDEX idx_purchase_date ON purchase_invoices(invoice_date)",
             "CREATE INDEX idx_cash_transactions_account_date ON cash_transactions(account_id, created_at)",
