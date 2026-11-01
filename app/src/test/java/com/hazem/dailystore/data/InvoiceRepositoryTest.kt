@@ -135,6 +135,43 @@ class InvoiceRepositoryTest {
     }
 
     @Test
+    fun versionEightMigrationRebuildsFifoLayersAndHistoricalSaleCogs() {
+        val sale = invoices.saveSalesDraft(
+            "legacy-fifo-sale-draft", null, null, "2026-10-31", 0, null,
+            listOf(InvoiceLineInput(productId, BigDecimal("4"), 250))
+        )
+        assertTrue(invoices.postCashSale(sale.invoiceId, "legacy-fifo-sale-post", cashAccountId))
+        // Recreate the v8 on-disk schema while preserving the old inventory ledger and invoice.
+        database.writableDatabase.execSQL("DROP TABLE sales_item_cost_allocations")
+        database.writableDatabase.execSQL("DROP TABLE inventory_cost_layers")
+        database.writableDatabase.execSQL("ALTER TABLE sales_items DROP COLUMN cogs_usd_cents")
+        database.writableDatabase.version = 8
+        database.close()
+        AppDatabase.resetForTests(RuntimeEnvironment.getApplication(), deleteExisting = false)
+        database = AppDatabase.getInstance(RuntimeEnvironment.getApplication())
+        val upgraded = database.writableDatabase
+        assertEquals(9, upgraded.version)
+        upgraded.rawQuery(
+            "SELECT remaining_quantity FROM inventory_cost_layers WHERE product_id=?",
+            arrayOf(productId)
+        ).use { c -> assertTrue(c.moveToFirst()); assertEquals(6.0, c.getDouble(0), 0.000001) }
+        upgraded.rawQuery(
+            "SELECT cogs_usd_cents FROM sales_items WHERE sales_invoice_id=?",
+            arrayOf(sale.invoiceId)
+        ).use { c -> assertTrue(c.moveToFirst()); assertEquals(400L, c.getLong(0)) }
+        upgraded.rawQuery(
+            "SELECT SUM(quantity),SUM(cost_usd_cents) FROM sales_item_cost_allocations WHERE sales_invoice_id=?",
+            arrayOf(sale.invoiceId)
+        ).use { c ->
+            assertTrue(c.moveToFirst())
+            assertEquals(4.0, c.getDouble(0), 0.000001)
+            assertEquals(400L, c.getLong(1))
+        }
+        assertTrue(upgraded.isDatabaseIntegrityOk)
+        upgraded.rawQuery("PRAGMA foreign_key_check", null).use { c -> assertTrue(!c.moveToFirst()) }
+    }
+
+    @Test
     fun fifoProfitReportUsesPostedRevenueAndCogsWithoutDoubleCountingCollections() {
         val purchase = invoices.savePurchaseDraft(
             "profit-fifo-purchase", null, null, "2026-10-31", 0, null,
