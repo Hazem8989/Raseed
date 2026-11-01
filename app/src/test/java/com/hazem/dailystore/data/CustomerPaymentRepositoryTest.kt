@@ -98,6 +98,33 @@ class CustomerPaymentRepositoryTest {
     }
 
     @Test
+    fun customerCollectionDoesNotMoveSaleRevenueToCollectionDay() {
+        val invoiceId = createCreditInvoice()
+        val db = database.writableDatabase
+        db.execSQL(
+            "UPDATE sales_invoices SET posted_at='2026-10-31T10:00:00.000Z',updated_at='2026-10-31T10:00:00.000Z' WHERE id=?",
+            arrayOf(invoiceId)
+        )
+        // Simulate a later collection that updates the invoice's mutable updated_at field.
+        payments.addPayment(invoiceId, "collection-after-sale-date", cashDrawerId, 15_000L)
+        db.execSQL(
+            "UPDATE sales_invoices SET updated_at='2026-11-02T10:00:00.000Z' WHERE id=?",
+            arrayOf(invoiceId)
+        )
+        val saleDay = SalesProfitRepository(RuntimeEnvironment.getApplication())
+            .summarize("2026-10-31", "2026-10-31")
+        val collectionDay = SalesProfitRepository(RuntimeEnvironment.getApplication())
+            .summarize("2026-11-02", "2026-11-02")
+        assertEquals(1, saleDay.invoiceCount)
+        assertEquals(500L, saleDay.revenueUsdCents)
+        assertEquals(0, collectionDay.invoiceCount)
+        assertEquals(0L, collectionDay.revenueUsdCents)
+        assertEquals("2026-10-31T10:00:00.000Z",
+            db.rawQuery("SELECT posted_at FROM sales_invoices WHERE id=?", arrayOf(invoiceId))
+                .use { c -> assertTrue(c.moveToFirst()); c.getString(0) })
+    }
+
+    @Test
     fun collectionUsesGreaterOfCurrentAndOriginalRate() {
         val invoiceId = createCreditInvoice()
         insertRate(20_000_000L, "2026-11-01T00:00:00.000Z")
