@@ -184,6 +184,7 @@ class InvoiceRepositoryTest {
         val fractionalProduct = store.saveProduct(
             null, "منتج كسري FIFO", null, null, store.getCategories().first().id,
             kgUnit.id, 1L, 250L, true, 0.0, adminId
+        )
         val purchase = invoices.savePurchaseDraft(
             "fractional-fifo-purchase", null, null, "2026-10-31", 0, null,
             listOf(
