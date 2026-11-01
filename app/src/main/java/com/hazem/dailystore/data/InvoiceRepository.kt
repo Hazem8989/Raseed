@@ -296,6 +296,11 @@ class InvoiceRepository(context: Context) {
                         }
                     }
                     if (tracks) {
+                        if (type == "SALE") {
+                            FifoCosting.consumeForSale(
+                                db, invoiceId, itemId, productId, warehouseId, quantity, now
+                            )
+                        }
                         val delta = if (type == "PURCHASE") quantity else -quantity
                         applyStockMovement(
                             db, productId, warehouseId, delta, unitCost,
@@ -445,19 +450,27 @@ class InvoiceRepository(context: Context) {
             }
             db.insertOrThrow("inventory_balances", null, balance)
         }
+        val movementId = UUID.randomUUID().toString()
+        val sourceType = if (movementType == "PURCHASE") "PURCHASE_INVOICE" else "SALES_INVOICE"
         val movement = ContentValues().apply {
-            put("id", UUID.randomUUID().toString())
+            put("id", movementId)
             put("product_id", productId)
             put("warehouse_id", warehouseId)
             put("movement_type", movementType)
             put("quantity_delta", delta)
             put("unit_cost_usd_cents", unitCost)
-            put("source_type", if (movementType == "PURCHASE") "PURCHASE_INVOICE" else "SALES_INVOICE")
+            put("source_type", sourceType)
             put("source_id", invoiceId)
             put("operation_id", movementOperationId)
             put("created_at", now)
         }
         db.insertOrThrow("inventory_movements", null, movement)
+        if (delta > 0.0) {
+            FifoCosting.addLayer(
+                db, movementId, productId, warehouseId, delta, unitCost,
+                sourceType, invoiceId, now
+            )
+        }
     }
 
     private fun defaultWarehouseId(db: SQLiteDatabase): String =
