@@ -986,7 +986,10 @@ class MainActivity : Activity() {
             "النسخ الاحتياطي والاستعادة" to "حفظ بيانات المتجر واستعادتها بأمان"
         )
         lateinit var popup: PopupWindow
-        entries.forEach { (title, description) ->
+        val visibleEntries = if (isManager()) entries else entries.filterNot {
+            it.first == "المنتجات والمخزون" || it.first == "النسخ الاحتياطي والاستعادة"
+        }
+        visibleEntries.forEach { (title, description) ->
             val item = LinearLayout(this).apply {
                 orientation = LinearLayout.VERTICAL
                 setPadding(dp(8), dp(10), dp(8), dp(10))
