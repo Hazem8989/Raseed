@@ -297,7 +297,7 @@ class CashAccountRepository(context: Context) {
                 put("is_active", 1); put("created_at", now)
             }
             db.insertOrThrow("cash_accounts", null, values)
-            val after = "{\\"name\\":\\""+jsonEscape(cleanName)+"\\",\\"account_type\\":\\""+accountType+"\\",\\"currency_code\\":\\""+currency+"\\",\\"opening_balance_minor\\":"+openingBalanceMinor+"}"
+            val after = """{"name":"${jsonEscape(cleanName)}","account_type":"$accountType","currency_code":"$currency","opening_balance_minor":$openingBalanceMinor}"""
             val audit = ContentValues().apply {
                 put("id", UUID.randomUUID().toString()); put("user_id", actorUserId)
                 put("action", "CREATE"); put("entity_type", "CASH_ACCOUNT"); put("entity_id", id)
