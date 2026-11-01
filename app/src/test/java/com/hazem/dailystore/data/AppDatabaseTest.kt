@@ -18,7 +18,9 @@ class AppDatabaseTest {
 
     @Before
     fun setUp() {
-        database = AppDatabase.getInstance(RuntimeEnvironment.getApplication())
+        val context = RuntimeEnvironment.getApplication()
+        AppDatabase.resetForTests(context)
+        database = AppDatabase.getInstance(context)
     }
 
     @After

@@ -11,7 +11,7 @@ import org.robolectric.RuntimeEnvironment
 @RunWith(RobolectricTestRunner::class)
 class SupplierRepositoryTest {
     private val context = RuntimeEnvironment.getApplication()
-    private val database = AppDatabase.getInstance(context)
+    private val AppDatabase.resetForTests(context) database = AppDatabase.getInstance(context)
     private val suppliers = SupplierRepository(context)
 
     @After

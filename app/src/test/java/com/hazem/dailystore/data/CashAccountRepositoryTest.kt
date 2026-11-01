@@ -17,6 +17,7 @@ class CashAccountRepositoryTest {
 
     @Before fun setUp() {
         val context = RuntimeEnvironment.getApplication()
+        AppDatabase.resetForTests(context)
         database = AppDatabase.getInstance(context)
         StoreRepository(context).ensureBaseSetup()
         val auth = AuthRepository(context)

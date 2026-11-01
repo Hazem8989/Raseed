@@ -20,6 +20,7 @@ class ServiceTransferRepositoryTest {
 
     @Before fun setUp() {
         val context = RuntimeEnvironment.getApplication()
+        AppDatabase.resetForTests(context)
         database = AppDatabase.getInstance(context)
         database.writableDatabase.execSQL("DELETE FROM service_transfers")
         database.writableDatabase.execSQL("DELETE FROM service_wallet_transactions")

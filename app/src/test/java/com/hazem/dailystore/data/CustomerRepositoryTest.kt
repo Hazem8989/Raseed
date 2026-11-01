@@ -23,6 +23,7 @@ class CustomerRepositoryTest {
     @Before
     fun setUp() {
         val context = RuntimeEnvironment.getApplication()
+        AppDatabase.resetForTests(context)
         database = AppDatabase.getInstance(context)
         val store = StoreRepository(context)
         store.ensureBaseSetup()

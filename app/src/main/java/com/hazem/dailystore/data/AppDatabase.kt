@@ -280,6 +280,17 @@ class AppDatabase private constructor(context: Context) :
         @Volatile
         private var INSTANCE: AppDatabase? = null
 
+        /**
+         * Starts each Robolectric repository test with a clean, isolated database.
+         * Production code must use getInstance(); this helper is only called by tests.
+         */
+        @Synchronized
+        internal fun resetForTests(context: Context) {
+            INSTANCE?.close()
+            INSTANCE = null
+            context.deleteDatabase(DATABASE_NAME)
+        }
+
         fun getInstance(context: Context): AppDatabase =
             INSTANCE ?: synchronized(this) {
                 INSTANCE ?: AppDatabase(context.applicationContext)

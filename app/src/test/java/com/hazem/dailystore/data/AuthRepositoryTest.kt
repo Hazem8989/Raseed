@@ -14,7 +14,9 @@ class AuthRepositoryTest {
     private lateinit var auth: AuthRepository
 
     @Before fun setUp() {
-        database = AppDatabase.getInstance(RuntimeEnvironment.getApplication())
+        val context = RuntimeEnvironment.getApplication()
+        AppDatabase.resetForTests(context)
+        database = AppDatabase.getInstance(context)
         auth = AuthRepository(RuntimeEnvironment.getApplication())
         auth.ensureInitialAdmin()
     }

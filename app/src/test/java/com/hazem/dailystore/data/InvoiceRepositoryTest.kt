@@ -25,6 +25,7 @@ class InvoiceRepositoryTest {
     @Before
     fun setUp() {
         val context = RuntimeEnvironment.getApplication()
+        AppDatabase.resetForTests(context)
         database = AppDatabase.getInstance(context)
         store = StoreRepository(context)
         invoices = InvoiceRepository(context)

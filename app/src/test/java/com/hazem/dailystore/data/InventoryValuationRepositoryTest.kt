@@ -25,6 +25,7 @@ class InventoryValuationRepositoryTest {
     @Before
     fun setUp() {
         val context = RuntimeEnvironment.getApplication()
+        AppDatabase.resetForTests(context)
         database = AppDatabase.getInstance(context)
         StoreRepository(context).ensureBaseSetup()
         val db = database.writableDatabase
