@@ -135,7 +135,7 @@ class AuthRepository(context: Context) {
 
     private fun requireActiveManager(userId: String) {
         val valid = database.readableDatabase.rawQuery(
-            "SELECT 1 FROM users WHERE id=? AND role_key='ADMIN' AND is_active=1", arrayOf(userId)
+            "SELECT 1 FROM users WHERE id=? AND role_key='ADMIN' AND is_active=1 AND must_change_password=0", arrayOf(userId)
         ).use { it.moveToFirst() }
         require(valid) { "يجب تسجيل الدخول بحساب مدير نشط لتنفيذ هذا الإجراء" }
     }
