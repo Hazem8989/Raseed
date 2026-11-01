@@ -83,6 +83,18 @@ class CustomerPaymentRepositoryTest {
             "SELECT COUNT(*) FROM cash_transactions WHERE source_id=? AND transaction_type='CUSTOMER_CREDIT_COLLECTION'",
             arrayOf(invoiceId)
         ).use { c -> assertTrue(c.moveToFirst()); assertEquals(1, c.getInt(0)) }
+
+        // Debt collection belongs to the collection day, is reported separately from sales,
+        // increases only the selected cash account, and never posts a second stock movement.
+        val collectionDate = SimpleDateFormat("yyyy-MM-dd", Locale.US).format(Date())
+        val dailyReport = DailyBalanceRepository(RuntimeEnvironment.getApplication()).dailyReport(collectionDate)
+        val drawerSummary = dailyReport.accounts.single { it.accountId == cashDrawerId }
+        assertEquals(0L, drawerSummary.salesReceiptsMinor)
+        assertEquals(15_000L, drawerSummary.debtCollectionsMinor)
+        assertEquals(15_000L, drawerSummary.electronicReceiptsMinor)
+        assertEquals(15_000L, dailyReport.physicalCashReceiptsByCurrency["SYP"])
+        assertEquals(stockBefore, stockQuantity(), 0.000001)
+        assertEquals(movementCountBefore, inventoryMovementCount(invoiceId))
     }
 
     @Test

@@ -43,7 +43,7 @@ class DailyBalanceRepositoryTest {
         val wallet = accounts.create("محفظة تقرير " + UUID.randomUUID(), "WALLET", "SYP", 0L)
         insertMovement(wallet.id, "SALE_RECEIPT", 40_000L, "sale-report")
         insertMovement(wallet.id, "CUSTOMER_CREDIT_COLLECTION", 20_000L, "debt-report")
-        val report = daily.dailyReport()
+        val report = daily.dailyReport(date)
         assertEquals(report.accounts.filter { it.accountType == "WALLET" && it.currencyCode == "SYP" }.sumOf { it.electronicReceiptsMinor }, report.electronicReceiptsByCurrency["SYP"])
         val row = report.accounts.single { it.accountId == wallet.id }
         assertEquals(40_000L, row.salesReceiptsMinor)
