@@ -69,6 +69,63 @@ class AppDatabaseTest {
     }
 
     @Test
+    fun upgradesVersionSevenDatabaseWithoutLosingExistingUserOrSettings() {
+        val context = RuntimeEnvironment.getApplication()
+        val db = database.writableDatabase
+        val originalUser = ContentValues().apply {
+            put("id", "legacy-admin")
+            put("username", "legacy-admin")
+            put("display_name", "مدير قديم")
+            put("password_hash", "preserved-hash")
+            put("password_salt", "preserved-salt")
+            put("role_key", "ADMIN")
+            put("is_active", 1)
+            put("must_change_password", 0)
+            put("created_at", "2026-10-01T08:00:00Z")
+            put("updated_at", "2026-10-01T08:00:00Z")
+        }
+        db.insertOrThrow("users", null, originalUser)
+        db.version = 7
+        database.close()
+
+        // Re-open the same on-disk database as an older installed version.
+        // Do not delete it: this specifically exercises the real 7 -> 8 migration.
+        AppDatabase.resetForTests(context, deleteExisting = false)
+        database = AppDatabase.getInstance(context)
+        val upgraded = database.writableDatabase
+
+        assertEquals(8, upgraded.version)
+        upgraded.rawQuery(
+            """SELECT username,display_name,password_hash,password_salt,role_key,is_active,
+                      must_change_password,created_at,updated_at
+               FROM users WHERE id=?""",
+            arrayOf("legacy-admin")
+        ).use { cursor ->
+            assertTrue("Legacy user must survive migration", cursor.moveToFirst())
+            assertEquals("legacy-admin", cursor.getString(0))
+            assertEquals("مدير قديم", cursor.getString(1))
+            assertEquals("preserved-hash", cursor.getString(2))
+            assertEquals("preserved-salt", cursor.getString(3))
+            assertEquals("ADMIN", cursor.getString(4))
+            assertEquals(1, cursor.getInt(5))
+            assertEquals(1, cursor.getInt(6))
+            assertEquals("2026-10-01T08:00:00Z", cursor.getString(7))
+            assertEquals("2026-10-01T08:00:00Z", cursor.getString(8))
+        }
+        upgraded.rawQuery(
+            "SELECT setting_value FROM app_settings WHERE setting_key='base_currency'",
+            null
+        ).use { cursor ->
+            assertTrue(cursor.moveToFirst())
+            assertEquals("USD", cursor.getString(0))
+        }
+        assertTrue("Migrated database must pass SQLite integrity check", upgraded.isDatabaseIntegrityOk)
+        upgraded.rawQuery("PRAGMA foreign_key_check", null).use { cursor ->
+            assertTrue("Migration must not introduce foreign-key violations", !cursor.moveToFirst())
+        }
+    }
+
+    @Test
     fun storesProductAndInventoryAndEnforcesForeignKeys() {
         val db = database.writableDatabase
 

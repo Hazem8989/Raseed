@@ -285,10 +285,10 @@ class AppDatabase private constructor(context: Context) :
          * Production code must use getInstance(); this helper is only called by tests.
          */
         @Synchronized
-        internal fun resetForTests(context: Context) {
+        internal fun resetForTests(context: Context, deleteExisting: Boolean = true) {
             INSTANCE?.close()
             INSTANCE = null
-            context.deleteDatabase(DATABASE_NAME)
+            if (deleteExisting) context.deleteDatabase(DATABASE_NAME)
         }
 
         fun getInstance(context: Context): AppDatabase =
