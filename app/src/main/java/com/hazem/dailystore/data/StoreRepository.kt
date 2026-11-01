@@ -292,8 +292,12 @@ class StoreRepository(context: Context) {
                     row.salePriceSyp != null -> CurrencyConverter.sypToUsdCents(row.salePriceSyp, exchangeRateMilli)
                     else -> 0L
                 }
-                require(costUsd > 0L && saleUsd > 0L) {
-                    "يجب تسجيل تكلفة شراء موجبة وسعر بيع موجب للصنف: $cleanName؛ لا يمكن إدخاله ضمن المخزون دون تكلفة قابلة للتقييم"
+                require((!row.tracksInventory || costUsd > 0L) && saleUsd > 0L) {
+                    if (row.tracksInventory) {
+                        "يجب تسجيل تكلفة شراء موجبة للصنف الذي يتتبع المخزون: $cleanName"
+                    } else {
+                        "سعر البيع المحوّل إلى الدولار أقل من سنت واحد أو غير صالح للصنف: $cleanName"
+                    }
                 }
 
                 val product = ContentValues().apply {
@@ -305,7 +309,7 @@ class StoreRepository(context: Context) {
                     put("unit_id", unitId)
                     put("purchase_cost_usd_cents", costUsd)
                     put("sale_price_usd_cents", saleUsd)
-                    put("track_inventory", 1)
+                    put("track_inventory", if (row.tracksInventory) 1 else 0)
                     put("created_at", now)
                     put("updated_at", now)
                 }
