@@ -22,7 +22,7 @@ concurrency:
 
 jobs:
   build:
-    name: Build Debug APK
+    name: Test and Build Android APK
     runs-on: ubuntu-latest
     timeout-minutes: 45
     env:
@@ -55,18 +55,51 @@ jobs:
           unzip -q /tmp/gradle.zip -d /tmp
           /tmp/gradle-8.9/bin/gradle --version
 
-      - name: Build APK
+      - name: Run unit tests
         run: |
           set -e
           echo "sdk.dir=$ANDROID_SDK_ROOT" > local.properties
-          /tmp/gradle-8.9/bin/gradle --no-daemon clean testDebugUnitTest assembleDebug
-          test -s app/build/outputs/apk/debug/app-debug.apk
-          sha256sum app/build/outputs/apk/debug/app-debug.apk
+          /tmp/gradle-8.9/bin/gradle --no-daemon clean testDebugUnitTest
+
+      - name: Build permanently signed release APK
+        if: ${{ secrets.ANDROID_KEYSTORE_BASE64 != '' && secrets.ANDROID_KEYSTORE_PASSWORD != '' && secrets.ANDROID_KEY_ALIAS != '' && secrets.ANDROID_KEY_PASSWORD != '' }}
+        env:
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+          APP_VERSION_NAME: ${{ vars.APP_VERSION_NAME }}
+        run: |
+          set -euo pipefail
+          echo "$ANDROID_KEYSTORE_BASE64" | base64 --decode > "$RUNNER_TEMP/the-daily-shop-release.jks"
+          test -s "$RUNNER_TEMP/the-daily-shop-release.jks"
+          export ANDROID_KEYSTORE_PATH="$RUNNER_TEMP/the-daily-shop-release.jks"
+          /tmp/gradle-8.9/bin/gradle --no-daemon assembleRelease
+          APK="app/build/outputs/apk/release/app-release.apk"
+          test -s "$APK"
+          "$ANDROID_HOME/build-tools/35.0.0/apksigner" verify --verbose "$APK"
+          sha256sum "$APK"
+          echo "APK_PATH=$APK" >> "$GITHUB_ENV"
+          echo "APK_KIND=stable-release-signed" >> "$GITHUB_ENV"
+
+      - name: Build development debug APK (not suitable for upgrading release installs)
+        if: ${{ !(secrets.ANDROID_KEYSTORE_BASE64 != '' && secrets.ANDROID_KEYSTORE_PASSWORD != '' && secrets.ANDROID_KEY_ALIAS != '' && secrets.ANDROID_KEY_PASSWORD != '') }}
+        env:
+          APP_VERSION_NAME: ${{ vars.APP_VERSION_NAME }}
+        run: |
+          set -e
+          /tmp/gradle-8.9/bin/gradle --no-daemon assembleDebug
+          APK="app/build/outputs/apk/debug/app-debug.apk"
+          test -s "$APK"
+          "$ANDROID_HOME/build-tools/35.0.0/apksigner" verify --verbose "$APK"
+          sha256sum "$APK"
+          echo "APK_PATH=$APK" >> "$GITHUB_ENV"
+          echo "APK_KIND=debug-development-only" >> "$GITHUB_ENV"
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: the-daily-shop-debug-apk
-          path: app/build/outputs/apk/debug/app-debug.apk
+          name: the-daily-shop-${{ env.APK_KIND }}
+          path: ${{ env.APK_PATH }}
           if-no-files-found: error
-          retention-days: 7
+          retention-days: 14
