@@ -135,6 +135,44 @@ class InvoiceRepositoryTest {
     }
 
     @Test
+    fun versionNineMigrationRestoresImmutableSalePostingDateFromOperationLedger() {
+        val sale = invoices.saveSalesDraft(
+            "posted-date-migration-draft", null, null, "2026-10-31", 0, null,
+            listOf(InvoiceLineInput(productId, BigDecimal.ONE, 250L))
+        )
+        assertTrue(invoices.postCashSale(sale.invoiceId, "posted-date-migration-op", cashAccountId))
+        val originalPostedAt = database.readableDatabase.rawQuery(
+            "SELECT created_at FROM operation_registry WHERE operation_id='posted-date-migration-op'",
+            null
+        ).use { c -> assertTrue(c.moveToFirst()); c.getString(0) }
+        database.writableDatabase.execSQL(
+            "UPDATE sales_invoices SET updated_at='2099-12-31T23:59:59.000Z' WHERE id=?",
+            arrayOf(sale.invoiceId)
+        )
+        // Recreate v9, before immutable posting timestamps were added.
+        database.writableDatabase.execSQL("DROP INDEX idx_sales_posted_operating_date")
+        database.writableDatabase.execSQL("DROP INDEX idx_sales_posted_at")
+        database.writableDatabase.execSQL("ALTER TABLE sales_invoices DROP COLUMN posted_operating_date")
+        database.writableDatabase.execSQL("ALTER TABLE sales_invoices DROP COLUMN posted_at")
+        database.writableDatabase.version = 9
+        database.close()
+        AppDatabase.resetForTests(RuntimeEnvironment.getApplication(), deleteExisting = false)
+        database = AppDatabase.getInstance(RuntimeEnvironment.getApplication())
+        val upgraded = database.writableDatabase
+        assertEquals(11, upgraded.version)
+        val restored = upgraded.rawQuery(
+            "SELECT posted_at,posted_operating_date FROM sales_invoices WHERE id=?",
+            arrayOf(sale.invoiceId)
+        ).use { c -> assertTrue(c.moveToFirst()); c.getString(0) to c.getString(1) }
+        assertEquals(originalPostedAt, restored.first)
+        assertEquals(10, restored.second.length)
+        val report = SalesProfitRepository(RuntimeEnvironment.getApplication())
+            .summarize(restored.second, restored.second)
+        assertEquals(1, report.invoiceCount)
+        assertEquals(250L, report.revenueUsdCents)
+    }
+
+    @Test
     fun fractionalFifoAllocationsRoundOnceAcrossLayers() {
         val kgUnit = store.getUnits().first { it.decimalPlaces == 3 }
         val fractionalProduct = store.saveProduct(
