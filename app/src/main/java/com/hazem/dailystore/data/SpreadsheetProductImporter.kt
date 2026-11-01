@@ -20,7 +20,8 @@ data class ProductImportRow(
     val purchaseCostUsdCents: Long?,
     val salePriceUsdCents: Long?,
     val sku: String?,
-    val barcode: String?
+    val barcode: String?,
+    val tracksInventory: Boolean = true
 ) {
     val usesSypPrices: Boolean get() = purchaseCostSyp != null || salePriceSyp != null
 }
@@ -154,6 +155,7 @@ object SpreadsheetProductImporter {
         val saleUsdCol = column("سعر البيع بالدولار", "سعر المبيع بالدولار", "sale price usd", "selling price usd")
         val skuCol = column("sku", "رمز sku")
         val barcodeCol = column("الباركود", "barcode", "باركود")
+        val trackInventoryCol = column("تتبع المخزون", "track inventory", "track_inventory")
         require(saleSypCol >= 0 || saleUsdCol >= 0) { "لم أجد عمود سعر البيع بالليرة أو الدولار" }
         val output = mutableListOf<ProductImportRow>()
         for (index in 1 until table.size) {
@@ -170,7 +172,14 @@ object SpreadsheetProductImporter {
                 purchaseCostUsdCents = value(costUsdCol)?.let { usdCents(it, index + 1) },
                 salePriceUsdCents = value(saleUsdCol)?.let { usdCents(it, index + 1) },
                 sku = value(skuCol),
-                barcode = value(barcodeCol)
+                barcode = value(barcodeCol),
+                tracksInventory = value(trackInventoryCol)?.let { raw ->
+                    when (raw.trim().lowercase(Locale.ROOT)) {
+                        "نعم", "yes", "true", "1" -> true
+                        "لا", "no", "false", "0" -> false
+                        else -> error("قيمة تتبع المخزون غير مفهومة في الصف ${index + 1}: $raw")
+                    }
+                } ?: true
             ))
         }
         require(output.isNotEmpty()) { "لم أجد أصنافاً صالحة للاستيراد" }
