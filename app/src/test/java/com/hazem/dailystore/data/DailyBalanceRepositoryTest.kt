@@ -31,6 +31,7 @@ class DailyBalanceRepositoryTest {
         val auth = AuthRepository(context)
         auth.ensureInitialAdmin()
         actorId = auth.authenticate("admin", "1234")!!.id
+        auth.changePassword(actorId, "1234", "TestAdmin123")
         accounts = CashAccountRepository(context)
         daily = DailyBalanceRepository(context)
     }
@@ -39,8 +40,8 @@ class DailyBalanceRepositoryTest {
 
     @Test fun walletSalesAndDebtCollectionsBothAppearInLiquidatableElectronicReceipts() {
         // The report groups physical receipts by currencies that have an active cash box.
-        accounts.create("درج تقرير " + UUID.randomUUID(), "CASH_BOX", "SYP", 0L)
-        val wallet = accounts.create("محفظة تقرير " + UUID.randomUUID(), "WALLET", "SYP", 0L)
+        accounts.create(actorId, "درج تقرير " + UUID.randomUUID(), "CASH_BOX", "SYP", 0L)
+        val wallet = accounts.create(actorId, "محفظة تقرير " + UUID.randomUUID(), "WALLET", "SYP", 0L)
         insertMovement(wallet.id, "SALE_RECEIPT", 40_000L, "sale-report")
         insertMovement(wallet.id, "CUSTOMER_CREDIT_COLLECTION", 20_000L, "debt-report")
         val report = daily.dailyReport(date)
@@ -53,8 +54,8 @@ class DailyBalanceRepositoryTest {
     }
 
     @Test fun walletToDrawerTransferIsAtomicIdempotentAndNotNewSales() {
-        val drawer = accounts.create("درج تحويل " + UUID.randomUUID(), "CASH_BOX", "SYP", 0L)
-        val wallet = accounts.create("محفظة تحويل " + UUID.randomUUID(), "WALLET", "SYP", 100_000L)
+        val drawer = accounts.create(actorId, "درج تحويل " + UUID.randomUUID(), "CASH_BOX", "SYP", 0L)
+        val wallet = accounts.create(actorId, "محفظة تحويل " + UUID.randomUUID(), "WALLET", "SYP", 100_000L)
         insertMovement(wallet.id, "SALE_RECEIPT", 40_000L, "sale-before-transfer")
         insertMovement(wallet.id, "CUSTOMER_CREDIT_COLLECTION", 20_000L, "debt-before-transfer")
         val first = daily.transferWalletToDrawer(actorId, wallet.id, drawer.id, 25_000L, "transfer-" + UUID.randomUUID())
@@ -82,8 +83,8 @@ class DailyBalanceRepositoryTest {
     }
 
     @Test fun dailyWalletOpeningAndCashFundingAreBalancedAndIdempotent() {
-        val source = accounts.create("صندوق تمويل محفظة " + UUID.randomUUID(), "CASH_BOX", "SYP", 10_000L)
-        val wallet = accounts.create("محفظة افتتاح " + UUID.randomUUID(), "WALLET", "SYP", 10_000L)
+        val source = accounts.create(actorId, "صندوق تمويل محفظة " + UUID.randomUUID(), "CASH_BOX", "SYP", 10_000L)
+        val wallet = accounts.create(actorId, "محفظة افتتاح " + UUID.randomUUID(), "WALLET", "SYP", 10_000L)
         daily.setWalletOpening(actorId, wallet.id, 15_000L, "مطابقة كشف المحفظة")
         val operation = "wallet-funding-" + UUID.randomUUID()
         daily.transferCashToWallet(actorId, source.id, wallet.id, 5_000L, operation, "REC-1")
@@ -97,9 +98,9 @@ class DailyBalanceRepositoryTest {
     }
 
     @Test fun coreCashBoxesCanBeFundedByBalancedInternalTransfers() {
-        val drawer = accounts.create("درج تمويل أساسي " + UUID.randomUUID(), "CASH_BOX", "SYP", 50_000L)
-        val supplier = accounts.create("صندوق موردين أساسي " + UUID.randomUUID(), "CASH_BOX", "SYP", 0L)
-        val recharge = accounts.create("صندوق تعبئة أساسي " + UUID.randomUUID(), "CASH_BOX", "SYP", 0L)
+        val drawer = accounts.create(actorId, "درج تمويل أساسي " + UUID.randomUUID(), "CASH_BOX", "SYP", 50_000L)
+        val supplier = accounts.create(actorId, "صندوق موردين أساسي " + UUID.randomUUID(), "CASH_BOX", "SYP", 0L)
+        val recharge = accounts.create(actorId, "صندوق تعبئة أساسي " + UUID.randomUUID(), "CASH_BOX", "SYP", 0L)
         accounts.setCurrentDayPrimaryDrawer("ADMIN", actorId, drawer.id)
         daily.transferCashBetweenBoxes(actorId, drawer.id, supplier.id, 20_000L,
             "cash-to-supplier-" + UUID.randomUUID(), "تخصيص نقد الموردين")
@@ -115,7 +116,7 @@ class DailyBalanceRepositoryTest {
     }
 
     @Test fun walletOpeningCannotBeChangedAfterDailyMovementsBegin() {
-        val wallet = accounts.create("محفظة مطابقة " + UUID.randomUUID(), "WALLET", "SYP", 0L)
+        val wallet = accounts.create(actorId, "محفظة مطابقة " + UUID.randomUUID(), "WALLET", "SYP", 0L)
         daily.setWalletOpening(actorId, wallet.id, 10_000L, "رصيد بداية اليوم")
         insertMovement(wallet.id, "CUSTOMER_CREDIT_COLLECTION", 1_000L, "wallet-opening-activity")
         try {
@@ -128,8 +129,8 @@ class DailyBalanceRepositoryTest {
     }
 
     @Test fun supplierRolloverIsSeparateAndPersonalWithdrawalsReduceItsAvailability() {
-        val drawer = accounts.create("درج رئيسي " + UUID.randomUUID(), "CASH_BOX", "SYP", 0L)
-        val supplierCash = accounts.create("نقد الموردين " + UUID.randomUUID(), "CASH_BOX", "SYP", 100_000L)
+        val drawer = accounts.create(actorId, "درج رئيسي " + UUID.randomUUID(), "CASH_BOX", "SYP", 0L)
+        val supplierCash = accounts.create(actorId, "نقد الموردين " + UUID.randomUUID(), "CASH_BOX", "SYP", 100_000L)
         accounts.setCurrentDayPrimaryDrawer("ADMIN", actorId, drawer.id)
         val initial = daily.setSupplierRollover(actorId, supplierCash.id, 80_000L, "من كشف أمس")
         assertEquals(80_000L, initial.availableMinor)
