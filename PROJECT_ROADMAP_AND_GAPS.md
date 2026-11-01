@@ -1,3 +1,7 @@
+> **Audit correction — 2026-11-02:** This roadmap contains older snapshots below. For the current verified implementation and open blockers, see [COMPREHENSIVE_AUDIT_2026-11-02.md](COMPREHENSIVE_AUDIT_2026-11-02.md). The current development branch has database version 11; FIFO layers/COGS and a gross-sales-profit summary are now implemented with automated tests. Encrypted backup/restore is also implemented with basic tests. Returns/refunds, stock adjustments, operating expenses, complete permission enforcement, full statements/exports, live sync, permanent release signing, and physical-device acceptance remain incomplete or pending. The current CI artifact is debug-only.
+>
+> This addendum supersedes any older status bullets below that describe FIFO or backup/restore as not yet implemented. It does not upgrade those features to production/device-accepted status.
+
 # The Daily Shop — Project Decisions, Status, and Remaining Work
 
 Last reviewed: 2026-10-31
