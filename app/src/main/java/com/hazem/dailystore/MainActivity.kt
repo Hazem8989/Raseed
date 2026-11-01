@@ -109,7 +109,7 @@ class MainActivity : Activity() {
             pendingBackupPassword = null
             val uri = data?.data
             if (resultCode != RESULT_OK || uri == null || password == null) {
-                password?.fill('\\u0000')
+                password?.fill(0.toChar())
                 return
             }
             try {
@@ -135,7 +135,7 @@ class MainActivity : Activity() {
                     .setPositiveButton("حسناً", null)
                     .show()
             } finally {
-                password.fill('\\u0000')
+                password.fill(0.toChar())
             }
             return
         }
@@ -925,7 +925,7 @@ class MainActivity : Activity() {
                     passwordField.error = "استخدم 10 أحرف على الأقل"
                     return@setOnClickListener
                 }
-                pendingBackupPassword?.fill('\\u0000')
+                pendingBackupPassword?.fill(0.toChar())
                 pendingBackupPassword = password.toCharArray()
                 val intent = if (restore) {
                     android.content.Intent(android.content.Intent.ACTION_OPEN_DOCUMENT).apply {
@@ -946,7 +946,7 @@ class MainActivity : Activity() {
                     startActivityForResult(intent, if (restore) backupRestoreRequestCode else backupCreateRequestCode)
                     dialog.dismiss()
                 } catch (e: Exception) {
-                    pendingBackupPassword?.fill('\\u0000')
+                    pendingBackupPassword?.fill(0.toChar())
                     pendingBackupPassword = null
                     Toast.makeText(this, "لا يتوفر مدير ملفات لاختيار موقع النسخة", Toast.LENGTH_LONG).show()
                 }
