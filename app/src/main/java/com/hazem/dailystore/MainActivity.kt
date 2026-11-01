@@ -2568,6 +2568,10 @@ class MainActivity : Activity() {
     }
 
     private fun showCreateCashAccountDialog() {
+        if (!isManager()) {
+            Toast.makeText(this, "إنشاء الحسابات المالية متاح للمدير فقط", Toast.LENGTH_SHORT).show()
+            return
+        }
         val content = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             setPadding(dp(18), dp(8), dp(18), dp(4))
@@ -2595,7 +2599,8 @@ class MainActivity : Activity() {
                     val balance = if (code == "USD") parseUsdCents(opening.text.toString())
                         else parseSypAmount(opening.text.toString())
                     val typeCode = listOf("CASH_BOX", "WALLET", "BANK", "OTHER")[type.selectedItemPosition]
-                    CashAccountRepository(this).create(name.text.toString(), typeCode, code, balance)
+                    CashAccountRepository(this).create(currentUserId ?: error("جلسة المدير غير صالحة"),
+                        name.text.toString(), typeCode, code, balance)
                     Toast.makeText(this, "تم إنشاء الحساب المالي", Toast.LENGTH_SHORT).show()
                     showCashAccounts()
                 } catch (e: Exception) {
@@ -2929,6 +2934,11 @@ class MainActivity : Activity() {
     }
 
     private fun showProductManagement() {
+        if (!isManager()) {
+            Toast.makeText(this, "إدارة المنتجات وسعر الصرف متاحة للمدير فقط", Toast.LENGTH_LONG).show()
+            showPointOfSale()
+            return
+        }
         markScreen("PRODUCTS")
         val repository = StoreRepository(this)
         repository.ensureBaseSetup()
@@ -3003,7 +3013,7 @@ class MainActivity : Activity() {
             setOnClickListener {
                 try {
                     val value = BigDecimal(rateInput.text.toString().trim().replace(',', '.'))
-                    repository.saveExchangeRate(value)
+                    repository.saveExchangeRate(value, currentUserId ?: error("جلسة المدير غير صالحة"))
                     Toast.makeText(this@MainActivity, "تم تحديث سعر الصرف؛ بقيت أسعار الدولار المرجعية ثابتة", Toast.LENGTH_LONG).show()
                     showProductManagement()
                 } catch (e: Exception) {
@@ -3100,7 +3110,7 @@ class MainActivity : Activity() {
                         .setNegativeButton("إلغاء", null)
                         .setPositiveButton("إيقاف") { _, _ ->
                             try {
-                                repository.setProductActive(product.id, false)
+                                repository.setProductActive(product.id, false, currentUserId ?: error("جلسة المدير غير صالحة"))
                                 refresh()
                                 Toast.makeText(this@MainActivity, "تم إيقاف المنتج", Toast.LENGTH_SHORT).show()
                             } catch (e: Exception) {
@@ -3192,6 +3202,10 @@ class MainActivity : Activity() {
     }
 
     private fun showProductEditor(existing: com.hazem.dailystore.data.StoreProduct?, onSaved: (() -> Unit)? = null) {
+        if (!isManager()) {
+            Toast.makeText(this, "إضافة المنتجات وتعديلها متاحان للمدير فقط", Toast.LENGTH_LONG).show()
+            return
+        }
         val repository = StoreRepository(this)
         val units = repository.getUnits()
         val categories = repository.getCategories()
@@ -3325,7 +3339,8 @@ class MainActivity : Activity() {
                         categories.getOrNull(categorySpinner.selectedItemPosition - 1)?.id else null
                     repository.saveProduct(
                         existing?.id, cleanName, barcode.text.toString(), sku.text.toString(),
-                        categoryId, unit.id, cost, price, tracks.isChecked, opening
+                        categoryId, unit.id, cost, price, tracks.isChecked, opening,
+                        currentUserId ?: error("جلسة المدير غير صالحة")
                     )
                     dialog.dismiss()
                     Toast.makeText(this, "تم حفظ بيانات المنتج", Toast.LENGTH_SHORT).show()
@@ -3339,6 +3354,10 @@ class MainActivity : Activity() {
     }
 
     private fun showAddCategoryDialog() {
+        if (!isManager()) {
+            Toast.makeText(this, "إضافة التصنيفات متاحة للمدير فقط", Toast.LENGTH_SHORT).show()
+            return
+        }
         val input = EditText(this).apply {
             hint = "اسم التصنيف"
             textSize = 16f
@@ -3351,7 +3370,7 @@ class MainActivity : Activity() {
             .setNegativeButton("إلغاء", null)
             .setPositiveButton("إضافة") { _, _ ->
                 try {
-                    StoreRepository(this).addCategory(input.text.toString())
+                    StoreRepository(this).addCategory(input.text.toString(), currentUserId ?: error("جلسة المدير غير صالحة"))
                     Toast.makeText(this, "تمت إضافة التصنيف", Toast.LENGTH_SHORT).show()
                     showProductManagement()
                 } catch (e: Exception) {
