@@ -134,14 +134,6 @@ class StoreRepository(context: Context) {
         val now = timestamp()
         db.beginTransaction()
         try {
-            requireManager(db, actorUserId)
-            val before = if (id != null) db.rawQuery(
-                "SELECT name,purchase_cost_usd_cents,sale_price_usd_cents,track_inventory FROM products WHERE id=?",
-                arrayOf(productId)
-            ).use { c ->
-                if (c.moveToFirst()) "{\\"name\\":\\""+jsonEscape(c.getString(0))+"\\",\\"purchase_cost_usd_cents\\":"+c.getLong(1)+",\\"sale_price_usd_cents\\":"+c.getLong(2)+",\\"track_inventory\\":"+c.getInt(3)+"}"
-                else null
-            } else null
             val values = ContentValues().apply {
                 put("name", clean)
                 put("created_at", now)
@@ -177,6 +169,14 @@ class StoreRepository(context: Context) {
         val now = timestamp()
         db.beginTransaction()
         try {
+            requireManager(db, actorUserId)
+            val before = if (id != null) db.rawQuery(
+                "SELECT name,purchase_cost_usd_cents,sale_price_usd_cents,track_inventory FROM products WHERE id=?",
+                arrayOf(productId)
+            ).use { c ->
+                if (c.moveToFirst()) "{\\"name\\":\\""+jsonEscape(c.getString(0))+"\\",\\"purchase_cost_usd_cents\\":"+c.getLong(1)+",\\"sale_price_usd_cents\\":"+c.getLong(2)+",\\"track_inventory\\":"+c.getInt(3)+"}"
+                else null
+            } else null
             val values = ContentValues().apply {
                 put("id", productId)
                 put("name", cleanName)
