@@ -89,6 +89,9 @@ class AppDatabaseTest {
         // The current onCreate schema is v8, so changing only user_version would
         // incorrectly leave the v8 column in place and make ALTER TABLE fail.
         db.execSQL("ALTER TABLE users DROP COLUMN must_change_password")
+        db.execSQL("DROP TABLE sales_item_cost_allocations")
+        db.execSQL("DROP TABLE inventory_cost_layers")
+        db.execSQL("ALTER TABLE sales_items DROP COLUMN cogs_usd_cents")
         db.version = 7
         database.close()
 
