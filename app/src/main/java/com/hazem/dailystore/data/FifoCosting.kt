@@ -26,7 +26,8 @@ internal object FifoCosting {
         unitCostUsdCents: Long,
         sourceType: String?,
         sourceId: String?,
-        receivedAt: String
+        receivedAt: String,
+        sourceItemId: String? = null
     ) {
         require(quantity > 0.0 && quantity.isFinite())
         val rate = when (sourceType) {
@@ -48,6 +49,7 @@ internal object FifoCosting {
             put("source_movement_id", movementId)
             put("source_type", sourceType)
             put("source_id", sourceId)
+            if (sourceItemId == null) putNull("source_item_id") else put("source_item_id", sourceItemId)
             put("received_quantity", quantity)
             put("remaining_quantity", quantity)
             if (unitCostUsdCents > 0L) put("unit_cost_usd_cents", unitCostUsdCents)
