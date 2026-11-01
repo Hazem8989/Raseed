@@ -105,6 +105,12 @@ class MainActivity : Activity() {
     override fun onActivityResult(requestCode: Int, resultCode: Int, data: android.content.Intent?) {
         super.onActivityResult(requestCode, resultCode, data)
         if (requestCode == backupCreateRequestCode || requestCode == backupRestoreRequestCode) {
+            if (currentUserRole != "ADMIN") {
+                pendingBackupPassword?.fill(0.toChar())
+                pendingBackupPassword = null
+                Toast.makeText(this, "النسخ الاحتياطي والاستعادة متاحان للمدير فقط", Toast.LENGTH_LONG).show()
+                return
+            }
             val password = pendingBackupPassword
             pendingBackupPassword = null
             val uri = data?.data
@@ -880,6 +886,10 @@ class MainActivity : Activity() {
     }
 
     private fun showBackupRestoreOptions() {
+        if (currentUserRole != "ADMIN") {
+            Toast.makeText(this, "النسخ الاحتياطي والاستعادة متاحان للمدير فقط", Toast.LENGTH_LONG).show()
+            return
+        }
         AlertDialog.Builder(this)
             .setTitle("النسخ الاحتياطي والاستعادة")
             .setItems(arrayOf("إنشاء نسخة احتياطية مشفّرة", "استعادة نسخة احتياطية")) { _, choice ->
