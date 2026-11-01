@@ -28,6 +28,14 @@ class AppDatabaseTest {
         database.close()
     }
 
+    private fun managerId(): String {
+        val auth = AuthRepository(RuntimeEnvironment.getApplication())
+        auth.ensureInitialAdmin()
+        val user = auth.authenticate("admin", "1234")!!
+        auth.changePassword(user.id, "1234", "TestAdmin123")
+        return user.id
+    }
+
     @Test
     fun createsCoreTablesAndDefaultCurrencySettings() {
         val db = database.writableDatabase
@@ -254,9 +262,10 @@ class AppDatabaseTest {
     fun savesExchangeRateAndConvertsBothCurrencies() {
         val repository = StoreRepository(RuntimeEnvironment.getApplication())
         repository.ensureBaseSetup()
+        val actor = managerId()
         val db = database.writableDatabase
         try {
-            repository.saveExchangeRate(BigDecimal("15000"))
+            repository.saveExchangeRate(BigDecimal("15000"), actor)
             assertEquals(15_000_000L, repository.getCurrentExchangeRateMilli())
             assertEquals(200L, CurrencyConverter.sypToUsdCents(30_000L, repository.getCurrentExchangeRateMilli()))
             assertEquals(30_000L, CurrencyConverter.usdCentsToSyp(200L, repository.getCurrentExchangeRateMilli()))
@@ -271,9 +280,10 @@ class AppDatabaseTest {
         repository.ensureBaseSetup()
         val unit = repository.getUnits().first()
         val category = repository.getCategories().first()
+        val actor = managerId()
         val id = repository.saveProduct(
             null, "منتج اختباري", "123456789", null, category.id, unit.id,
-            125, 175, true, 8.0
+            125, 175, true, 8.0, actor
         )
         val product = repository.listProducts().single { it.id == id }
         assertEquals("منتج اختباري", product.name)
