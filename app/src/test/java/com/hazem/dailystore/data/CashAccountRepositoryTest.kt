@@ -1,5 +1,6 @@
 package com.hazem.dailystore.data
 
+import android.content.ContentValues
 import java.util.UUID
 import org.junit.After
 import org.junit.Assert.*
@@ -34,7 +35,7 @@ class CashAccountRepositoryTest {
         accounts.updateDetails("ADMIN", adminId, account.id, "المحفظة الرئيسية", "WALLET", "USD")
         assertEquals("المحفظة الرئيسية", accounts.listAll().first { it.id == account.id }.name)
         database.readableDatabase.rawQuery(
-            "SELECT action,entity_type,before_json,after_json FROM audit_log WHERE entity_id=?",
+            "SELECT action,entity_type,before_json,after_json FROM audit_log WHERE entity_id=? AND action='UPDATE'",
             arrayOf(account.id)
         ).use {
             assertTrue(it.moveToFirst())
@@ -65,6 +66,42 @@ class CashAccountRepositoryTest {
         val dailyDrawer = accounts.currentDayPrimaryDrawer()
         assertNotNull(dailyDrawer)
         assertNotEquals(supplierCash.id, dailyDrawer!!.id)
+    }
+
+    @Test fun cashierCannotCreateFinancialAccount() {
+        val cashierId = UUID.randomUUID().toString()
+        val now = "2026-11-02T10:00:00.000Z"
+        val cashier = ContentValues().apply {
+            put("id", cashierId); put("username", "cashier_$cashierId")
+            put("display_name", "Cashier"); put("password_hash", "test")
+            put("password_salt", "test"); put("role_key", "CASHIER")
+            put("is_active", 1); put("must_change_password", 0)
+            put("created_at", now); put("updated_at", now)
+        }
+        database.writableDatabase.insertOrThrow("users", null, cashier)
+        val before = accounts.listAll().size
+        try {
+            accounts.create(cashierId, "حساب غير مصرح", "CASH_BOX", "SYP", 50_000L)
+            fail("Cashier must not create a financial account")
+        } catch (_: IllegalArgumentException) { }
+        assertEquals(before, accounts.listAll().size)
+        database.readableDatabase.rawQuery(
+            "SELECT COUNT(*) FROM audit_log WHERE user_id=? AND action='CREATE' AND entity_type='CASH_ACCOUNT'",
+            arrayOf(cashierId)
+        ).use { assertTrue(it.moveToFirst()); assertEquals(0, it.getInt(0)) }
+    }
+
+    @Test fun managerAccountCreationIsAudited() {
+        val account = accounts.create(adminId, "حساب مدقق " + UUID.randomUUID(), "WALLET", "SYP", 2500L)
+        database.readableDatabase.rawQuery(
+            "SELECT user_id,action,after_json FROM audit_log WHERE entity_id=? AND action='CREATE'",
+            arrayOf(account.id)
+        ).use {
+            assertTrue(it.moveToFirst())
+            assertEquals(adminId, it.getString(0))
+            assertEquals("CREATE", it.getString(1))
+            assertTrue(it.getString(2).contains("2500"))
+        }
     }
 
     @Test fun nonManagerCannotEditAccount() {
