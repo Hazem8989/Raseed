@@ -19,6 +19,7 @@ class CustomerRepositoryTest {
     private lateinit var customers: CustomerRepository
     private lateinit var invoices: InvoiceRepository
     private lateinit var productId: String
+    private lateinit var adminId: String
 
     @Before
     fun setUp() {
@@ -27,12 +28,17 @@ class CustomerRepositoryTest {
         database = AppDatabase.getInstance(context)
         val store = StoreRepository(context)
         store.ensureBaseSetup()
+        val auth = AuthRepository(context)
+        auth.ensureInitialAdmin()
+        val admin = auth.authenticate("admin", "1234")!!
+        auth.changePassword(admin.id, "1234", "TestAdmin123")
+        adminId = admin.id
         customers = CustomerRepository(context)
         invoices = InvoiceRepository(context)
         val unit = store.getUnits().first()
         val category = store.getCategories().first()
         productId = store.saveProduct(null, "صنف اختبار زبائن", null, null,
-            category.id, unit.id, 100, 250, true, 5.0)
+            category.id, unit.id, 100, 250, true, 5.0, adminId)
     }
 
     @After
