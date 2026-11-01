@@ -311,7 +311,7 @@ class DailyBalanceRepository(context:Context) {
         val v=ContentValues().apply{put("id",UUID.randomUUID().toString());put("user_id",user);put("action",action);put("entity_type",kind);put("entity_id",id);if(before==null)putNull("before_json")else put("before_json",before);put("after_json",after);put("created_at",now)}
         db.insertOrThrow("audit_log",null,v)
     }
-    private fun manager(db:SQLiteDatabase,id:String){require(id.isNotBlank()){"جلسة المدير غير صالحة"};val ok=db.rawQuery("SELECT 1 FROM users WHERE id=? AND role_key='ADMIN' AND is_active=1",arrayOf(id)).use{it.moveToFirst()};require(ok){"هذه العملية متاحة للمدير فقط"}}
+    private fun manager(db:SQLiteDatabase,id:String){require(id.isNotBlank()){"جلسة المدير غير صالحة"};val ok=db.rawQuery("SELECT 1 FROM users WHERE id=? AND role_key='ADMIN' AND is_active=1 AND must_change_password=0",arrayOf(id)).use{it.moveToFirst()};require(ok){"هذه العملية متاحة للمدير فقط"}}
     private fun typeName(t:String)=when(t){"SALE_RECEIPT"->"قبض مبيعات";"CUSTOMER_CREDIT_COLLECTION"->"تحصيل ديون";"PURCHASE_PAYMENT"->"دفعة مورد";"PERSONAL_WITHDRAWAL"->"مسحوبات شخصية";"ACCOUNT_TRANSFER_IN","ACCOUNT_TRANSFER_OUT"->"تحويل داخلي – تصريف محفظة";"WALLET_TOP_UP"->"تغذية محفظة";"SERVICE_TRANSFER_RECEIPT"->"مقبوض تحويل رصيد";"SERVICE_RECHARGE"->"شراء رصيد خدمة";else->t}
     private fun esc(s:String)=s.replace("\\","\\\\").replace("\"","\\\"").replace("\n","\\n").replace("\r","\\r")
     private fun hash(s:String)=MessageDigest.getInstance("SHA-256").digest(s.toByteArray(Charsets.UTF_8)).joinToString(""){"%02x".format(it)}
