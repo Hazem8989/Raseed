@@ -164,14 +164,26 @@ class StoreRepository(context: Context) {
     ): String {
         val cleanName = name.trim()
         require(cleanName.isNotEmpty()) { "اسم المنتج مطلوب" }
-        require(purchaseCostUsdCents >= 0 && salePriceUsdCents >= 0) { "السعر غير صالح" }
-        require(openingQuantity >= 0.0) { "الكمية الافتتاحية غير صالحة" }
+        require(purchaseCostUsdCents >= 0 && salePriceUsdCents > 0) { "سعر البيع يجب أن يكون موجباً والتكلفة غير سالبة" }
+        require(!tracksInventory || purchaseCostUsdCents > 0L) {
+            "يجب تسجيل تكلفة شراء موجبة للصنف الذي يتتبع المخزون"
+        }
+        require(openingQuantity.isFinite() && openingQuantity >= 0.0) { "الكمية الافتتاحية غير صالحة" }
+        require(tracksInventory || openingQuantity == 0.0) {
+            "لا يمكن تسجيل كمية افتتاحية لصنف لا يتتبع المخزون"
+        }
         val db = helper.writableDatabase
         val productId = id ?: UUID.randomUUID().toString()
         val now = timestamp()
         db.beginTransaction()
         try {
             requireManager(db, actorUserId)
+            val unitDecimals = db.rawQuery("SELECT decimal_places FROM units WHERE id=?", arrayOf(unitId.toString())).use {
+                require(it.moveToFirst()) { "وحدة القياس غير موجودة" }
+                it.getInt(0)
+            }
+            val quantityPrecision = BigDecimal.valueOf(openingQuantity).stripTrailingZeros().scale().coerceAtLeast(0)
+            require(quantityPrecision <= unitDecimals) { "دقة الكمية الافتتاحية تتجاوز دقة وحدة القياس" }
             val before = if (id != null) db.rawQuery(
                 "SELECT name,purchase_cost_usd_cents,sale_price_usd_cents,track_inventory FROM products WHERE id=?",
                 arrayOf(productId)
@@ -179,6 +191,29 @@ class StoreRepository(context: Context) {
                 if (c.moveToFirst()) "{\\"name\\":\\""+jsonEscape(c.getString(0))+"\\",\\"purchase_cost_usd_cents\\":"+c.getLong(1)+",\\"sale_price_usd_cents\\":"+c.getLong(2)+",\\"track_inventory\\":"+c.getInt(3)+"}"
                 else null
             } else null
+            if (id != null) {
+                val prior = db.rawQuery(
+                    "SELECT track_inventory,unit_id FROM products WHERE id=?", arrayOf(productId)
+                ).use { c ->
+                    require(c.moveToFirst()) { "المنتج المطلوب تعديله غير موجود" }
+                    c.getInt(0) to c.getLong(1)
+                }
+                val hasMovementHistory = db.rawQuery(
+                    "SELECT 1 FROM inventory_movements WHERE product_id=? LIMIT 1", arrayOf(productId)
+                ).use { it.moveToFirst() }
+                val currentQuantity = db.rawQuery(
+                    "SELECT COALESCE(SUM(quantity),0) FROM inventory_balances WHERE product_id=?",
+                    arrayOf(productId)
+                ).use { it.moveToFirst(); it.getDouble(0) }
+                if (hasMovementHistory || kotlin.math.abs(currentQuantity) > 0.0000001) {
+                    require(prior.first == tracksInventory) {
+                        "لا يمكن تغيير تتبع المخزون بعد وجود حركات أو رصيد للصنف"
+                    }
+                    require(prior.second == unitId) {
+                        "لا يمكن تغيير وحدة القياس بعد وجود حركات أو رصيد للصنف"
+                    }
+                }
+            }
             val values = ContentValues().apply {
                 put("id", productId)
                 put("name", cleanName)
