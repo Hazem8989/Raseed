@@ -85,6 +85,10 @@ class AppDatabaseTest {
             put("updated_at", "2026-10-01T08:00:00Z")
         }
         db.insertOrThrow("users", null, originalUser)
+        // Recreate the actual v7 users schema before lowering user_version.
+        // The current onCreate schema is v8, so changing only user_version would
+        // incorrectly leave the v8 column in place and make ALTER TABLE fail.
+        db.execSQL("ALTER TABLE users DROP COLUMN must_change_password")
         db.version = 7
         database.close()
 
