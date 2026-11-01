@@ -39,6 +39,7 @@ class BackupRestoreManager(private val context: Context) {
                 AppDatabase.getInstance(context).checkpointAndCloseForBackup()
                 val live = context.getDatabasePath(AppDatabase.DATABASE_NAME)
                 check(live.isFile && live.length() > 0L) { "قاعدة البيانات غير موجودة أو فارغة" }
+                check(live.length() <= MAX_DATABASE_BYTES) { "حجم قاعدة البيانات يتجاوز الحد المدعوم للنسخ الاحتياطي" }
                 copyFile(live, snapshot)
                 encryptSnapshot(snapshot, encrypted, password)
                 FileInputStream(encrypted).use { input -> input.copyTo(destination) }
@@ -110,12 +111,12 @@ class BackupRestoreManager(private val context: Context) {
         val cipher = cipher(Cipher.ENCRYPT_MODE, password, salt, iv)
         cipher.updateAAD(headerBytes)
         FileOutputStream(target).use { fileOut ->
-            BufferedOutputStream(fileOut).use { buffered ->
-                buffered.write(headerBytes)
-                CipherOutputStream(buffered, cipher).use { encryptedOut ->
-                    FileInputStream(snapshot).use { input -> input.copyTo(encryptedOut) }
-                }
+            val buffered = BufferedOutputStream(fileOut)
+            buffered.write(headerBytes)
+            CipherOutputStream(buffered, cipher).use { encryptedOut ->
+                FileInputStream(snapshot).use { input -> input.copyTo(encryptedOut) }
             }
+            fileOut.fd.sync()
         }
     }
 
@@ -128,19 +129,20 @@ class BackupRestoreManager(private val context: Context) {
         cipher.updateAAD(header)
         try {
             FileOutputStream(target).use { fileOut ->
-                BufferedOutputStream(fileOut).use { output ->
-                    CipherInputStream(data, cipher).use { decrypted ->
-                        val buffer = ByteArray(DEFAULT_BUFFER_SIZE)
-                        var total = 0L
-                        while (true) {
-                            val count = decrypted.read(buffer)
-                            if (count < 0) break
-                            total += count
-                            require(total <= MAX_DATABASE_BYTES) { "حجم قاعدة البيانات أكبر من الحد المسموح" }
-                            output.write(buffer, 0, count)
-                        }
+                val output = BufferedOutputStream(fileOut)
+                CipherInputStream(data, cipher).use { decrypted ->
+                    val buffer = ByteArray(DEFAULT_BUFFER_SIZE)
+                    var total = 0L
+                    while (true) {
+                        val count = decrypted.read(buffer)
+                        if (count < 0) break
+                        total += count
+                        require(total <= MAX_DATABASE_BYTES) { "حجم قاعدة البيانات أكبر من الحد المسموح" }
+                        output.write(buffer, 0, count)
                     }
                 }
+                output.flush()
+                fileOut.fd.sync()
             }
         } catch (error: Exception) {
             target.delete()
