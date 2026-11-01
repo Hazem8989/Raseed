@@ -120,8 +120,8 @@ class StoreRepository(context: Context) {
             }
             db.insertOrThrow("exchange_rates", null, values)
             insertAudit(db, actorUserId, "UPDATE_EXCHANGE_RATE", "EXCHANGE_RATE", milli.toString(),
-                if (old > 0L) "{\\"rate_syp_per_usd_milli\\":$old}" else null,
-                "{\\"rate_syp_per_usd_milli\\":$milli}", now)
+                if (old > 0L) """{"rate_syp_per_usd_milli":$old}""" else null,
+                """{"rate_syp_per_usd_milli":$milli}""", now)
             db.setTransactionSuccessful()
         } finally { db.endTransaction() }
         return milli
