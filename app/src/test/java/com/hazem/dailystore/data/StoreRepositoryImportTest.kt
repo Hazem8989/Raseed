@@ -60,6 +60,45 @@ class StoreRepositoryImportTest {
     }
 
     @Test
+    fun productEditsCannotDisableTrackedStockOrChangeItsUnitAfterMovement() {
+        val piece = repository.getUnits().first()
+        val kg = repository.getUnits().first { it.decimalPlaces == 3 }
+        val category = repository.getCategories().first()
+        val id = repository.saveProduct(
+            null, "Tracked edit guard $actorId", null, null, category.id, piece.id,
+            100L, 200L, true, 5.0, actorId
+        )
+
+        fun assertRejected(block: () -> Unit) {
+            var rejected = false
+            try { block() } catch (_: IllegalArgumentException) { rejected = true }
+            assertTrue("Unsafe tracked-inventory edit must be rejected", rejected)
+        }
+
+        assertRejected {
+            repository.saveProduct(id, "Tracked edit guard $actorId", null, null,
+                category.id, piece.id, 100L, 200L, false, 0.0, actorId)
+        }
+        assertRejected {
+            repository.saveProduct(id, "Tracked edit guard $actorId", null, null,
+                category.id, kg.id, 100L, 200L, true, 0.0, actorId)
+        }
+        assertRejected {
+            repository.saveProduct(null, "Uncosted tracked $actorId", null, null,
+                category.id, piece.id, 0L, 200L, true, 0.0, actorId)
+        }
+        val current = repository.listProducts().single { it.id == id }
+        assertTrue(current.tracksInventory)
+        assertEquals(5.0, current.stock, 0.000001)
+
+        val nonInventory = repository.saveProduct(
+            null, "Non inventory $actorId", null, null, category.id, piece.id,
+            0L, 200L, false, 0.0, actorId
+        )
+        assertFalse(repository.listProducts().single { it.id == nonInventory }.tracksInventory)
+    }
+
+    @Test
     fun cashierCannotChangeCatalogExchangeRateOrOpeningStock() {
         val cashierId = UUID.randomUUID().toString()
         val now = Instant.now().toString()
