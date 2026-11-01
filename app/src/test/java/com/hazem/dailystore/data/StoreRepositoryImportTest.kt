@@ -60,6 +60,56 @@ class StoreRepositoryImportTest {
     }
 
     @Test
+    fun cashierCannotChangeCatalogExchangeRateOrOpeningStock() {
+        val cashierId = UUID.randomUUID().toString()
+        val now = Instant.now().toString()
+        val cashier = ContentValues().apply {
+            put("id", cashierId); put("username", "cashier_$cashierId")
+            put("display_name", "Cashier"); put("password_hash", "test")
+            put("password_salt", "test"); put("role_key", "CASHIER")
+            put("is_active", 1); put("must_change_password", 0)
+            put("created_at", now); put("updated_at", now)
+        }
+        database.writableDatabase.insertOrThrow("users", null, cashier)
+
+        val unit = repository.getUnits().first()
+        val category = repository.getCategories().first()
+        val existingId = repository.saveProduct(
+            null, "Protected product $actorId", null, null, category.id, unit.id,
+            100L, 200L, true, 0.0, actorId
+        )
+        val beforeProducts = repository.listProducts().size
+
+        fun assertDenied(block: () -> Unit) {
+            var denied = false
+            try { block() } catch (_: IllegalArgumentException) { denied = true }
+            assertTrue("Cashier operation must be rejected", denied)
+        }
+
+        assertDenied { repository.saveExchangeRate(java.math.BigDecimal("15000"), cashierId) }
+        assertDenied {
+            repository.saveProduct(null, "Unauthorized $actorId", null, null, category.id,
+                unit.id, 100L, 200L, true, 0.0, cashierId)
+        }
+        assertDenied { repository.setProductActive(existingId, false, cashierId) }
+        assertDenied { repository.addCategory("Unauthorized category $actorId", cashierId) }
+        assertDenied { repository.recordOpeningStock(existingId, 5.0, cashierId, "unauthorized") }
+        val importRow = ProductImportRow(
+            rowNumber = 2, name = "Unauthorized import $actorId", category = categoryName,
+            unit = "قطعة", purchaseCostSyp = null, salePriceSyp = null,
+            purchaseCostUsdCents = 100L, salePriceUsdCents = 200L, sku = null, barcode = null
+        )
+        assertDenied { repository.importProducts(listOf(importRow), 0L, cashierId) }
+
+        assertEquals(beforeProducts, repository.listProducts().size)
+        assertTrue(repository.listProducts().any { it.id == existingId && it.stock == 0.0 })
+        database.readableDatabase.rawQuery("SELECT COUNT(*) FROM exchange_rates", null).use {
+            assertTrue(it.moveToFirst()); assertEquals(0, it.getInt(0))
+        }
+        database.writableDatabase.delete("users", "id=?", arrayOf(cashierId))
+    }
+
+    @Test
     fun importsSyrianPoundPricesUsingTheExplicitRateAndLeavesStockAtZero() {
         val rateMilli = 15_000_000L
         val row = ProductImportRow(
