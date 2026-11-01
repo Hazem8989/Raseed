@@ -253,6 +253,21 @@ class AppDatabase private constructor(context: Context) :
                 db.endTransaction()
             }
         }
+        if (version < 8) {
+            db.beginTransaction()
+            try {
+                db.execSQL("""
+                    ALTER TABLE users ADD COLUMN must_change_password INTEGER NOT NULL DEFAULT 1
+                        CHECK(must_change_password IN (0,1))
+                """.trimIndent())
+                // Existing accounts must rotate their credentials after this security upgrade.
+                db.execSQL("UPDATE users SET must_change_password=1")
+                db.setTransactionSuccessful()
+                version = 8
+            } finally {
+                db.endTransaction()
+            }
+        }
         if (version != newVersion) {
             throw IllegalStateException("Missing database migration from version $version to $newVersion")
         }
@@ -260,7 +275,7 @@ class AppDatabase private constructor(context: Context) :
 
     companion object {
         const val DATABASE_NAME = "the_daily_shop.db"
-        const val DATABASE_VERSION = 7
+        const val DATABASE_VERSION = 8
 
         @Volatile
         private var INSTANCE: AppDatabase? = null
@@ -289,6 +304,7 @@ class AppDatabase private constructor(context: Context) :
                 password_salt TEXT NOT NULL,
                 role_key TEXT NOT NULL,
                 is_active INTEGER NOT NULL DEFAULT 1 CHECK(is_active IN (0,1)),
+                must_change_password INTEGER NOT NULL DEFAULT 1 CHECK(must_change_password IN (0,1)),
                 created_at TEXT NOT NULL,
                 updated_at TEXT NOT NULL,
                 last_login_at TEXT
