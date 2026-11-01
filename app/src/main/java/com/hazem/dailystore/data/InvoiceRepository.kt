@@ -468,7 +468,8 @@ class InvoiceRepository(context: Context) {
         if (delta > 0.0) {
             FifoCosting.addLayer(
                 db, movementId, productId, warehouseId, delta, unitCost,
-                sourceType, invoiceId, now
+                sourceType, invoiceId, now,
+                sourceItemId = movementOperationId.substringAfterLast(':')
             )
         }
     }
