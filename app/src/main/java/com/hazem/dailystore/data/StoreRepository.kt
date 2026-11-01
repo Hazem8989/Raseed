@@ -169,6 +169,9 @@ class StoreRepository(context: Context) {
             "يجب تسجيل تكلفة شراء موجبة للصنف الذي يتتبع المخزون"
         }
         require(openingQuantity.isFinite() && openingQuantity >= 0.0) { "الكمية الافتتاحية غير صالحة" }
+        require(id == null || openingQuantity == 0.0) {
+            "لا يمكن إدخال كمية افتتاحية عند تعديل منتج موجود؛ استخدم عملية جرد مستقلة"
+        }
         require(tracksInventory || openingQuantity == 0.0) {
             "لا يمكن تسجيل كمية افتتاحية لصنف لا يتتبع المخزون"
         }
@@ -254,6 +257,8 @@ class StoreRepository(context: Context) {
                         put("unit_cost_usd_cents", purchaseCostUsdCents)
                         put("source_type", "PRODUCT_SETUP")
                         put("source_id", productId)
+                        put("operation_id", "PRODUCT_SETUP:$productId")
+                        put("created_by", actorUserId)
                         put("note", "رصيد افتتاحي عند إنشاء المنتج")
                         put("created_at", now)
                     }
