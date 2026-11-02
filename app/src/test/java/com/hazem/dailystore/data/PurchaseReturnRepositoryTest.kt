@@ -75,6 +75,7 @@ class PurchaseReturnRepositoryTest {
         assertEquals(10000L,statement.entries.first { it.type=="PURCHASE_INVOICE" }.debitUsdCents)
         assertEquals(300000L,statement.entries.first { it.type=="PURCHASE_RETURN" }.creditSypMinor)
         assertEquals(700000L,statement.closingBalanceSypMinor)
+        assertEquals(7000L,statement.closingBalanceUsdCents)
         assertEquals(0,statement.unpricedEntryCount)
     }
 
