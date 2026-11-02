@@ -325,4 +325,34 @@ class InvoiceRepositoryTest {
         "SELECT quantity FROM inventory_balances WHERE product_id=?",
         arrayOf(productId)
     ).use { if (it.moveToFirst()) it.getDouble(0) else 0.0 }
+
+    @Test
+    fun cashierCanSaveSalesButCannotCreatePurchaseInvoices() {
+        val auth = AuthRepository(RuntimeEnvironment.getApplication())
+        val cashierId = auth.createUser(
+            "ADMIN", adminId, "cashierinvoice", "موظف بيع", "Cashier5678", "CASHIER"
+        )
+        auth.changePassword(cashierId, "Cashier5678", "CashierPass2026")
+
+        val sale = invoices.saveSalesDraft(
+            cashierId, "cashier-sale-${UUID.randomUUID()}", null, null,
+            "2026-11-02", 0L, null, listOf(InvoiceLineInput(productId, 1.0, 250L))
+        )
+        assertTrue(sale.invoiceId.isNotBlank())
+
+        val before = database.readableDatabase.rawQuery(
+            "SELECT COUNT(*) FROM purchase_invoices", null
+        ).use { it.moveToFirst(); it.getInt(0) }
+        try {
+            invoices.savePurchaseDraft(
+                cashierId, "cashier-purchase-${UUID.randomUUID()}", null, null,
+                "2026-11-02", 0L, null, listOf(InvoiceLineInput(productId, 1.0, 100L))
+            )
+            org.junit.Assert.fail("Cashier must not create purchase invoices")
+        } catch (_: IllegalArgumentException) { }
+        val after = database.readableDatabase.rawQuery(
+            "SELECT COUNT(*) FROM purchase_invoices", null
+        ).use { it.moveToFirst(); it.getInt(0) }
+        assertEquals(before, after)
+    }
 }
