@@ -356,6 +356,52 @@ class SyncProtocolRepository(private val context: Context, private val credentia
         return sequence
     }
 
+    /** Explicitly maps a remote secondary login to a local primary account. */
+    fun mapSecondaryActor(
+        managerUserId: String, secondaryDeviceId: String,
+        remoteActorUserId: String, primaryUserId: String
+    ) {
+        require(remoteActorUserId.isNotBlank() && primaryUserId.isNotBlank())
+        val db = database.writableDatabase
+        db.beginTransaction()
+        try {
+            requirePrimaryManager(db, managerUserId)
+            val enrolled = db.rawQuery(
+                "SELECT 1 FROM sync_devices WHERE device_id=? AND device_role='SECONDARY' AND status='ACTIVE'",
+                arrayOf(secondaryDeviceId)
+            ).use { it.moveToFirst() }
+            require(enrolled) { "الجهاز الثانوي غير مسجل أو غير مفعل" }
+            val userActive = db.rawQuery(
+                "SELECT 1 FROM users WHERE id=? AND is_active=1 AND must_change_password=0",
+                arrayOf(primaryUserId)
+            ).use { it.moveToFirst() }
+            require(userActive) { "حساب المستخدم الأساسي غير مفعل أو يتطلب تغيير كلمة المرور" }
+            val now = timestamp()
+            db.insertWithOnConflict("sync_actor_mappings", null, ContentValues().apply {
+                put("device_id", secondaryDeviceId); put("remote_actor_user_id", remoteActorUserId)
+                put("primary_user_id", primaryUserId); put("is_active", 1)
+                put("mapped_by", managerUserId); put("mapped_at", now)
+            }, SQLiteDatabase.CONFLICT_REPLACE)
+            audit(db, managerUserId, "SYNC_ACTOR_MAPPED", secondaryDeviceId, null,
+                JSONObject().put("remote_actor_user_id", remoteActorUserId)
+                    .put("primary_user_id", primaryUserId).toString(), now)
+            db.setTransactionSuccessful()
+        } finally { db.endTransaction() }
+    }
+
+    private fun requiredPermissionForBusinessOperation(operation: String): String =
+        when (operation) {
+            "POST_SALES_INVOICE" -> PermissionPolicy.SALES_CHECKOUT
+            "POST_PURCHASE_INVOICE" -> PermissionPolicy.PURCHASES_MANAGE
+            "COLLECT_CUSTOMER_PAYMENT" -> PermissionPolicy.CUSTOMERS_COLLECT
+            "POST_SUPPLIER_PAYMENT" -> PermissionPolicy.SUPPLIER_PAYMENTS_MANAGE
+            "POST_OPERATING_EXPENSE" -> PermissionPolicy.EXPENSES_MANAGE
+            "EXECUTE_SERVICE_TRANSFER" -> PermissionPolicy.SERVICE_TRANSFERS_EXECUTE
+            "POST_SALES_RETURN", "POST_PURCHASE_RETURN" -> PermissionPolicy.RETURNS_PROCESS
+            "ADJUST_INVENTORY" -> PermissionPolicy.INVENTORY_ADJUST
+            else -> throw IllegalArgumentException("نوع العملية غير مدعوم للاعتماد عن بعد")
+        }
+
     /**
      * Durable authenticated receive on the primary. This only records an inbox
      * command and advances its per-device receive cursor; domain posting is a
@@ -371,6 +417,18 @@ class SyncProtocolRepository(private val context: Context, private val credentia
                 arrayOf(envelope.originDeviceId)
             ).use { it.moveToFirst() }
             require(active) { "تم إلغاء تسجيل الجهاز المرسل" }
+            val payload = JSONObject(envelope.payloadJson)
+            val businessOperation = payload.optString("business_operation")
+            val requiredPermission = requiredPermissionForBusinessOperation(businessOperation)
+            val mappedUser = db.rawQuery(
+                """SELECT m.primary_user_id FROM sync_actor_mappings m
+                   JOIN users u ON u.id=m.primary_user_id
+                   WHERE m.device_id=? AND m.remote_actor_user_id=? AND m.is_active=1
+                     AND u.is_active=1 AND u.must_change_password=0""".trimIndent(),
+                arrayOf(envelope.originDeviceId, envelope.actorUserId)
+            ).use { c -> if (c.moveToFirst()) c.getString(0) else null }
+                ?: throw IllegalArgumentException("لم يتم ربط مستخدم الجهاز الثانوي بحساب مخول على الجهاز الأساسي")
+            PermissionPolicy.require(db, mappedUser, requiredPermission)
             val existing = db.rawQuery(
                 "SELECT payload_sha256 FROM sync_inbox WHERE operation_id=?",
                 arrayOf(envelope.operationId)
