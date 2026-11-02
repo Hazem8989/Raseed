@@ -146,6 +146,9 @@ class PurchasePaymentRepositoryTest {
             syp.id, 100000L)
         assertEquals(1000L, result.paidUsdCents)
         assertEquals(9000L, result.outstandingUsdCents)
+        val statement = PartyStatementRepository(RuntimeEnvironment.getApplication()).supplier(supplierId)
+        assertEquals(9000L, statement.closingBalanceUsdCents)
+        assertEquals(900000L, statement.closingBalanceSypMinor)
 
         val newerRate = ContentValues().apply {
             put("id", UUID.randomUUID().toString())
