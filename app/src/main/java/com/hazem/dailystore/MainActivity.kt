@@ -52,6 +52,9 @@ import com.hazem.dailystore.data.InventoryValuationRepository
 import com.hazem.dailystore.data.SalesProfitRepository
 import com.hazem.dailystore.data.PermissionPolicy
 import com.hazem.dailystore.data.InventoryAdjustmentRepository
+import com.hazem.dailystore.data.SalesReturnRepository
+import com.hazem.dailystore.data.SalesReturnItemInput
+import com.hazem.dailystore.data.SalesRefundAllocationInput
 import java.math.BigDecimal
 import java.math.RoundingMode
 import java.text.DecimalFormat
@@ -982,6 +985,7 @@ class MainActivity : Activity() {
             "نقطة البيع" to "واجهة البيع الرئيسية",
             "المنتجات والمخزون" to "إدارة المنتجات والكميات",
             "تسويات المخزون" to "تسجيل فروقات الجرد بالزيادة أو النقصان",
+            "مرتجعات المبيعات" to "إرجاع أصناف ورد المبالغ للعملاء",
             "المشتريات" to "فواتير الشراء والموردون",
             "العملاء والديون" to "ملفات العملاء والأرصدة",
             "الصناديق والمحافظ" to "الحركة النقدية والحسابات",
@@ -992,7 +996,7 @@ class MainActivity : Activity() {
         )
         lateinit var popup: PopupWindow
         val visibleEntries = if (isManager()) entries else entries.filterNot {
-            it.first in setOf("المنتجات والمخزون", "تسويات المخزون", "المشتريات", "التقارير", "النسخ الاحتياطي والاستعادة", "المستخدمون والصلاحيات")
+            it.first in setOf("المنتجات والمخزون", "تسويات المخزون", "مرتجعات المبيعات", "المشتريات", "التقارير", "النسخ الاحتياطي والاستعادة", "المستخدمون والصلاحيات")
         }
         visibleEntries.forEach { (title, description) ->
             val item = LinearLayout(this).apply {
@@ -1006,6 +1010,7 @@ class MainActivity : Activity() {
                         "نقطة البيع" -> showPointOfSale()
                         "المنتجات والمخزون" -> showProductManagement()
                         "تسويات المخزون" -> showInventoryAdjustments()
+                        "مرتجعات المبيعات" -> showSalesReturns()
                         "المشتريات" -> showPurchases()
                         "العملاء والديون" -> showCustomers()
                         "الصناديق والمحافظ" -> showCashAccounts()
@@ -3133,6 +3138,174 @@ class MainActivity : Activity() {
         background = inputBackground()
     }
 
+
+
+    private fun showSalesReturns() {
+        val repository = SalesReturnRepository(this)
+        markScreen("SALES_RETURNS")
+        val page = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setBackgroundColor(backgroundColor) }
+        val header = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL
+            setPadding(dp(14), dp(10), dp(14), dp(10)); setBackgroundColor(Color.WHITE)
+        }
+        header.addView(Button(this).apply {
+            text = "‹"; textSize = 25f; isAllCaps = false; setTextColor(green)
+            setBackgroundColor(Color.TRANSPARENT); setOnClickListener { showPointOfSale() }
+        }, LinearLayout.LayoutParams(dp(48), dp(48)))
+        header.addView(label("مرتجعات المبيعات", 19f, green, true, Gravity.CENTER),
+            LinearLayout.LayoutParams(0, -2, 1f))
+        val content = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL; setPadding(dp(16), dp(16), dp(16), dp(24))
+        }
+        content.addView(label("فواتير قابلة للإرجاع", 21f, green, true, Gravity.RIGHT))
+        content.addView(label(
+            "يُخصم الدين المستحق أولاً، ثم يُرد المتبقي نقداً. يمكنك توزيع المبلغ النقدي على أكثر من صندوق أو محفظة.",
+            13f, mutedColor, false, Gravity.RIGHT
+        ).apply { setPadding(0, dp(5), 0, dp(12)) })
+        val invoices = repository.listReturnableInvoices()
+        if (invoices.isEmpty()) {
+            content.addView(label("لا توجد فواتير معتمدة تحتوي كميات متاحة للإرجاع.", 14f, mutedColor, false, Gravity.CENTER))
+        } else invoices.forEach { invoice ->
+            val card = LinearLayout(this).apply {
+                orientation = LinearLayout.VERTICAL; setPadding(dp(13), dp(11), dp(13), dp(11))
+                background = cardBackground()
+            }
+            card.addView(label("فاتورة " + invoice.number, 16f, green, true, Gravity.RIGHT))
+            card.addView(label(
+                invoice.date + " • " + (invoice.customerName ?: "بيع نقدي") + " • " + invoice.saleType,
+                12f, mutedColor, false, Gravity.RIGHT
+            ))
+            card.addView(label("الإجمالي: " + invoice.totalUsdCents + " سنت USD", 13f, textColor, true, Gravity.RIGHT))
+            card.addView(smallButton("إنشاء مرتجع") { showSalesReturnEditor(invoice.id) },
+                fieldParams(dp(42), dp(7)))
+            content.addView(card, fieldParams(-2, dp(8)))
+        }
+        val scroll = ScrollView(this).apply { isFillViewport = true; addView(content) }
+        page.addView(header, matchWidth())
+        page.addView(scroll, LinearLayout.LayoutParams(-1, 0, 1f))
+        setContentView(page)
+    }
+
+    private fun showSalesReturnEditor(invoiceId: String) {
+        val actor = currentUserId ?: return
+        val repository = SalesReturnRepository(this)
+        val items = repository.listReturnableItems(invoiceId)
+        val cashRepository = CashAccountRepository(this)
+        val supplierRolloverId = cashRepository.systemRoleAccountId("SUPPLIER_ROLLOVER")
+        val accounts = cashRepository.listActive().filter {
+            (it.currencyCode == "SYP" || it.currencyCode == "USD") && it.id != supplierRolloverId
+        }
+        val content = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL; setPadding(dp(16), dp(8), dp(16), dp(8))
+        }
+        val quantities = linkedMapOf<String, EditText>()
+        content.addView(label("الكميات المراد إرجاعها", 16f, green, true, Gravity.RIGHT))
+        items.forEach { item ->
+            val row = LinearLayout(this).apply {
+                orientation = LinearLayout.VERTICAL; setPadding(0, dp(4), 0, dp(4))
+            }
+            row.addView(label(
+                item.productName + " • مباع " + item.soldQuantity.toPlainString() +
+                    " • سبق إرجاعه " + item.returnedQuantity.toPlainString() +
+                    " • متاح " + item.availableQuantity.toPlainString(),
+                13f, textColor, true, Gravity.RIGHT
+            ))
+            val quantity = fieldForDialog("الكمية المرتجعة",
+                type = InputType.TYPE_CLASS_NUMBER or InputType.TYPE_NUMBER_FLAG_DECIMAL)
+            quantities[item.id] = quantity
+            row.addView(quantity, fieldParams(dp(44), dp(4)))
+            content.addView(row, matchWidth())
+        }
+        val reason = fieldForDialog("سبب المرتجع")
+        content.addView(reason, fieldParams(dp(46), dp(8)))
+        val summary = label("اضغط معاينة لحساب قيمة المرتجع والدين ورد النقد.", 13f, mutedColor, false, Gravity.RIGHT)
+        content.addView(summary, fieldParams(-2, dp(8)))
+        content.addView(label("توزيع رد المبلغ النقدي", 15f, green, true, Gravity.RIGHT))
+        content.addView(label(
+            "أضف حساباً أو أكثر. المبلغ يُدخل بعملة الحساب: الدولار للحساب USD والليرة للحساب SYP.",
+            12f, mutedColor, false, Gravity.RIGHT
+        ))
+        val allocationContainer = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+        val allocationRows = mutableListOf<Pair<Spinner, EditText>>()
+        fun addAllocationRow() {
+            if (accounts.isEmpty()) {
+                Toast.makeText(this, "لا يوجد حساب نشط صالح لرد المبلغ", Toast.LENGTH_LONG).show()
+                return
+            }
+            val row = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(0, dp(3), 0, dp(3)) }
+            val accountSpinner = Spinner(this@MainActivity)
+            accountSpinner.adapter = ArrayAdapter(this@MainActivity, android.R.layout.simple_spinner_dropdown_item,
+                accounts.map { it.name + " • " + it.currencyCode + " • " + formatAccountBalance(it.balanceMinor, it.currencyCode) })
+            val amount = fieldForDialog("المبلغ من هذا الحساب")
+            row.addView(accountSpinner, fieldParams(dp(44), dp(2)))
+            row.addView(amount, fieldParams(dp(44), dp(2)))
+            allocationContainer.addView(row, matchWidth())
+            allocationRows.add(accountSpinner to amount)
+        }
+        content.addView(allocationContainer, matchWidth())
+        content.addView(smallButton("+ إضافة حساب للتوزيع") { addAllocationRow() },
+            fieldParams(dp(40), dp(5)))
+        val scroll = ScrollView(this).apply { isFillViewport = true; addView(content) }
+        val dialog = AlertDialog.Builder(this)
+            .setTitle("إنشاء مرتجع مبيعات")
+            .setView(scroll)
+            .setNegativeButton("إلغاء", null)
+            .setNeutralButton("معاينة", null)
+            .setPositiveButton("اعتماد المرتجع", null)
+            .create()
+        fun selectedItems(): List<SalesReturnItemInput> = quantities.mapNotNull { (id, field) ->
+            val raw = field.text.toString().trim().replace(',', '.')
+            if (raw.isEmpty()) null else SalesReturnItemInput(id, BigDecimal(raw))
+        }
+        fun selectedAllocations(): List<SalesRefundAllocationInput> = allocationRows.mapNotNull { (spinner, field) ->
+            val raw = field.text.toString().trim().replace(',', '.')
+            if (raw.isEmpty()) null else {
+                val account = accounts[spinner.selectedItemPosition]
+                val minor = BigDecimal(raw).multiply(BigDecimal.valueOf(if (account.currencyCode == "USD") 100L else 1L))
+                    .setScale(0, RoundingMode.HALF_UP).longValueExact()
+                SalesRefundAllocationInput(account.id, minor)
+            }
+        }
+        dialog.setOnShowListener {
+            dialog.getButton(AlertDialog.BUTTON_NEUTRAL).setOnClickListener {
+                try {
+                    val selected = selectedItems()
+                    require(selected.isNotEmpty()) { "أدخل كمية مرتجعة لصنف واحد على الأقل" }
+                    val preview = repository.previewSalesReturn(invoiceId, selected)
+                    summary.text = "قيمة المرتجع: " + preview.totalUsdCents +
+                        " سنت USD\nتخفيض الدين: " + preview.creditReductionUsdCents +
+                        " سنت USD\nالمبلغ النقدي المطلوب رده: " + preview.cashRefundSypMinor + " ل.س"
+                    if (preview.cashRefundSypMinor > 0L && allocationRows.isEmpty()) addAllocationRow()
+                } catch (e: Exception) {
+                    Toast.makeText(this, e.message ?: "تعذرت معاينة المرتجع", Toast.LENGTH_LONG).show()
+                }
+            }
+            dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener {
+                try {
+                    val selected = selectedItems()
+                    require(selected.isNotEmpty()) { "أدخل كمية مرتجعة لصنف واحد على الأقل" }
+                    val preview = repository.previewSalesReturn(invoiceId, selected)
+                    val allocations = selectedAllocations()
+                    if (preview.cashRefundSypMinor == 0L) require(allocations.isEmpty()) {
+                        "لا يوجد مبلغ نقدي مستحق؛ احذف توزيعات رد المبلغ"
+                    } else require(allocations.isNotEmpty()) { "حدد حساباً ومبلغ الرد" }
+                    val usedIds = allocations.map { it.cashAccountId }
+                    require(usedIds.distinct().size == usedIds.size) { "لا تكرر الحساب؛ اجمع مبلغه في سطر واحد" }
+                    val result = repository.postSalesReturn(
+                        actor, invoiceId, UUID.randomUUID().toString(),
+                        SimpleDateFormat("yyyy-MM-dd", Locale.US).format(Date()),
+                        reason.text.toString(), selected, allocations
+                    )
+                    Toast.makeText(this, "تم اعتماد المرتجع " + result.returnNumber, Toast.LENGTH_LONG).show()
+                    dialog.dismiss()
+                    showSalesReturns()
+                } catch (e: Exception) {
+                    Toast.makeText(this, e.message ?: "تعذر اعتماد المرتجع", Toast.LENGTH_LONG).show()
+                }
+            }
+        }
+        dialog.show()
+    }
 
     private fun showInventoryAdjustments() {
         val actor = currentUserId ?: return
