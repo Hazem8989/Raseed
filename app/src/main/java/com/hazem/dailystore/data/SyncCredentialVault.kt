@@ -15,7 +15,7 @@ import javax.crypto.spec.GCMParameterSpec
  * The plaintext credential is returned only to the active sync caller and is never written
  * to ordinary preferences or the SQLite database.
  */
-class SyncCredentialVault(context: Context) {
+class SyncCredentialVault(context: Context, private val testKeyProvider: (() -> SecretKey)? = null) {
     private val appContext = context.applicationContext
     private val preferences = appContext.getSharedPreferences(PREFERENCES, Context.MODE_PRIVATE)
 
@@ -54,6 +54,7 @@ class SyncCredentialVault(context: Context) {
     }
 
     private fun encryptionKey(): SecretKey {
+        testKeyProvider?.let { return it() }
         val store = KeyStore.getInstance(ANDROID_KEYSTORE).apply { load(null) }
         (store.getKey(KEY_ALIAS, null) as? SecretKey)?.let { return it }
         val generator = KeyGenerator.getInstance(KeyProperties.KEY_ALGORITHM_AES, ANDROID_KEYSTORE)
