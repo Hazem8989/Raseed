@@ -57,6 +57,9 @@ import com.hazem.dailystore.data.InventoryAdjustmentRepository
 import com.hazem.dailystore.data.SalesReturnRepository
 import com.hazem.dailystore.data.SalesReturnItemInput
 import com.hazem.dailystore.data.SalesRefundAllocationInput
+import com.hazem.dailystore.data.PurchaseReturnRepository
+import com.hazem.dailystore.data.PurchaseReturnItemInput
+import com.hazem.dailystore.data.SupplierRefundAllocationInput
 import java.math.BigDecimal
 import java.math.RoundingMode
 import java.text.DecimalFormat
@@ -374,6 +377,7 @@ class MainActivity : Activity() {
         when (activeScreenKey) {
             "PRODUCTS" -> showProductManagement()
             "PURCHASES" -> showPurchases()
+            "PURCHASE_RETURNS" -> showPurchaseReturns()
             "SUPPLIERS" -> showSuppliers()
             "SUPPLIER_DETAILS" -> showSupplierDetails(activeScreenArgument ?: "")
             "CUSTOMERS" -> showCustomers()
@@ -1045,6 +1049,7 @@ class MainActivity : Activity() {
             "المنتجات والمخزون" to "إدارة المنتجات والكميات",
             "تسويات المخزون" to "تسجيل فروقات الجرد بالزيادة أو النقصان",
             "مرتجعات المبيعات" to "إرجاع أصناف ورد المبالغ للعملاء",
+            "مرتجعات المشتريات" to "إرجاع البضاعة وتسوية مستحقات المورد",
             "المشتريات" to "فواتير الشراء والموردون",
             "العملاء والديون" to "ملفات العملاء والأرصدة",
             "الصناديق والمحافظ" to "الحركة النقدية والحسابات",
@@ -1057,7 +1062,7 @@ class MainActivity : Activity() {
         val visibleEntries = entries.filter { entry ->
             when (entry.first) {
                 "تسويات المخزون" -> hasPermission(PermissionPolicy.INVENTORY_ADJUST)
-                "مرتجعات المبيعات" -> hasPermission(PermissionPolicy.RETURNS_PROCESS)
+                "مرتجعات المبيعات", "مرتجعات المشتريات" -> isManager() && hasPermission(PermissionPolicy.RETURNS_PROCESS)
                 "المنتجات والمخزون", "المشتريات", "التقارير", "النسخ الاحتياطي والاستعادة", "المستخدمون والصلاحيات" -> isManager()
                 else -> true
             }
@@ -1075,6 +1080,7 @@ class MainActivity : Activity() {
                         "المنتجات والمخزون" -> showProductManagement()
                         "تسويات المخزون" -> showInventoryAdjustments()
                         "مرتجعات المبيعات" -> showSalesReturns()
+                        "مرتجعات المشتريات" -> showPurchaseReturns()
                         "المشتريات" -> showPurchases()
                         "العملاء والديون" -> showCustomers()
                         "الصناديق والمحافظ" -> showCashAccounts()
@@ -1162,7 +1168,9 @@ class MainActivity : Activity() {
         }
         actions.addView(add, LinearLayout.LayoutParams(0, dp(50), 1f).apply { marginEnd = dp(6) })
         actions.addView(suppliers, LinearLayout.LayoutParams(0, dp(50), 1f))
-        content.addView(actions, fieldParams(dp(50), dp(12)))
+        content.addView(actions, fieldParams(dp(50), dp(8)))
+        content.addView(smallButton("↩ مرتجعات المشتريات") { showPurchaseReturns() },
+            fieldParams(dp(44), dp(4)))
         val invoices = repository.listPurchaseInvoices()
         val outstandingTotalSyp = invoices.filter {
             it.invoiceStatus != "DRAFT" && it.invoiceStatus != "CANCELLED"
@@ -3375,6 +3383,170 @@ class MainActivity : Activity() {
                     showSalesReturns()
                 } catch (e: Exception) {
                     Toast.makeText(this, e.message ?: "تعذر اعتماد المرتجع", Toast.LENGTH_LONG).show()
+                }
+            }
+        }
+        dialog.show()
+    }
+
+    private fun showPurchaseReturns() {
+        if (!isManager()) {
+            Toast.makeText(this, "مرتجعات المشتريات متاحة للمدير فقط", Toast.LENGTH_SHORT).show()
+            return
+        }
+        markScreen("PURCHASE_RETURNS")
+        val repository = PurchaseReturnRepository(this)
+        val page = LinearLayout(this).apply { orientation=LinearLayout.VERTICAL; setBackgroundColor(backgroundColor) }
+        val header = LinearLayout(this).apply {
+            orientation=LinearLayout.HORIZONTAL; gravity=Gravity.CENTER_VERTICAL
+            setPadding(dp(14),dp(10),dp(14),dp(10)); setBackgroundColor(Color.WHITE)
+        }
+        header.addView(Button(this).apply {
+            text="‹"; textSize=25f; isAllCaps=false; setTextColor(green)
+            setBackgroundColor(Color.TRANSPARENT); setOnClickListener { showPurchases() }
+        },LinearLayout.LayoutParams(dp(48),dp(48)))
+        header.addView(label("مرتجعات المشتريات",19f,green,true,Gravity.CENTER),
+            LinearLayout.LayoutParams(0,-2,1f))
+        val content=LinearLayout(this).apply {
+            orientation=LinearLayout.VERTICAL; setPadding(dp(16),dp(16),dp(16),dp(24))
+        }
+        content.addView(label("فواتير شراء قابلة للإرجاع",21f,green,true,Gravity.RIGHT))
+        content.addView(label(
+            "يُخصم المرتجع من مستحق المورد أولاً. إذا كانت الفاتورة مسددة، يُسجل الفرق كمبلغ مسترد يدخل إلى الصندوق أو المحفظة المختارة.",
+            13f,mutedColor,false,Gravity.RIGHT
+        ).apply { setPadding(0,dp(5),0,dp(12)) })
+        val invoices=repository.listReturnableInvoices()
+        if(invoices.isEmpty()) content.addView(label(
+            "لا توجد فواتير شراء معتمدة تحتوي كميات متاحة من طبقات الشراء الأصلية.",
+            14f,mutedColor,false,Gravity.CENTER
+        )) else invoices.forEach { invoice ->
+            val card=LinearLayout(this).apply {
+                orientation=LinearLayout.VERTICAL; setPadding(dp(13),dp(11),dp(13),dp(11)); background=cardBackground()
+            }
+            card.addView(label("فاتورة "+invoice.invoiceNumber,16f,green,true,Gravity.RIGHT))
+            card.addView(label(invoice.date+" • "+invoice.supplierName,12f,mutedColor,false,Gravity.RIGHT))
+            card.addView(label("الإجمالي: "+moneyText(invoice.totalUsdCents)+" USD",13f,textColor,true,Gravity.RIGHT))
+            card.addView(smallButton("إنشاء مرتجع") { showPurchaseReturnEditor(invoice.id) },fieldParams(dp(42),dp(7)))
+            content.addView(card,fieldParams(-2,dp(8)))
+        }
+        page.addView(header,matchWidth())
+        page.addView(ScrollView(this).apply { isFillViewport=true; addView(content) },
+            LinearLayout.LayoutParams(-1,0,1f))
+        setContentView(page)
+    }
+
+    private fun showPurchaseReturnEditor(invoiceId: String) {
+        val actor=currentUserId ?: return
+        val repository=PurchaseReturnRepository(this)
+        val items=repository.listReturnableItems(invoiceId)
+        val accounts=CashAccountRepository(this).listActive().filter {
+            it.currencyCode=="SYP" || it.currencyCode=="USD"
+        }
+        val invoiceRate=PurchasePaymentRepository(this).listPurchaseInvoices()
+            .firstOrNull { it.id==invoiceId }?.invoiceRateMilli ?: 0L
+        val content=LinearLayout(this).apply {
+            orientation=LinearLayout.VERTICAL; setPadding(dp(16),dp(8),dp(16),dp(8))
+        }
+        val quantities=linkedMapOf<String,EditText>()
+        content.addView(label("الكميات المراد إرجاعها",16f,green,true,Gravity.RIGHT))
+        items.forEach { item ->
+            val row=LinearLayout(this).apply {
+                orientation=LinearLayout.VERTICAL; setPadding(0,dp(4),0,dp(4))
+            }
+            row.addView(label(
+                item.productName+" • مشتراة "+item.purchasedQuantity.toPlainString()+
+                    " • سبق إرجاعه "+item.returnedQuantity.toPlainString()+
+                    " • المتاح من طبقة الشراء "+item.availableQuantity.toPlainString(),
+                13f,textColor,true,Gravity.RIGHT
+            ))
+            val quantity=fieldForDialog("الكمية المرتجعة",
+                type=InputType.TYPE_CLASS_NUMBER or InputType.TYPE_NUMBER_FLAG_DECIMAL)
+            quantities[item.id]=quantity
+            row.addView(quantity,fieldParams(dp(44),dp(4)))
+            content.addView(row,matchWidth())
+        }
+        val returnDate=fieldForDialog("تاريخ المرتجع",SimpleDateFormat("yyyy-MM-dd",Locale.US).format(Date()))
+        val reason=fieldForDialog("سبب المرتجع")
+        content.addView(returnDate,fieldParams(dp(44),dp(6)))
+        content.addView(reason,fieldParams(dp(44),dp(6)))
+        val summary=label("اضغط معاينة لحساب تخفيض مستحق المورد والمبلغ المسترد نقداً.",13f,mutedColor,false,Gravity.RIGHT)
+        content.addView(summary,fieldParams(-2,dp(8)))
+        content.addView(label("توزيع المبلغ المسترد من المورد",15f,green,true,Gravity.RIGHT))
+        content.addView(label(
+            "إذا بقي مبلغ مستحق لك لدى المورد، اختر الحساب أو الحسابات التي ستستقبل المبلغ. أدخل كل مبلغ بعملة الحساب.",
+            12f,mutedColor,false,Gravity.RIGHT
+        ))
+        val allocationContainer=LinearLayout(this).apply { orientation=LinearLayout.VERTICAL }
+        val allocationRows=mutableListOf<Pair<Spinner,EditText>>()
+        fun addAllocationRow() {
+            if(accounts.isEmpty()) {
+                Toast.makeText(this,"لا يوجد حساب USD أو SYP نشط لاستقبال المبلغ",Toast.LENGTH_LONG).show()
+                return
+            }
+            val row=LinearLayout(this).apply { orientation=LinearLayout.VERTICAL; setPadding(0,dp(3),0,dp(3)) }
+            val spinner=Spinner(this@MainActivity)
+            spinner.adapter=ArrayAdapter(this@MainActivity,android.R.layout.simple_spinner_dropdown_item,
+                accounts.map { it.name+" • "+it.currencyCode+" • "+formatAccountBalance(it.balanceMinor,it.currencyCode) })
+            val amount=fieldForDialog("المبلغ من هذا الحساب")
+            row.addView(spinner,fieldParams(dp(44),dp(2)))
+            row.addView(amount,fieldParams(dp(44),dp(2)))
+            allocationContainer.addView(row,matchWidth())
+            allocationRows.add(spinner to amount)
+        }
+        content.addView(allocationContainer,matchWidth())
+        content.addView(smallButton("+ إضافة حساب للتوزيع") { addAllocationRow() },fieldParams(dp(40),dp(5)))
+        val dialog=AlertDialog.Builder(this).setTitle("إنشاء مرتجع مشتريات").setView(
+            ScrollView(this).apply { isFillViewport=true; addView(content) }
+        ).setNegativeButton("إلغاء",null).setNeutralButton("معاينة",null)
+            .setPositiveButton("اعتماد المرتجع",null).create()
+        fun selectedItems(): List<PurchaseReturnItemInput> = quantities.mapNotNull { (id,field) ->
+            val raw=field.text.toString().trim().replace(',','.')
+            if(raw.isEmpty()) null else PurchaseReturnItemInput(id,BigDecimal(raw))
+        }
+        fun selectedAllocations(): List<SupplierRefundAllocationInput> = allocationRows.mapNotNull { (spinner,field) ->
+            val raw=field.text.toString().trim().replace(',','.')
+            if(raw.isEmpty()) null else {
+                val account=accounts[spinner.selectedItemPosition]
+                val minor=BigDecimal(raw).multiply(BigDecimal.valueOf(if(account.currencyCode=="USD") 100L else 1L))
+                    .setScale(0,RoundingMode.UNNECESSARY).longValueExact()
+                SupplierRefundAllocationInput(account.id,minor)
+            }
+        }
+        dialog.setOnShowListener {
+            dialog.getButton(AlertDialog.BUTTON_NEUTRAL).setOnClickListener {
+                try {
+                    val selected=selectedItems()
+                    require(selected.isNotEmpty()) { "أدخل كمية مرتجعة لصنف واحد على الأقل" }
+                    val preview=repository.previewPurchaseReturn(invoiceId,selected)
+                    summary.text="قيمة المرتجع: "+moneyText(preview.totalUsdCents)+" USD"+
+                        "\nتخفيض مستحق المورد: "+formatSypAmount(preview.supplierCreditReductionSypMinor)+" ل.س"+
+                        "\nالمبلغ المسترد نقداً: "+formatSypAmount(preview.supplierCashRefundSypMinor)+" ل.س"
+                    if(preview.supplierCashRefundSypMinor>0L && allocationRows.isEmpty()) addAllocationRow()
+                } catch(e: Exception) {
+                    Toast.makeText(this,e.message ?: "تعذرت معاينة المرتجع",Toast.LENGTH_LONG).show()
+                }
+            }
+            dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener {
+                try {
+                    val selected=selectedItems()
+                    require(selected.isNotEmpty()) { "أدخل كمية مرتجعة لصنف واحد على الأقل" }
+                    val preview=repository.previewPurchaseReturn(invoiceId,selected)
+                    val allocations=selectedAllocations()
+                    if(preview.supplierCashRefundSypMinor==0L) require(allocations.isEmpty()) {
+                        "لا يوجد مبلغ مسترد نقداً؛ احذف توزيعات القبض"
+                    } else require(allocations.isNotEmpty()) { "حدد حساباً ومبلغ الاسترداد" }
+                    require(allocations.map { it.cashAccountId }.distinct().size==allocations.size) {
+                        "لا تكرر الحساب؛ اجمع مبلغه في سطر واحد"
+                    }
+                    val result=repository.postPurchaseReturn(
+                        actor,invoiceId,UUID.randomUUID().toString(),returnDate.text.toString().trim(),
+                        reason.text.toString(),selected,allocations
+                    )
+                    Toast.makeText(this,"تم اعتماد مرتجع المشتريات "+result.returnNumber,Toast.LENGTH_LONG).show()
+                    dialog.dismiss()
+                    showPurchaseReturns()
+                } catch(e: Exception) {
+                    Toast.makeText(this,e.message ?: "تعذر اعتماد مرتجع المشتريات",Toast.LENGTH_LONG).show()
                 }
             }
         }
