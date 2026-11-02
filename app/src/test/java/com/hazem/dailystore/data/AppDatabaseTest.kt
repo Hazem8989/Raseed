@@ -113,7 +113,7 @@ class AppDatabaseTest {
         database = AppDatabase.getInstance(context)
         val upgraded = database.writableDatabase
 
-        assertEquals(12, upgraded.version)
+        assertEquals(13, upgraded.version)
         upgraded.rawQuery(
             """SELECT username,display_name,password_hash,password_salt,role_key,is_active,
                       must_change_password,created_at,updated_at
