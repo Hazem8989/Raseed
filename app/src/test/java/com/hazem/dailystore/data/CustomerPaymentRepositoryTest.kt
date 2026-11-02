@@ -46,7 +46,7 @@ class CustomerPaymentRepositoryTest {
         payments = CustomerPaymentRepository(context)
         database.writableDatabase.delete("exchange_rates", null, null)
         database.writableDatabase.delete("daily_cash_sessions", null, null)
-        customerId = customers.create("زبون تحصيل " + UUID.randomUUID()).id
+        customerId = customers.create(adminId, "زبون تحصيل " + UUID.randomUUID()).id
         val unit = store.getUnits().first()
         val category = store.getCategories().first()
         productId = store.saveProduct(null, "صنف تحصيل " + UUID.randomUUID(), null, null,
