@@ -54,7 +54,7 @@ class PurchasePaymentRepositoryTest {
         val category = store.getCategories().first()
         val productId = store.saveProduct(
             null, "صنف دفع ${UUID.randomUUID()}", null, null, category.id, unit.id,
-            500, 1000, true, 0.0
+            500, 1000, true, 0.0, adminId
         )
         val draft = invoices.savePurchaseDraft(
             "payment-draft-${UUID.randomUUID()}", null, supplierId, "2026-10-31",
@@ -117,7 +117,7 @@ class PurchasePaymentRepositoryTest {
 
     @Test
     fun rejectsPaymentWhenCashAccountDoesNotHaveEnoughFunds() {
-        val poor = cashAccounts.create("صندوق محدود ${UUID.randomUUID()}",
+        val poor = cashAccounts.create(adminId, "صندوق محدود ${UUID.randomUUID()}",
             "CASH_BOX", "USD", 100L)
         try {
             payments.addPayment(invoiceId, "pay-poor-${UUID.randomUUID()}", poor.id, 200L)
@@ -140,7 +140,7 @@ class PurchasePaymentRepositoryTest {
             put("created_at", "2026-10-31T10:00:00.000Z")
         }
         database.writableDatabase.insertOrThrow("exchange_rates", null, rateValues)
-        val syp = cashAccounts.create("محفظة ليرة ${UUID.randomUUID()}",
+        val syp = cashAccounts.create(adminId, "محفظة ليرة ${UUID.randomUUID()}",
             "WALLET", "SYP", 500000L)
         val result = payments.addPayment(invoiceId, "pay-syp-${UUID.randomUUID()}",
             syp.id, 100000L)
@@ -167,7 +167,7 @@ class PurchasePaymentRepositoryTest {
 
     @Test
     fun supplierBalanceStaysAtPurchaseRateAfterExchangeRateChanges() {
-        val syp = cashAccounts.create("محفظة ليرة ثابتة ${UUID.randomUUID()}",
+        val syp = cashAccounts.create(adminId, "محفظة ليرة ثابتة ${UUID.randomUUID()}",
             "WALLET", "SYP", 500000L)
         val first = payments.addPayment(invoiceId, "fixed-syp-first-${UUID.randomUUID()}",
             syp.id, 100000L)
@@ -199,9 +199,9 @@ class PurchasePaymentRepositoryTest {
 
     @Test
     fun sypCashBoxSupplierPaymentsMustStayWithinDailyRolloverAllocation() {
-        val drawer = cashAccounts.create("درج رئيسي يومي " + UUID.randomUUID(), "CASH_BOX", "SYP", 0L)
+        val drawer = cashAccounts.create(adminId, "درج رئيسي يومي " + UUID.randomUUID(), "CASH_BOX", "SYP", 0L)
         cashAccounts.setCurrentDayPrimaryDrawer("ADMIN", adminId, drawer.id)
-        val supplierCash = cashAccounts.create("نقد موردين مدور " + UUID.randomUUID(), "CASH_BOX", "SYP", 500000L)
+        val supplierCash = cashAccounts.create(adminId, "نقد موردين مدور " + UUID.randomUUID(), "CASH_BOX", "SYP", 500000L)
         val daily = DailyBalanceRepository(RuntimeEnvironment.getApplication())
         // This test uses the current operating date; remove only the prior test allocation.
         database.writableDatabase.delete("daily_supplier_rollovers", null, null)
@@ -220,7 +220,7 @@ class PurchasePaymentRepositoryTest {
     @Test
     fun managerCanCorrectPaymentAmountAndAccountAtomically() {
         val payment = payments.addPayment(invoiceId, "pay-edit-${UUID.randomUUID()}", accountId, 4000L, "قبل التصحيح")
-        val replacement = cashAccounts.create("صندوق بديل ${UUID.randomUUID()}", "CASH_BOX", "USD", 10000L)
+        val replacement = cashAccounts.create(adminId, "صندوق بديل ${UUID.randomUUID()}", "CASH_BOX", "USD", 10000L)
 
         val corrected = payments.editPayment(
             "ADMIN", adminId, payment.paymentId, replacement.id, 3500L, "تصحيح دفعة"
