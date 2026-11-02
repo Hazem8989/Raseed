@@ -148,8 +148,8 @@ class CustomerPaymentRepository(context: Context) {
     }
 
     fun addPayment(
-        invoiceId: String, operationId: String, cashAccountId: String,
-        amountSypMinor: Long, note: String? = null, actorUserId: String? = null
+        actorUserId: String, invoiceId: String, operationId: String, cashAccountId: String,
+        amountSypMinor: Long, note: String? = null
     ): CustomerPaymentResult {
         require(invoiceId.isNotBlank() && operationId.isNotBlank() && cashAccountId.isNotBlank()) {
             "بيانات التحصيل غير مكتملة"
@@ -160,6 +160,7 @@ class CustomerPaymentRepository(context: Context) {
         val payloadHash = hash(invoiceId + "|" + cashAccountId + "|" + amountSypMinor + "|" + cleanNote.orEmpty())
         db.beginTransaction()
         try {
+            PermissionPolicy.require(db, actorUserId, PermissionPolicy.CUSTOMERS_COLLECT)
             val invoice = db.rawQuery(
                 """SELECT status,sale_type,total_usd_cents,customer_id,invoice_number,
                           exchange_rate_syp_per_usd_milli
