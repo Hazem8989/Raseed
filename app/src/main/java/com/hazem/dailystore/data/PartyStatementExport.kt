@@ -74,18 +74,17 @@ object PartyStatementExport {
         val document = PdfDocument()
         val pageWidth = 842
         val pageHeight = 595
-        val left = 36f
         val right = pageWidth - 36f
         val lineHeight = 17f
-        val rows = pdfLines(statement)
-        val perPage = 29
-        val pages = maxOf(1, (rows.size + perPage - 1) / perPage)
         val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
             color = android.graphics.Color.BLACK
             textSize = 10f
             typeface = Typeface.create("sans-serif", Typeface.NORMAL)
             textAlign = Paint.Align.RIGHT
         }
+        val rows = pdfLines(statement).flatMap { wrapPdfLine(it, right - 36f, paint) }
+        val perPage = 29
+        val pages = maxOf(1, (rows.size + perPage - 1) / perPage)
         val titlePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
             color = android.graphics.Color.BLACK
             textSize = 18f
@@ -141,6 +140,34 @@ object PartyStatementExport {
         return rows
     }
 
+    private fun wrapPdfLine(value: String, maxWidth: Float, paint: Paint): List<String> {
+        if (paint.measureText(value) <= maxWidth) return listOf(value)
+        val lines = mutableListOf<String>()
+        var current = ""
+        value.split(Regex("\\s+")).forEach { word ->
+            val candidate = if (current.isEmpty()) word else "$current $word"
+            if (paint.measureText(candidate) <= maxWidth) {
+                current = candidate
+            } else {
+                if (current.isNotEmpty()) lines.add(current)
+                current = word
+                if (paint.measureText(current) > maxWidth) {
+                    var fragment = ""
+                    current.forEach { character ->
+                        val next = fragment + character
+                        if (fragment.isNotEmpty() && paint.measureText(next) > maxWidth) {
+                            lines.add(fragment)
+                            fragment = character.toString()
+                        } else fragment = next
+                    }
+                    current = fragment
+                }
+            }
+        }
+        if (current.isNotEmpty()) lines.add(current)
+        return lines.ifEmpty { listOf("") }
+    }
+
     private fun xlsxRow(number: Int, values: List<Any>): String {
         val cells = values.mapIndexed { index, value ->
             val ref = column(index) + number
@@ -168,8 +195,11 @@ object PartyStatementExport {
     }
 
     private fun csvCell(value: String): String {
-        val safe = if (value.trimStart().startsWith("=") || value.trimStart().startsWith("+") ||
-            value.trimStart().startsWith("-") || value.trimStart().startsWith("@")) "'$value" else value
+        val trimmed = value.trim()
+        val isPlainNumber = trimmed.matches(Regex("-?\\d+(\\.\\d+)?"))
+        val startsFormula = value.trimStart().startsWith("=") || value.trimStart().startsWith("+") ||
+            value.trimStart().startsWith("-") || value.trimStart().startsWith("@")
+        val safe = if (startsFormula && !isPlainNumber) "'$value" else value
         return "\"" + safe.replace("\"", "\"\"") + "\""
     }
     private fun xmlEscape(value: String): String = value.replace("&", "&amp;")
