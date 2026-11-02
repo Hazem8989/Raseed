@@ -2617,12 +2617,12 @@ class MainActivity : Activity() {
         profitCard.addView(label("مرتجعات المبيعات: ${formatDualMoney(todayProfit.returnUsdCents, rate)}", 13f, textColor, false, Gravity.RIGHT))
         profitCard.addView(label("صافي الإيراد بعد المرتجعات: ${formatDualMoney(todayProfit.netRevenueUsdCents, rate)}", 13f, textColor, true, Gravity.RIGHT))
         profitCard.addView(label("تكلفة FIFO المباعة: ${formatDualMoney(todayProfit.cogsUsdCents, rate)} • تكلفة المرتجع: ${formatDualMoney(todayProfit.returnedCogsUsdCents, rate)}", 12f, mutedColor, false, Gravity.RIGHT))
-        profitCard.addView(label("المصاريف التشغيلية اليوم: ${formatDualMoney(todayProfit.operatingExpensesUsdCents, rate)} • عددها: ${todayProfit.operatingExpenseCount}",
+        profitCard.addView(label("المصاريف التشغيلية اليوم: ${moneyText(todayProfit.operatingExpensesUsdCents)} USD • عددها: ${todayProfit.operatingExpenseCount}",
             13f, textColor, false, Gravity.RIGHT))
         if (todayProfit.isComplete) {
             profitCard.addView(label("مجمل الربح بعد المرتجعات وقبل المصاريف: ${formatDualMoney(todayProfit.grossProfitUsdCents, rate)}",
                 14f, mutedColor, true, Gravity.RIGHT).apply { setPadding(0, dp(5), 0, 0) })
-            profitCard.addView(label("صافي نتيجة التشغيل بعد المصاريف: ${formatDualMoney(todayProfit.netOperatingProfitUsdCents, rate)}",
+            profitCard.addView(label("صافي نتيجة التشغيل بعد المصاريف: ${moneyText(todayProfit.netOperatingProfitUsdCents)} USD",
                 16f, green, true, Gravity.RIGHT).apply { setPadding(0, dp(3), 0, 0) })
         } else {
             profitCard.addView(label("الربح غير مكتمل: فواتير بلا تكلفة FIFO: ${todayProfit.uncostedInvoiceCount} • مرتجعات بلا تكلفة معروفة: ${todayProfit.uncostedReturnCount}. راجعها قبل الاعتماد.",
@@ -2631,19 +2631,19 @@ class MainActivity : Activity() {
         val allProfit = profitRepo.allTime()
         profitCard.addView(label("منذ بداية التشغيل • المبيعات: ${formatDualMoney(allProfit.revenueUsdCents, rate)} • المرتجعات: ${formatDualMoney(allProfit.returnUsdCents, rate)}",
             11f, mutedColor, false, Gravity.RIGHT).apply { setPadding(0, dp(8), 0, 0) })
-        profitCard.addView(label("المصاريف التشغيلية التراكمية: ${formatDualMoney(allProfit.operatingExpensesUsdCents, rate)} • عددها: ${allProfit.operatingExpenseCount}",
+        profitCard.addView(label("المصاريف التشغيلية التراكمية: ${moneyText(allProfit.operatingExpensesUsdCents)} USD • عددها: ${allProfit.operatingExpenseCount}",
             11f, mutedColor, false, Gravity.RIGHT))
         if (allProfit.isComplete) {
             profitCard.addView(label("مجمل الربح التراكمي بعد المرتجعات وقبل المصاريف: ${formatDualMoney(allProfit.grossProfitUsdCents, rate)}",
                 12f, mutedColor, true, Gravity.RIGHT))
-            profitCard.addView(label("صافي نتيجة التشغيل التراكمية بعد المصاريف: ${formatDualMoney(allProfit.netOperatingProfitUsdCents, rate)}",
+            profitCard.addView(label("صافي نتيجة التشغيل التراكمية بعد المصاريف: ${moneyText(allProfit.netOperatingProfitUsdCents)} USD",
                 14f, green, true, Gravity.RIGHT))
         } else {
             profitCard.addView(label("الربح التراكمي غير مكتمل؛ فواتير بلا تكلفة: ${allProfit.uncostedInvoiceCount} • مرتجعات بلا تكلفة: ${allProfit.uncostedReturnCount}",
                 11f, Color.rgb(170, 80, 45), true, Gravity.RIGHT))
         }
         content.addView(profitCard, fieldParams(-2, dp(12)))
-        content.addView(label("صافي نتيجة التشغيل = مجمل الربح بعد مرتجعات المبيعات − المصاريف التشغيلية المسجلة. لا يشمل الضرائب أو البنود غير المسجلة.",
+        content.addView(label("تُحوّل المصروفات إلى الدولار بسعر الصرف المحفوظ وقت تسجيل كل مصروف. صافي نتيجة التشغيل = مجمل الربح بعد مرتجعات المبيعات − المصروفات المسجلة، ولا يشمل الضرائب أو البنود غير المسجلة.",
             11f, mutedColor, false, Gravity.RIGHT).apply { setPadding(0, 0, 0, dp(12)) })
         content.addView(sectionHeading("ملخص المخزون"))
         content.addView(label("عدد الأصناف التي تتبع المخزون: ${products.size}", 15f, textColor, true, Gravity.RIGHT)
