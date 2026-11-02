@@ -20,6 +20,20 @@ data class SalesReturnResult(
     val returnedCogsUsdCents: Long?, val replayed: Boolean
 )
 
+data class SalesReturnInvoiceOption(
+    val id: String, val number: String, val date: String, val saleType: String,
+    val customerName: String?, val totalUsdCents: Long
+)
+data class SalesReturnableItem(
+    val id: String, val productName: String, val soldQuantity: BigDecimal,
+    val returnedQuantity: BigDecimal, val availableQuantity: BigDecimal,
+    val unitPriceUsdCents: Long, val tracksInventory: Boolean
+)
+data class SalesReturnPreview(
+    val totalUsdCents: Long, val creditReductionUsdCents: Long,
+    val cashRefundUsdCents: Long, val cashRefundSypMinor: Long
+)
+
 /** Atomic customer sales returns. Purchase returns use a separate supplier-credit workflow. */
 class SalesReturnRepository(context: Context) {
     private val database = AppDatabase.getInstance(context)
@@ -43,6 +57,80 @@ class SalesReturnRepository(context: Context) {
         val returnValueUsdCents: Long, val returnedCogsUsdCents: Long?,
         val costAllocations: List<CostAllocationPlan>
     )
+
+    fun listReturnableInvoices(): List<SalesReturnInvoiceOption> {
+        val result = mutableListOf<SalesReturnInvoiceOption>()
+        database.readableDatabase.rawQuery(
+            """SELECT i.id,i.invoice_number,i.invoice_date,i.sale_type,c.name,i.total_usd_cents
+               FROM sales_invoices i LEFT JOIN customers c ON c.id=i.customer_id
+               WHERE i.status IN ('POSTED','PARTIALLY_PAID','PAID')
+               ORDER BY i.invoice_date DESC,i.created_at DESC""".trimIndent(), null
+        ).use { c ->
+            while (c.moveToNext()) {
+                val id = c.getString(0)
+                if (listReturnableItems(id).any { it.availableQuantity.signum() > 0 }) {
+                    result.add(SalesReturnInvoiceOption(
+                        id,c.getString(1),c.getString(2),c.getString(3),
+                        if (c.isNull(4)) null else c.getString(4),c.getLong(5)
+                    ))
+                }
+            }
+        }
+        return result
+    }
+
+    fun listReturnableItems(invoiceId: String): List<SalesReturnableItem> {
+        require(invoiceId.isNotBlank()) { "معرّف الفاتورة مطلوب" }
+        val db = database.readableDatabase
+        val invoice = loadOriginalInvoice(db, invoiceId)
+        val originals = loadOriginalItems(db, invoice)
+        return originals.map { item ->
+            val returned = db.rawQuery(
+                """SELECT COALESCE(SUM(ri.quantity),0)
+                   FROM return_items ri JOIN returns r ON r.id=ri.return_id
+                   WHERE ri.original_sales_item_id=? AND r.status='POSTED'""".trimIndent(),
+                arrayOf(item.id)
+            ).use { c -> c.moveToFirst(); BigDecimal.valueOf(c.getDouble(0)) }
+            SalesReturnableItem(
+                item.id, productName(db, item.productId), item.quantity, returned,
+                item.quantity.subtract(returned).max(BigDecimal.ZERO),
+                item.unitPriceUsdCents, item.tracksInventory
+            )
+        }
+    }
+
+    fun previewSalesReturn(invoiceId: String, items: List<SalesReturnItemInput>): SalesReturnPreview {
+        require(invoiceId.isNotBlank() && items.isNotEmpty()) { "حدد الفاتورة والأصناف المرتجعة" }
+        require(items.map { it.originalSalesItemId }.distinct().size == items.size) {
+            "لا تكرر بند الفاتورة نفسه"
+        }
+        val db = database.readableDatabase
+        val invoice = loadOriginalInvoice(db, invoiceId)
+        require(invoice.status in setOf("POSTED", "PARTIALLY_PAID", "PAID")) {
+            "لا يمكن معاينة مرتجع لفاتورة غير معتمدة"
+        }
+        require(invoice.rateMilli > 0L) { "الفاتورة الأصلية بلا سعر صرف محفوظ" }
+        val originals = loadOriginalItems(db, invoice)
+        val plans = items.map { input ->
+            val original = originals.firstOrNull { it.id == input.originalSalesItemId }
+                ?: throw IllegalArgumentException("أحد الأصناف لا ينتمي إلى الفاتورة الأصلية")
+            buildItemPlan(db, original, input.quantity, invoice)
+        }
+        val total = plans.fold(0L) { sum, plan -> Math.addExact(sum, plan.returnValueUsdCents) }
+        val paid = paidUsdCents(db, invoiceId)
+        val priorCredit = db.rawQuery(
+            """SELECT COALESCE(SUM(credit_reduction_usd_cents),0)
+               FROM returns WHERE original_invoice_type='SALE'
+                 AND original_invoice_id=? AND status='POSTED'""".trimIndent(),
+            arrayOf(invoiceId)
+        ).use { c -> c.moveToFirst(); c.getLong(0) }
+        val outstanding = (invoice.totalUsdCents - paid - priorCredit).coerceAtLeast(0L)
+        val credit = minOf(total, outstanding)
+        val refund = Math.subtractExact(total, credit)
+        return SalesReturnPreview(
+            total, credit, refund, CurrencyConverter.usdCentsToSyp(refund, invoice.rateMilli)
+        )
+    }
 
     fun postSalesReturn(
         actorUserId: String, originalInvoiceId: String, operationId: String,
