@@ -11,7 +11,7 @@ import java.util.Date
 import java.util.Locale
 import java.util.TimeZone
 import java.util.UUID
-import java.util.Base64
+import android.util.Base64
 
 data class SyncPairingInvitation(val invitationId: String, val token: String, val expiresAt: String)
 data class SyncEnrollment(val deviceId: String, val credential: String)
@@ -54,7 +54,11 @@ class SyncProtocolRepository(private val context: Context) {
                 put("enrolled_by", actorUserId)
                 put("created_at", now)
                 put("last_seen_at", now)
-            }, SQLiteDatabase.CONFLICT_REPLACE)
+            }, SQLiteDatabase.CONFLICT_IGNORE)
+            db.update("sync_devices", ContentValues().apply {
+                put("display_name", cleanName); put("last_seen_at", now)
+                put("status", "ACTIVE"); putNull("revoked_at")
+            }, "device_id=?", arrayOf(deviceId))
             putState(db, "authority_device_id", deviceId, now)
             if (state(db, "next_sequence") == null) putState(db, "next_sequence", "1", now)
             audit(db, actorUserId, "SYNC_PRIMARY_CONFIGURED", deviceId,
@@ -121,8 +125,12 @@ class SyncProtocolRepository(private val context: Context) {
                 put("enrolled_by", actorUserId)
                 put("created_at", now)
                 put("last_seen_at", now)
-                putNull("revoked_at")
-            }, SQLiteDatabase.CONFLICT_REPLACE)
+            }, SQLiteDatabase.CONFLICT_IGNORE)
+            db.update("sync_devices", ContentValues().apply {
+                put("display_name", cleanName); put("device_role", "SECONDARY")
+                put("credential_hash", sha256(credential)); put("status", "ACTIVE")
+                put("enrolled_by", actorUserId); put("last_seen_at", now); putNull("revoked_at")
+            }, "device_id=?", arrayOf(remoteDeviceId))
             db.update("sync_pairing_invitations", ContentValues().apply { put("consumed_at", now) },
                 "invitation_id=?", arrayOf(invitation))
             db.insertWithOnConflict("sync_cursors", null, ContentValues().apply {
@@ -276,7 +284,7 @@ class SyncProtocolRepository(private val context: Context) {
     }
 
     private fun randomToken(): String = ByteArray(32).also(random::nextBytes)
-        .let { Base64.getUrlEncoder().withoutPadding().encodeToString(it) }
+        .let { Base64.encodeToString(it, Base64.URL_SAFE or Base64.NO_WRAP or Base64.NO_PADDING) }
 
     private fun sha256(value: String): String = MessageDigest.getInstance("SHA-256")
         .digest(value.toByteArray(Charsets.UTF_8)).joinToString("") { "%02x".format(it) }

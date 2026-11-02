@@ -69,7 +69,7 @@ class SyncProtocolRepositoryTest {
 
     @Test fun cashierCannotConfigurePrimaryOrCreateInvitations() {
         val auth = AuthRepository(RuntimeEnvironment.getApplication())
-        val cashierId = auth.createUser(adminId, adminId, "sync-cashier", "Cashier", "Cashier12345", "CASHIER")
+        val cashierId = auth.createUser("ADMIN", adminId, "sync-cashier", "Cashier", "Cashier12345", "CASHIER")
         auth.changePassword(cashierId, "Cashier12345", "CashierStrong123")
         var denied = false
         try { repository.configureAsPrimary(cashierId, "غير مصرح") }
