@@ -64,7 +64,7 @@ class SyncEnvelopeSecurityTest {
     @Test fun rejectsNonCanonicalPayloadAndAlteredMetadata() {
         val signed = create()
         assertFalse(SyncEnvelopeSecurity.verify(
-            signed.copy(payloadJson = """{"a":{"x":1,"y":2},"z":3}"""), secret
+            signed.copy(payloadJson = """{"z":3,"a":{"y":2,"x":1}}"""), secret
         ))
         assertFalse(SyncEnvelopeSecurity.verify(signed.copy(sequenceNumber = 2L), secret))
         assertFalse(SyncEnvelopeSecurity.verify(signed.copy(entityType = "USERS"), secret))
