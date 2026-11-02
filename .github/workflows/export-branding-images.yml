@@ -3,6 +3,10 @@ on:
   push:
     branches:
       - the-daily-shop-development
+    paths:
+      - 'branding_logo.png'
+      - 'branding_splash.png'
+  workflow_dispatch:
 permissions:
   contents: write
 jobs:
