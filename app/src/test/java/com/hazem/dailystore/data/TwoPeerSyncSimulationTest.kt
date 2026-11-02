@@ -38,8 +38,8 @@ class TwoPeerSyncSimulationTest {
         context.deleteDatabase(SECONDARY_DB)
         primary = PeerDb(context, PRIMARY_DB)
         secondary = PeerDb(context, SECONDARY_DB)
-        primary.initialize(storeId, primaryId, secondaryId, secondaryId, secret, initialStock = 5)
-        secondary.initialize(storeId, secondaryId, primaryId, secondaryId, secret, initialStock = 0)
+        primary.initialize(storeId, primaryId, secondaryId, primaryId, secondaryId, secret, initialStock = 5)
+        secondary.initialize(storeId, secondaryId, primaryId, primaryId, secondaryId, secret, initialStock = 0)
     }
 
     @After fun tearDown() {
@@ -180,13 +180,13 @@ class TwoPeerSyncSimulationTest {
         }
         override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) = Unit
 
-        fun initialize(store: String, localId: String, peerId: String, secondaryDeviceId: String, credential: ByteArray, initialStock: Int) {
+        fun initialize(store: String, localId: String, peerId: String, primaryDeviceId: String, secondaryDeviceId: String, credential: ByteArray, initialStock: Int) {
             val db = writableDatabase
             db.beginTransaction()
             try {
                 db.insertOrThrow("peer_meta", null, ContentValues().apply { put("k", "store_id"); put("v", store) })
                 db.insertOrThrow("peer_meta", null, ContentValues().apply { put("k", "local_device_id"); put("v", localId) })
-                db.insertOrThrow("peer_meta", null, ContentValues().apply { put("k", "primary_device_id"); put("v", if (localId == primaryId) localId else peerId) })
+                db.insertOrThrow("peer_meta", null, ContentValues().apply { put("k", "primary_device_id"); put("v", if (localId == primaryDeviceId) localId else peerId) })
                 db.insertOrThrow("device_cursors", null, ContentValues().apply { put("device_id", secondaryDeviceId); put("last_sequence", 0L) })
                 db.insertOrThrow("enrolled_devices", null, ContentValues().apply {
                     put("device_id", peerId); put("secret", credential); put("active", 1)
