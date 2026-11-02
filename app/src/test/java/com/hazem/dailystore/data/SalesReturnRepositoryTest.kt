@@ -133,11 +133,58 @@ class SalesReturnRepositoryTest {
         assertEquals(250L, second.creditReductionUsdCents)
         assertEquals(0L, CustomerPaymentRepository(RuntimeEnvironment.getApplication())
             .listInvoices(customerId).single().outstandingUsdCents)
+        val accounts = CashAccountRepository(RuntimeEnvironment.getApplication())
+        accounts.listActive() // Ensure the current operating day's primary drawer exists.
+        val drawer = accounts.currentDayPrimaryDrawer()!!
+        val paymentsBefore = database.readableDatabase.rawQuery(
+            "SELECT COUNT(*) FROM invoice_payments WHERE invoice_id=?", arrayOf(draft.invoiceId)
+        ).use { c -> c.moveToFirst(); c.getInt(0) }
+        try {
+            CustomerPaymentRepository(RuntimeEnvironment.getApplication()).addPayment(
+                adminId, draft.invoiceId, "collection-after-full-return", drawer.id, 1L
+            )
+            throw AssertionError("A fully returned credit balance must not be collected")
+        } catch (_: IllegalArgumentException) { }
+        val paymentsAfter = database.readableDatabase.rawQuery(
+            "SELECT COUNT(*) FROM invoice_payments WHERE invoice_id=?", arrayOf(draft.invoiceId)
+        ).use { c -> c.moveToFirst(); c.getInt(0) }
+        assertEquals(paymentsBefore, paymentsAfter)
         val profit = SalesProfitRepository(RuntimeEnvironment.getApplication()).allTime()
         assertEquals(0L, profit.revenueUsdCents - profit.returnUsdCents)
         assertEquals(0L, profit.cogsUsdCents - profit.returnedCogsUsdCents)
         assertEquals(0L, profit.grossProfitUsdCents)
         assertTrue(profit.isComplete)
+    }
+
+
+    @Test
+    fun returnIsReportedOnItsOwnDateWhenOriginalSaleWasInEarlierPeriod() {
+        val draft = invoices.saveSalesDraft(
+            adminId, "return-later-period-draft", null, null, "2026-11-01", 0L, null,
+            listOf(InvoiceLineInput(productId, BigDecimal.ONE, 250L))
+        )
+        assertTrue(invoices.postCashSale(adminId, draft.invoiceId, "return-later-period-sale", cashAccountId))
+        database.writableDatabase.execSQL(
+            "UPDATE sales_invoices SET posted_operating_date='2026-11-01' WHERE id=?",
+            arrayOf(draft.invoiceId)
+        )
+        val result = returns.postSalesReturn(
+            adminId, draft.invoiceId, "return-later-period-op", "2026-11-02",
+            "إرجاع في يوم لاحق",
+            listOf(SalesReturnItemInput(saleItemId(draft.invoiceId), BigDecimal.ONE)),
+            listOf(SalesRefundAllocationInput(cashAccountId, 250L))
+        )
+        assertEquals(250L, result.totalUsdCents)
+        val report = SalesProfitRepository(RuntimeEnvironment.getApplication())
+            .summarize("2026-11-02", "2026-11-02")
+        assertEquals(0L, report.revenueUsdCents)
+        assertEquals(250L, report.returnUsdCents)
+        assertEquals(0L, report.cogsUsdCents)
+        assertEquals(100L, report.returnedCogsUsdCents)
+        assertEquals(-250L, report.netRevenueUsdCents)
+        assertEquals(-100L, report.netCogsUsdCents)
+        assertEquals(-150L, report.grossProfitUsdCents)
+        assertTrue(report.isComplete)
     }
 
     @Test

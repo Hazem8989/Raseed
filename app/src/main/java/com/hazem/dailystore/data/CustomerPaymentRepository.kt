@@ -266,7 +266,8 @@ class CustomerPaymentRepository(context: Context) {
             db.insertOrThrow("invoice_payments", null, payment)
 
             val newPaid = Math.addExact(state.paidUsdCents, usdReduction)
-            val newOutstanding = (invoice.totalUsdCents - newPaid).coerceAtLeast(0L)
+            val creditReduction = creditReductionUsdCents(db, invoiceId)
+            val newOutstanding = (invoice.totalUsdCents - newPaid - creditReduction).coerceAtLeast(0L)
             val newStatus = if (newOutstanding == 0L) "PAID" else "PARTIALLY_PAID"
             db.execSQL(
                 "UPDATE sales_invoices SET status=?,updated_at=? WHERE id=? AND status IN ('POSTED','PARTIALLY_PAID')",
@@ -428,7 +429,8 @@ class CustomerPaymentRepository(context: Context) {
         db: SQLiteDatabase, invoiceId: String, totalUsdCents: Long, originalRate: Long
     ): InvoicePaymentState {
         val paid = paidUsdCents(db, invoiceId)
-        val outstanding = (totalUsdCents - paid).coerceAtLeast(0L)
+        val creditReduction = creditReductionUsdCents(db, invoiceId)
+        val outstanding = (totalUsdCents - paid - creditReduction).coerceAtLeast(0L)
         val current = currentRate(db)
         val effective = if (originalRate > 0L) maxOf(current, originalRate) else 0L
         val outstandingSyp = if (effective > 0L)

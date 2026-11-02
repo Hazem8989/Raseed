@@ -95,8 +95,10 @@ class SalesProfitRepository(context: Context) {
                 else returnedCogs = Math.addExact(returnedCogs, returns.getLong(1))
             }
         }
-        val returnedCostExceedsSales = returnedCogs > knownCogs
-        val complete = uncosted == 0 && uncostedReturns == 0 && !returnedCostExceedsSales
+        // Returns are recognized on their own return date, even if the original sale
+        // belongs to an earlier reporting period. A valid COGS reversal can therefore
+        // exceed this period's sales COGS and produce a negative net COGS for the period.
+        val complete = uncosted == 0 && uncostedReturns == 0
         val netRevenue = Math.subtractExact(revenue, returnRevenue)
         val netCogs = Math.subtractExact(knownCogs, returnedCogs)
         return SalesProfitSummary(
