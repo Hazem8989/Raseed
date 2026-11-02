@@ -48,7 +48,7 @@ class CustomerRepositoryTest {
     fun customerCanBeCreatedUpdatedAndDeactivatedWithoutDeletingHistory() {
         val customer = customers.create(adminId, "زبون اختبار ${UUID.randomUUID()}", "0999000000")
         assertEquals("0999000000", customer.phone)
-        val updated = customers.update(customer.id, "اسم معدل", "0999111111")
+        val updated = customers.update(adminId, customer.id, "اسم معدل", "0999111111")
         assertEquals("اسم معدل", updated.name)
         customers.setActive(customer.id, false)
         assertNull(customers.listActive().firstOrNull { it.id == customer.id })
