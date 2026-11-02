@@ -161,6 +161,95 @@ class SyncProtocolRepositoryTest {
         recipientSecret.fill(0)
     }
 
+    @Test fun secondaryCommandIsQueuedAndSignedWithItsOwnCredentialWithoutPostingLocally() {
+        val primaryId = UUID.randomUUID().toString()
+        val secretBytes = ByteArray(32) { (it + 31).toByte() }
+        val credential = android.util.Base64.encodeToString(
+            secretBytes,
+            android.util.Base64.URL_SAFE or android.util.Base64.NO_WRAP or android.util.Base64.NO_PADDING
+        )
+        repository.configureAsSecondary(adminId, "store-command-01", primaryId, credential, "الثانوي")
+        val operationId = UUID.randomUUID().toString()
+        val db = database.writableDatabase
+        db.beginTransaction()
+        val sequence = repository.enqueueSecondaryCommand(
+            db, adminId, operationId, "POST_SALES_INVOICE", "SALES_INVOICE", "sale-command-1",
+            """{"invoice_id":"sale-command-1","total_usd_cents":2500}"""
+        )
+        db.setTransactionSuccessful()
+        db.endTransaction()
+
+        assertEquals(1L, sequence)
+        assertEquals(1, repository.pendingOutbox().size)
+        assertEquals(0, db.rawQuery("SELECT COUNT(*) FROM sales_invoices", null).use { it.moveToFirst(); it.getInt(0) })
+        val envelope = repository.authenticatedOutbox(operationId, primaryId)
+        assertEquals(SyncDeviceIdentity.getOrCreate(RuntimeEnvironment.getApplication()), envelope.originDeviceId)
+        assertTrue(SyncEnvelopeSecurity.verify(envelope, secretBytes))
+        assertEquals("POST_SALES_INVOICE", org.json.JSONObject(envelope.payloadJson).getString("business_operation"))
+        secretBytes.fill(0)
+    }
+
+    @Test fun primaryDurablyReceivesSecondaryCommandAndHandlesDuplicateAndHashConflict() {
+        repository.configureAsPrimary(adminId, "الرئيسي")
+        val invitation = repository.createPairingInvitation(adminId)
+        val secondaryId = UUID.randomUUID().toString()
+        repository.enrollSecondaryDevice(adminId, invitation.token, secondaryId, "الثانوي")
+        val secret = vault.load(secondaryId)!!
+        val operationId = UUID.randomUUID().toString()
+        val envelope = SyncEnvelopeSecurity.create(
+            database.readableDatabase.rawQuery(
+                "SELECT state_value FROM sync_protocol_state WHERE state_key='store_id'", null
+            ).use { c -> assertTrue(c.moveToFirst()); c.getString(0) },
+            operationId, 1L, secondaryId, adminId, "CREATE", "SALES_INVOICE",
+            "sale-incoming-1", 0L, """{"invoice_id":"sale-incoming-1","total_usd_cents":2500}""",
+            "2026-11-03T12:00:00Z", secret
+        )
+        val encoded = SyncEnvelopeSecurity.encode(envelope)
+        assertEquals(SyncInboxDisposition.RECEIVED, repository.recordIncomingFromSecondary(encoded))
+        assertEquals(SyncInboxDisposition.DUPLICATE, repository.recordIncomingFromSecondary(encoded))
+        val changed = SyncEnvelopeSecurity.create(
+            envelope.storeId, operationId, 1L, secondaryId, adminId, "CREATE", "SALES_INVOICE",
+            "sale-incoming-1", 0L, """{"invoice_id":"sale-incoming-1","total_usd_cents":9900}""",
+            "2026-11-03T12:00:01Z", secret
+        )
+        assertEquals(SyncInboxDisposition.CONFLICT,
+            repository.recordIncomingFromSecondary(SyncEnvelopeSecurity.encode(changed)))
+        database.readableDatabase.rawQuery(
+            "SELECT status FROM sync_inbox WHERE operation_id=?", arrayOf(operationId)
+        ).use { c -> assertTrue(c.moveToFirst()); assertEquals("RECEIVED", c.getString(0)) }
+        database.readableDatabase.rawQuery(
+            "SELECT last_sequence FROM sync_cursors WHERE device_id=?", arrayOf(secondaryId)
+        ).use { c -> assertTrue(c.moveToFirst()); assertEquals(1L, c.getLong(0)) }
+        secret.fill(0)
+    }
+
+    @Test fun primaryRejectsSequenceGapWithoutAdvancingDurableCursor() {
+        repository.configureAsPrimary(adminId, "الرئيسي")
+        val invitation = repository.createPairingInvitation(adminId)
+        val secondaryId = UUID.randomUUID().toString()
+        repository.enrollSecondaryDevice(adminId, invitation.token, secondaryId, "الثانوي")
+        val secret = vault.load(secondaryId)!!
+        val storeId = database.readableDatabase.rawQuery(
+            "SELECT state_value FROM sync_protocol_state WHERE state_key='store_id'", null
+        ).use { c -> assertTrue(c.moveToFirst()); c.getString(0) }
+        val gap = SyncEnvelopeSecurity.create(
+            storeId, UUID.randomUUID().toString(), 2L, secondaryId, adminId, "CREATE",
+            "SALES_INVOICE", "sale-gap", 0L, """{"invoice_id":"sale-gap"}""",
+            "2026-11-03T12:00:00Z", secret
+        )
+        var rejected = false
+        try { repository.recordIncomingFromSecondary(SyncEnvelopeSecurity.encode(gap)) }
+        catch (_: IllegalArgumentException) { rejected = true }
+        assertTrue(rejected)
+        database.readableDatabase.rawQuery(
+            "SELECT last_sequence FROM sync_cursors WHERE device_id=?", arrayOf(secondaryId)
+        ).use { c -> assertTrue(c.moveToFirst()); assertEquals(0L, c.getLong(0)) }
+        assertEquals(0, database.readableDatabase.rawQuery(
+            "SELECT COUNT(*) FROM sync_inbox", null
+        ).use { c -> c.moveToFirst(); c.getInt(0) })
+        secret.fill(0)
+    }
+
     @Test fun noOutboxIsCreatedBeforePrimaryDeviceIsConfigured() {
         val db = database.writableDatabase
         db.beginTransaction()
