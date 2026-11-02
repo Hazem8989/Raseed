@@ -1212,8 +1212,11 @@ class MainActivity : Activity() {
                 13f, green, true, Gravity.RIGHT).apply { setPadding(0, dp(5), 0, dp(3)) })
             card.addView(label("الإجمالي المتفق عليه: ${formatSypAmount(invoice.totalSypMinor)} ل.س",
                 13f, textColor, false, Gravity.RIGHT))
-            card.addView(label("المدفوع: ${formatSypAmount(invoice.paidSypMinor)} ل.س",
+            card.addView(label("المدفوع نقداً: ${formatSypAmount(invoice.paidSypMinor)} ل.س",
                 13f, textColor, false, Gravity.RIGHT))
+            if (invoice.supplierReturnCreditSypMinor > 0L) card.addView(label(
+                "تخفيض مستحق المورد بمرتجعات: ${formatSypAmount(invoice.supplierReturnCreditSypMinor)} ل.س",
+                13f, green, true, Gravity.RIGHT))
             card.addView(label("المتبقي الثابت: ${formatSypAmount(invoice.outstandingSypMinor)} ل.س",
                 14f, if (invoice.outstandingSypMinor > 0L) green else mutedColor,
                 true, Gravity.RIGHT))
@@ -1253,6 +1256,7 @@ class MainActivity : Activity() {
         "UNPAID" -> "آجلة – غير مدفوعة"
         "PARTIALLY_PAID" -> "مدفوعة جزئياً"
         "PAID" -> "مدفوعة بالكامل"
+        "SETTLED_BY_RETURN" -> "مسوّاة بمرتجع مورد"
         "DRAFT" -> "مسودة"
         "CANCELLED" -> "ملغاة"
         else -> status
@@ -1438,8 +1442,12 @@ class MainActivity : Activity() {
         }
         val totalDueSyp = suppliers.sumOf { it.outstandingSypMinor }
         val totalPaidSyp = suppliers.sumOf { it.paidSypMinor }
-        list.addView(label("إجمالي ما دُفع: ${formatSypAmount(totalPaidSyp)} ل.س",
+        val totalReturnCreditsSyp = suppliers.sumOf { it.supplierReturnCreditsSypMinor }
+        list.addView(label("إجمالي ما دُفع نقداً: ${formatSypAmount(totalPaidSyp)} ل.س",
             14f, textColor, false, Gravity.RIGHT))
+        if (totalReturnCreditsSyp > 0L) list.addView(label(
+            "إجمالي تخفيضات مرتجعات الموردين: ${formatSypAmount(totalReturnCreditsSyp)} ل.س",
+            14f, green, true, Gravity.RIGHT))
         list.addView(label("إجمالي المستحق الثابت: ${formatSypAmount(totalDueSyp)} ل.س",
             16f, green, true, Gravity.RIGHT).apply { setPadding(0, dp(4), 0, dp(14)) })
         val unpricedCount = suppliers.sumOf { it.unpricedInvoiceCount }
@@ -1461,8 +1469,11 @@ class MainActivity : Activity() {
             card.addView(label(supplier.name, 16f, green, true, Gravity.RIGHT))
             card.addView(label("الفواتير المعتمدة: ${formatSypAmount(supplier.totalPurchaseSypMinor)} ل.س",
                 12f, textColor, false, Gravity.RIGHT).apply { setPadding(0, dp(5), 0, dp(2)) })
-            card.addView(label("المدفوع: ${formatSypAmount(supplier.paidSypMinor)} ل.س",
+            card.addView(label("المدفوع نقداً: ${formatSypAmount(supplier.paidSypMinor)} ل.س",
                 12f, textColor, false, Gravity.RIGHT))
+            if (supplier.supplierReturnCreditsSypMinor > 0L) card.addView(label(
+                "تخفيض المرتجعات: ${formatSypAmount(supplier.supplierReturnCreditsSypMinor)} ل.س",
+                12f, green, true, Gravity.RIGHT))
             card.addView(label("المتبقي الثابت: ${formatSypAmount(supplier.outstandingSypMinor)} ل.س",
                 14f, green, true, Gravity.RIGHT).apply { setPadding(0, dp(3), 0, dp(2)) })
             card.addView(label("فواتير غير مسددة: ${supplier.unpaidInvoiceCount}",
