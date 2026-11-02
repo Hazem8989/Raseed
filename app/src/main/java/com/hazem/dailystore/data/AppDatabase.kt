@@ -48,6 +48,7 @@ class AppDatabase private constructor(context: Context) :
             ensureSalesReturnSchema(db)
             ensureInventoryAdjustmentSchema(db)
             ensureSupplierReturnSchema(db)
+            ensureOperatingExpenseSchema(db)
             db.execSQL(
                 """INSERT INTO app_settings(setting_key, setting_value, updated_at)
                    VALUES('base_currency', 'USD', strftime('%Y-%m-%dT%H:%M:%fZ','now'))"""
@@ -402,6 +403,16 @@ class AppDatabase private constructor(context: Context) :
                 db.endTransaction()
             }
         }
+        if (version < 17) {
+            db.beginTransaction()
+            try {
+                ensureOperatingExpenseSchema(db)
+                db.setTransactionSuccessful()
+                version = 17
+            } finally {
+                db.endTransaction()
+            }
+        }
         if (version != newVersion) {
             throw IllegalStateException("Missing database migration from version $version to $newVersion")
         }
@@ -480,6 +491,62 @@ class AppDatabase private constructor(context: Context) :
      * their own source-item link and inbound cash-refund allocations. This
      * keeps customer refund semantics and supplier credits separate.
      */
+    private fun ensureOperatingExpenseSchema(db: SQLiteDatabase) {
+        db.execSQL("""
+            CREATE TABLE IF NOT EXISTS expense_categories (
+                id TEXT PRIMARY KEY NOT NULL,
+                name TEXT NOT NULL COLLATE NOCASE UNIQUE,
+                is_active INTEGER NOT NULL DEFAULT 1 CHECK(is_active IN (0,1)),
+                created_by TEXT,
+                created_at TEXT NOT NULL,
+                FOREIGN KEY(created_by) REFERENCES users(id) ON UPDATE RESTRICT ON DELETE RESTRICT
+            )
+        """.trimIndent())
+        db.execSQL("""
+            CREATE TABLE IF NOT EXISTS operating_expenses (
+                id TEXT PRIMARY KEY NOT NULL,
+                category_id TEXT NOT NULL,
+                cash_account_id TEXT NOT NULL,
+                cash_transaction_id TEXT NOT NULL UNIQUE,
+                amount_minor INTEGER NOT NULL CHECK(amount_minor > 0),
+                currency_code TEXT NOT NULL CHECK(currency_code IN ('USD','SYP')),
+                exchange_rate_syp_per_usd_milli INTEGER CHECK(
+                    exchange_rate_syp_per_usd_milli IS NULL OR exchange_rate_syp_per_usd_milli > 0
+                ),
+                amount_usd_cents INTEGER NOT NULL CHECK(amount_usd_cents >= 0),
+                expense_date TEXT NOT NULL,
+                reference TEXT,
+                notes TEXT,
+                created_by TEXT NOT NULL,
+                operation_id TEXT NOT NULL UNIQUE,
+                created_at TEXT NOT NULL,
+                FOREIGN KEY(category_id) REFERENCES expense_categories(id) ON UPDATE RESTRICT ON DELETE RESTRICT,
+                FOREIGN KEY(cash_account_id) REFERENCES cash_accounts(id) ON UPDATE RESTRICT ON DELETE RESTRICT,
+                FOREIGN KEY(cash_transaction_id) REFERENCES cash_transactions(id) ON UPDATE RESTRICT ON DELETE RESTRICT,
+                FOREIGN KEY(created_by) REFERENCES users(id) ON UPDATE RESTRICT ON DELETE RESTRICT
+            )
+        """.trimIndent())
+        db.execSQL("CREATE INDEX IF NOT EXISTS idx_operating_expenses_date ON operating_expenses(expense_date,id)")
+        db.execSQL("CREATE INDEX IF NOT EXISTS idx_operating_expenses_category ON operating_expenses(category_id,expense_date)")
+        val defaults = listOf(
+            "expense-rent" to "إيجار",
+            "expense-salaries" to "رواتب وأجور",
+            "expense-transport" to "نقل ومواصلات",
+            "expense-maintenance" to "صيانة",
+            "expense-communications" to "اتصالات وإنترنت",
+            "expense-energy" to "وقود وطاقة",
+            "expense-supplies" to "مواد تشغيلية",
+            "expense-fees" to "رسوم وعمولات",
+            "expense-other" to "أخرى"
+        )
+        defaults.forEach { (id,name) ->
+            db.execSQL(
+                "INSERT OR IGNORE INTO expense_categories(id,name,is_active,created_at) VALUES(?,?,1,strftime('%Y-%m-%dT%H:%M:%fZ','now'))",
+                arrayOf(id,name)
+            )
+        }
+    }
+
     private fun ensureSupplierReturnSchema(db: SQLiteDatabase) {
         fun ensureColumn(table: String, column: String, definition: String) {
             var exists = false
@@ -619,7 +686,7 @@ class AppDatabase private constructor(context: Context) :
 
     companion object {
         const val DATABASE_NAME = "the_daily_shop.db"
-        const val DATABASE_VERSION = 16
+        const val DATABASE_VERSION = 17
 
         @Volatile
         private var INSTANCE: AppDatabase? = null
