@@ -65,7 +65,7 @@ class CustomerRepositoryTest {
             put("created_at", "2026-10-31T00:00:00.000Z")
         }
         database.writableDatabase.insertOrThrow("exchange_rates", null, rate)
-        val draft = invoices.saveSalesDraft(
+        val draft = invoices.saveSalesDraft(adminId, 
             "credit-draft-${UUID.randomUUID()}", null, customer.id, "2026-10-31",
             0L, null, listOf(InvoiceLineInput(productId, BigDecimal.ONE, 250L)),
             saleType = "CREDIT"
@@ -73,7 +73,7 @@ class CustomerRepositoryTest {
         database.readableDatabase.rawQuery(
             "SELECT sale_type FROM sales_invoices WHERE id=?", arrayOf(draft.invoiceId)
         ).use { c -> assertTrue(c.moveToFirst()); assertEquals("CREDIT", c.getString(0)) }
-        val cash = invoices.saveSalesDraft(
+        val cash = invoices.saveSalesDraft(adminId, 
             "cash-draft-${UUID.randomUUID()}", null, null, "2026-10-31",
             0L, null, listOf(InvoiceLineInput(productId, BigDecimal.ONE, 250L))
         )
@@ -85,7 +85,7 @@ class CustomerRepositoryTest {
     @Test
     fun creditSaleWithoutCustomerIsRejected() {
         try {
-            invoices.saveSalesDraft(
+            invoices.saveSalesDraft(adminId, 
                 "credit-no-customer-${UUID.randomUUID()}", null, null, "2026-10-31",
                 0L, null, listOf(InvoiceLineInput(productId, BigDecimal.ONE, 250L)),
                 saleType = "CREDIT"
