@@ -116,7 +116,7 @@ class PurchasePaymentRepository(context: Context) {
     }
 
     fun addPayment(
-        invoiceId: String, operationId: String, cashAccountId: String,
+        actorUserId: String, invoiceId: String, operationId: String, cashAccountId: String,
         amountMinor: Long, note: String? = null
     ): PurchasePaymentResult {
         require(invoiceId.isNotBlank() && operationId.isNotBlank() && cashAccountId.isNotBlank()) {
@@ -128,6 +128,7 @@ class PurchasePaymentRepository(context: Context) {
         val payloadHash = hash("$invoiceId|$cashAccountId|$amountMinor|${cleanNote.orEmpty()}")
         db.beginTransaction()
         try {
+            PermissionPolicy.require(db, actorUserId, PermissionPolicy.SUPPLIER_PAYMENTS_MANAGE)
             findOperation(db, operationId)?.let { existing ->
                 require(existing.type == "PURCHASE_PAYMENT" && existing.payloadHash == payloadHash) {
                     "معرّف العملية مستخدم لعملية أو بيانات مختلفة"
