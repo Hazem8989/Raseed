@@ -1845,10 +1845,16 @@ class MainActivity : Activity() {
             val amount = when {
                 entry.debitUsdCents > 0L -> "مدين: ${moneyText(entry.debitUsdCents)} USD"
                 entry.creditUsdCents > 0L -> "دائن: ${moneyText(entry.creditUsdCents)} USD"
+                entry.cashRefundUsdCents > 0L -> "رد نقدي: ${moneyText(entry.cashRefundUsdCents)} USD"
+                entry.cashRefundSypMinor > 0L -> "رد نقدي: ${formatSypAmount(entry.cashRefundSypMinor)} ل.س"
                 else -> "حركة مالية"
             }
+            val cashRefund = if (entry.cashRefundUsdCents > 0L && entry.creditUsdCents > 0L)
+                " • رد نقدي: ${moneyText(entry.cashRefundUsdCents)} USD"
+            else if (entry.cashRefundSypMinor > 0L && entry.creditUsdCents > 0L)
+                " • رد نقدي: ${formatSypAmount(entry.cashRefundSypMinor)} ل.س" else ""
             content.addView(label(
-                "${entry.date} • ${entry.reference} • ${entry.description}\n$amount • الرصيد: ${moneyText(entry.balanceUsdCents)} USD",
+                "${entry.date} • ${entry.reference} • ${entry.description}\n$amount$cashRefund • الرصيد: ${moneyText(entry.balanceUsdCents)} USD",
                 11f, textColor, false, Gravity.RIGHT
             ).apply { setPadding(dp(8), dp(6), dp(8), dp(6)); background = cardBackground() })
         }
