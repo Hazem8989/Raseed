@@ -72,13 +72,13 @@ class CustomerPaymentRepositoryTest {
         val invoiceId = createCreditInvoice()
         val stockBefore = stockQuantity()
         val movementCountBefore = inventoryMovementCount(invoiceId)
-        val first = payments.addPayment(invoiceId, "customer-pay-first", cashDrawerId, 15_000L, "دفعة أولى")
+        val first = payments.addPayment(adminId, invoiceId, "customer-pay-first", cashDrawerId, 15_000L, "دفعة أولى")
         assertFalse(first.replayed)
         assertEquals(100L, first.paidUsdCents)
         assertEquals(400L, first.outstandingUsdCents)
         assertEquals(60_000L, first.outstandingSypMinor)
 
-        val replay = payments.addPayment(invoiceId, "customer-pay-first", cashDrawerId, 15_000L, "دفعة أولى")
+        val replay = payments.addPayment(adminId, invoiceId, "customer-pay-first", cashDrawerId, 15_000L, "دفعة أولى")
         assertTrue(replay.replayed)
         assertEquals(first.paymentId, replay.paymentId)
         assertEquals(1, payments.listPayments(invoiceId).size)
@@ -112,7 +112,7 @@ class CustomerPaymentRepositoryTest {
             arrayOf(invoiceId)
         )
         // Simulate a later collection that updates the invoice's mutable updated_at field.
-        payments.addPayment(invoiceId, "collection-after-sale-date", cashDrawerId, 15_000L)
+        payments.addPayment(adminId, invoiceId, "collection-after-sale-date", cashDrawerId, 15_000L)
         db.execSQL(
             "UPDATE sales_invoices SET updated_at='2026-11-02T10:00:00.000Z' WHERE id=?",
             arrayOf(invoiceId)
@@ -134,7 +134,7 @@ class CustomerPaymentRepositoryTest {
     fun collectionUsesGreaterOfCurrentAndOriginalRate() {
         val invoiceId = createCreditInvoice()
         insertRate(20_000_000L, "2026-11-01T00:00:00.000Z")
-        val result = payments.addPayment(invoiceId, "customer-high-rate", cashDrawerId, 20_000L)
+        val result = payments.addPayment(adminId, invoiceId, "customer-high-rate", cashDrawerId, 20_000L)
         assertEquals(100L, result.paidUsdCents)
         assertEquals(400L, result.outstandingUsdCents)
         assertEquals(80_000L, result.outstandingSypMinor)
@@ -145,7 +145,7 @@ class CustomerPaymentRepositoryTest {
     fun fallingRateCannotReduceDebtBelowOriginalInvoiceRateFloor() {
         val invoiceId = createCreditInvoice()
         insertRate(10_000_000L, "2026-11-02T00:00:00.000Z")
-        val result = payments.addPayment(invoiceId, "customer-low-rate", cashDrawerId, 15_000L)
+        val result = payments.addPayment(adminId, invoiceId, "customer-low-rate", cashDrawerId, 15_000L)
         assertEquals(100L, result.paidUsdCents)
         assertEquals(400L, result.outstandingUsdCents)
         assertEquals(60_000L, result.outstandingSypMinor)
@@ -156,7 +156,7 @@ class CustomerPaymentRepositoryTest {
     fun electronicCollectionIncreasesOnlySelectedWallet() {
         val invoiceId = createCreditInvoice()
         val cashBefore = CashAccountRepository(RuntimeEnvironment.getApplication()).balance(cashDrawerId)
-        val result = payments.addPayment(invoiceId, "customer-wallet", walletId, 30_000L)
+        val result = payments.addPayment(adminId, invoiceId, "customer-wallet", walletId, 30_000L)
         assertEquals(200L, result.paidUsdCents)
         val accounts = CashAccountRepository(RuntimeEnvironment.getApplication())
         assertEquals(30_000L, accounts.balance(walletId))
@@ -176,11 +176,11 @@ class CustomerPaymentRepositoryTest {
         val invoiceId = createCreditInvoice()
         database.writableDatabase.delete("daily_cash_sessions", null, null)
         try {
-            payments.addPayment(invoiceId, "no-drawer", cashDrawerId, 1000L)
+            payments.addPayment(adminId, invoiceId, "no-drawer", cashDrawerId, 1000L)
             throw AssertionError("Missing primary daily drawer must be rejected")
         } catch (_: IllegalArgumentException) { }
         try {
-            payments.addPayment(invoiceId, "usd-collection", usdAccountId, 1000L)
+            payments.addPayment(adminId, invoiceId, "usd-collection", usdAccountId, 1000L)
             throw AssertionError("USD collection must be rejected")
         } catch (_: IllegalArgumentException) { }
         assertTrue(payments.listPayments(invoiceId).isEmpty())
@@ -190,7 +190,7 @@ class CustomerPaymentRepositoryTest {
     fun overpaymentIsRejectedWithoutChangingInvoiceOrCashAccount() {
         val invoiceId = createCreditInvoice()
         try {
-            payments.addPayment(invoiceId, "customer-overpay", cashDrawerId, 75_001L)
+            payments.addPayment(adminId, invoiceId, "customer-overpay", cashDrawerId, 75_001L)
             throw AssertionError("Overpayment must be rejected")
         } catch (_: IllegalArgumentException) { }
         assertTrue(payments.listPayments(invoiceId).isEmpty())
@@ -208,7 +208,7 @@ class CustomerPaymentRepositoryTest {
         invoices.postCashSale(adminId, draft.invoiceId, "customer-cash-post-" + UUID.randomUUID(), cashDrawerId)
         val receiptsBefore = payments.listPayments(draft.invoiceId).size
         try {
-            payments.addPayment(draft.invoiceId, "customer-cash-payment-" + UUID.randomUUID(), cashDrawerId, 1000L)
+            payments.addPayment(adminId, draft.invoiceId, "customer-cash-payment-" + UUID.randomUUID(), cashDrawerId, 1000L)
             throw AssertionError("Cash sale must not be collected as customer credit")
         } catch (_: IllegalArgumentException) { }
         assertEquals(receiptsBefore, payments.listPayments(draft.invoiceId).size)
