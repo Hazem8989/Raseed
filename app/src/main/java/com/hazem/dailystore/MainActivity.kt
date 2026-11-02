@@ -1299,7 +1299,7 @@ class MainActivity : Activity() {
                         parseUsdCents(entered) else parseSypAmount(entered)
                     require(amountMinor > 0L) { "أدخل مبلغاً أكبر من صفر" }
                     val result = payments.addPayment(
-                        invoiceId, UUID.randomUUID().toString(), account.id, amountMinor,
+                        currentUserId ?: error("جلسة المستخدم غير صالحة"), invoiceId, UUID.randomUUID().toString(), account.id, amountMinor,
                         note.text.toString().trim().ifEmpty { null }
                     )
                     dialog.dismiss()
