@@ -28,6 +28,7 @@ data class OperatingExpenseResult(
  * committed atomically, with the exchange rate captured at posting time.
  */
 class OperatingExpenseRepository(context: Context) {
+    private val context = context.applicationContext
     private val database = AppDatabase.getInstance(context)
 
     fun listCategories(activeOnly: Boolean = true): List<ExpenseCategory> {
@@ -174,6 +175,16 @@ class OperatingExpenseRepository(context: Context) {
                     .put("reference",cleanReference).put("notes",cleanNotes).toString())
                 put("created_at",now)
             })
+            SyncProtocolRepository(context).enqueueLocalOperation(
+                db, actorUserId, operationId, "POST_OPERATING_EXPENSE", "OPERATING_EXPENSE",
+                expenseId, "CREATE",
+                JSONObject().put("expense_id", expenseId).put("cash_transaction_id", cashId)
+                    .put("category_id", categoryId).put("cash_account_id", cashAccountId)
+                    .put("amount_minor", amountMinor).put("currency_code", currency)
+                    .put("exchange_rate_syp_per_usd_milli", rate).put("amount_usd_cents", amountUsd)
+                    .put("expense_date", expenseDate).put("reference", cleanReference)
+                    .put("notes", cleanNotes).put("created_at", now).toString()
+            )
             db.setTransactionSuccessful()
             return OperatingExpenseResult(expenseId,cashId,amountMinor,currency,amountUsd,false)
         } finally { db.endTransaction() }
