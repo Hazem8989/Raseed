@@ -25,6 +25,7 @@ object PermissionPolicy {
     const val REPORTS_READ = "reports.read"
     const val DAILY_CASH_MANAGE = "daily_cash.manage"
     const val SERVICE_TRANSFERS_MANAGE = "service_transfers.manage"
+    const val SERVICE_TRANSFERS_EXECUTE = "service_transfers.execute"
     const val BACKUP_MANAGE = "backup.manage"
     const val INVENTORY_ADJUST = "inventory.adjust"
     const val RETURNS_PROCESS = "returns.process"
@@ -46,7 +47,8 @@ object PermissionPolicy {
         SALES_CHECKOUT to "تنفيذ عمليات البيع",
         REPORTS_READ to "عرض التقارير",
         DAILY_CASH_MANAGE to "إدارة إقفال وفتح الصندوق اليومي",
-        SERVICE_TRANSFERS_MANAGE to "إدارة تحويلات الخدمات",
+        SERVICE_TRANSFERS_MANAGE to "إدارة محافظ الخدمات وإعادة شحنها",
+        SERVICE_TRANSFERS_EXECUTE to "تنفيذ تحويلات العملاء للخدمات",
         BACKUP_MANAGE to "النسخ الاحتياطي والاستعادة",
         INVENTORY_ADJUST to "تسويات وجرد المخزون",
         RETURNS_PROCESS to "تنفيذ المرتجعات ورد الأموال",
@@ -55,7 +57,7 @@ object PermissionPolicy {
 
     // Conservative cashier defaults: sell, view/create customers, and collect customer debts.
     private val cashierDefaults = setOf(
-        SALES_CHECKOUT, CUSTOMERS_READ, CUSTOMERS_CREATE, CUSTOMERS_COLLECT
+        SALES_CHECKOUT, CUSTOMERS_READ, CUSTOMERS_CREATE, CUSTOMERS_COLLECT, SERVICE_TRANSFERS_EXECUTE
     )
 
     fun ensureDefaults(db: SQLiteDatabase) {
