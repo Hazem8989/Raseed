@@ -46,6 +46,7 @@ class AppDatabase private constructor(context: Context) :
             PermissionPolicy.ensureDefaults(db)
             ensureFifoSchema(db)
             ensureSalesReturnSchema(db)
+            ensureInventoryAdjustmentSchema(db)
             db.execSQL(
                 """INSERT INTO app_settings(setting_key, setting_value, updated_at)
                    VALUES('base_currency', 'USD', strftime('%Y-%m-%dT%H:%M:%fZ','now'))"""
@@ -380,6 +381,16 @@ class AppDatabase private constructor(context: Context) :
                 db.endTransaction()
             }
         }
+        if (version < 15) {
+            db.beginTransaction()
+            try {
+                ensureInventoryAdjustmentSchema(db)
+                db.setTransactionSuccessful()
+                version = 15
+            } finally {
+                db.endTransaction()
+            }
+        }
         if (version != newVersion) {
             throw IllegalStateException("Missing database migration from version $version to $newVersion")
         }
@@ -425,6 +436,32 @@ class AppDatabase private constructor(context: Context) :
             )
         """.trimIndent())
         db.execSQL("CREATE INDEX IF NOT EXISTS idx_return_cost_source ON return_cost_allocations(source_sale_allocation_id)")
+    }
+
+    private fun ensureInventoryAdjustmentSchema(db: SQLiteDatabase) {
+        db.execSQL("""
+            CREATE TABLE IF NOT EXISTS inventory_adjustments (
+                id TEXT PRIMARY KEY NOT NULL,
+                operation_id TEXT NOT NULL UNIQUE,
+                product_id TEXT NOT NULL,
+                warehouse_id TEXT NOT NULL,
+                inventory_movement_id TEXT NOT NULL UNIQUE,
+                adjustment_type TEXT NOT NULL CHECK(adjustment_type IN ('INCREASE','DECREASE')),
+                quantity REAL NOT NULL CHECK(quantity > 0),
+                quantity_before REAL NOT NULL CHECK(quantity_before >= 0),
+                quantity_after REAL NOT NULL CHECK(quantity_after >= 0),
+                unit_cost_usd_cents INTEGER CHECK(unit_cost_usd_cents IS NULL OR unit_cost_usd_cents > 0),
+                cost_usd_cents INTEGER CHECK(cost_usd_cents IS NULL OR cost_usd_cents >= 0),
+                reason TEXT NOT NULL,
+                created_by TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                FOREIGN KEY(product_id) REFERENCES products(id) ON UPDATE RESTRICT ON DELETE RESTRICT,
+                FOREIGN KEY(warehouse_id) REFERENCES warehouses(id) ON UPDATE RESTRICT ON DELETE RESTRICT,
+                FOREIGN KEY(inventory_movement_id) REFERENCES inventory_movements(id) ON UPDATE RESTRICT ON DELETE RESTRICT,
+                FOREIGN KEY(created_by) REFERENCES users(id) ON UPDATE RESTRICT ON DELETE RESTRICT
+            )
+        """.trimIndent())
+        db.execSQL("CREATE INDEX IF NOT EXISTS idx_inventory_adjustments_product_date ON inventory_adjustments(product_id,created_at)")
     }
 
     private fun ensureFifoSchema(db: SQLiteDatabase) {
@@ -516,7 +553,7 @@ class AppDatabase private constructor(context: Context) :
 
     companion object {
         const val DATABASE_NAME = "the_daily_shop.db"
-        const val DATABASE_VERSION = 14
+        const val DATABASE_VERSION = 15
 
         @Volatile
         private var INSTANCE: AppDatabase? = null
