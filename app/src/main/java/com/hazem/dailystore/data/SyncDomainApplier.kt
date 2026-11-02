@@ -1,0 +1,177 @@
+package com.hazem.dailystore.data
+
+import android.content.ContentValues
+import android.content.Context
+import org.json.JSONArray
+import org.json.JSONObject
+import java.math.BigDecimal
+
+/**
+ * Applies the currently supported incoming invoice commands on the primary.
+ *
+ * The inbox receipt is durable before this class is called. Draft creation and
+ * posting use deterministic operation IDs so a process death between those
+ * steps can safely resume without posting stock or cash twice.
+ *
+ * Cash-sale receipt accounts are intentionally not guessed: until cash-account
+ * identity mapping is implemented, those commands remain unapplied.
+ */
+class SyncDomainApplier(context: Context) {
+    private val appContext = context.applicationContext
+    private val database = AppDatabase.getInstance(appContext)
+
+    data class ApplyResult(
+        val operationId: String,
+        val applied: Boolean,
+        val reason: String? = null
+    )
+
+    fun applyReceivedInvoice(operationId: String): ApplyResult = synchronized(APPLY_LOCK) {
+        require(operationId.isNotBlank()) { "معرّف الأمر مطلوب" }
+        val db = database.writableDatabase
+        val row = db.rawQuery(
+            """SELECT i.origin_device_id,i.entity_type,i.entity_id,i.payload_json,i.status,
+                      m.primary_user_id
+               FROM sync_inbox i
+               JOIN sync_actor_mappings m
+                 ON m.device_id=i.origin_device_id AND m.is_active=1
+               JOIN users u ON u.id=m.primary_user_id
+               JOIN sync_devices d ON d.device_id=i.origin_device_id
+               WHERE i.operation_id=? AND d.device_role='SECONDARY'
+                 AND d.status='ACTIVE' AND u.is_active=1 AND u.must_change_password=0
+               ORDER BY m.mapped_at DESC LIMIT 1""".trimIndent(),
+            arrayOf(operationId)
+        ).use { c ->
+            require(c.moveToFirst()) { "الأمر غير موجود أو الجهاز/المستخدم غير مفعل أو لم يتم ربط المستخدم" }
+            InboxCommand(
+                c.getString(0), c.getString(1), c.getString(2), c.getString(3),
+                c.getString(4), c.getString(5)
+            )
+        }
+        if (row.status == "APPLIED") return@synchronized ApplyResult(operationId, true)
+        require(row.status == "RECEIVED") { "حالة الأمر لا تسمح بالتطبيق: ${row.status}" }
+
+        val payload = JSONObject(row.payloadJson)
+        val businessOperation = payload.optString("business_operation")
+        val requiredPermission = when (businessOperation) {
+            "POST_PURCHASE_INVOICE" -> PermissionPolicy.PURCHASES_MANAGE
+            "POST_SALES_INVOICE" -> PermissionPolicy.SALES_CHECKOUT
+            else -> throw IllegalArgumentException("نوع الأمر غير مدعوم في مطبّق الفواتير: $businessOperation")
+        }
+        PermissionPolicy.require(db, row.primaryUserId, requiredPermission)
+
+        val invoiceId = payload.getString("id")
+        require(invoiceId == row.entityId) { "معرّف الفاتورة لا يطابق معرّف الكيان في الظرف" }
+        val invoiceType = if (businessOperation == "POST_PURCHASE_INVOICE") "PURCHASE" else "SALE"
+        val saleType = payload.optString("sale_type", "CASH")
+        if (invoiceType == "SALE" && saleType != "CREDIT") {
+            throw IllegalArgumentException(
+                "بيع نقدي وارد مؤجل: يلزم أولاً ربط حسابات الصناديق والمحافظ بين الجهازين؛ لم يتم ترحيل أي حركة نقدية"
+            )
+        }
+
+        val items = payload.getJSONArray("items")
+        require(items.length() in 1..500) { "عدد أصناف الفاتورة غير صالح" }
+        val lines = parseLines(items)
+        val partyId = if (payload.isNull("party_id")) null else payload.getString("party_id")
+        val date = payload.getString("invoice_date")
+        val discount = payload.getLong("discount_usd_cents")
+        val notes = if (payload.isNull("notes")) null else payload.getString("notes")
+        val rate = payload.getLong("exchange_rate_syp_per_usd_milli")
+        require(rate > 0L) { "الفاتورة الواردة لا تحتوي سعر صرف صالحاً" }
+
+        val invoices = InvoiceRepository(appContext)
+        val draftOperationId = "${operationId}:IMPORT_DRAFT"
+        val postOperationId = "${operationId}:IMPORT_POST"
+        val saved = if (invoiceType == "PURCHASE") {
+            invoices.savePurchaseDraft(
+                row.primaryUserId, draftOperationId, invoiceId, partyId,
+                date, discount, notes, lines
+            )
+        } else {
+            invoices.saveSalesDraft(
+                row.primaryUserId, draftOperationId, invoiceId, partyId,
+                date, discount, notes, lines, "CREDIT"
+            )
+        }
+        require(saved.invoiceId == invoiceId) { "لم يتم حفظ الفاتورة بالمعرّف الوارد" }
+
+        // Preserve the source invoice's exchange-rate snapshot rather than
+        // silently substituting the primary device's current rate.
+        val table = if (invoiceType == "PURCHASE") "purchase_invoices" else "sales_invoices"
+        val changed = db.update(
+            table,
+            ContentValues().apply { put("exchange_rate_syp_per_usd_milli", rate) },
+            "id=? AND status='DRAFT'",
+            arrayOf(invoiceId)
+        )
+        if (changed == 0) {
+            val existingRate = db.rawQuery(
+                "SELECT exchange_rate_syp_per_usd_milli FROM $table WHERE id=?",
+                arrayOf(invoiceId)
+            ).use { c -> require(c.moveToFirst()); c.getLong(0) }
+            require(existingRate == rate) { "سعر صرف الفاتورة المحلية يختلف عن السعر الوارد" }
+        }
+
+        if (invoiceType == "PURCHASE") {
+            invoices.postPurchase(row.primaryUserId, invoiceId, postOperationId)
+        } else {
+            invoices.postSale(row.primaryUserId, invoiceId, postOperationId)
+        }
+
+        db.beginTransaction()
+        try {
+            val current = db.rawQuery(
+                "SELECT status,payload_sha256 FROM sync_inbox WHERE operation_id=?",
+                arrayOf(operationId)
+            ).use { c ->
+                require(c.moveToFirst()) { "اختفى أمر المزامنة أثناء التطبيق" }
+                c.getString(0) to c.getString(1)
+            }
+            require(current.first == "RECEIVED") { "تغيرت حالة الأمر أثناء التطبيق" }
+            db.update(
+                "sync_inbox",
+                ContentValues().apply {
+                    put("status", "APPLIED")
+                    put("applied_at", timestamp())
+                    putNull("rejection_reason")
+                },
+                "operation_id=? AND status='RECEIVED'",
+                arrayOf(operationId)
+            ).also { require(it == 1) { "تعذر تثبيت حالة تطبيق الأمر" } }
+            db.setTransactionSuccessful()
+        } finally {
+            db.endTransaction()
+        }
+        ApplyResult(operationId, true)
+    }
+
+    private fun parseLines(items: JSONArray): List<InvoiceLineInput> =
+        (0 until items.length()).map { index ->
+            val item = items.getJSONObject(index)
+            val quantity = BigDecimal(item.getString("quantity"))
+            val unitPrice = item.getLong("unit_price_or_cost_usd_cents")
+            require(item.getString("product_id").isNotBlank() && quantity > BigDecimal.ZERO && unitPrice >= 0L) {
+                "بيانات أحد أصناف الفاتورة غير صالحة"
+            }
+            InvoiceLineInput(item.getString("product_id"), quantity, unitPrice)
+        }
+
+    private data class InboxCommand(
+        val originDeviceId: String,
+        val entityType: String,
+        val entityId: String,
+        val payloadJson: String,
+        val status: String,
+        val primaryUserId: String
+    )
+
+    private fun timestamp(): String =
+        java.text.SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss.SSS'Z'", java.util.Locale.US).apply {
+            timeZone = java.util.TimeZone.getTimeZone("UTC")
+        }.format(java.util.Date())
+
+    companion object {
+        private val APPLY_LOCK = Any()
+    }
+}
