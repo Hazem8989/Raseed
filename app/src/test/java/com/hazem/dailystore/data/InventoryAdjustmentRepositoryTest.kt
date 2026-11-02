@@ -170,4 +170,18 @@ class InventoryAdjustmentRepositoryTest {
             throw AssertionError("Expected non-inventory rejection")
         } catch (_: IllegalArgumentException) { }
     }
+
+    @Test
+    fun primaryInventoryAdjustmentIsAddedToOutboxAtomically() {
+        val context = RuntimeEnvironment.getApplication()
+        val sync = SyncProtocolRepository(context)
+        sync.configureAsPrimary(adminId, "الهاتف الرئيسي")
+        repository.postAdjustment(adminId, productId, BigDecimal("1"),
+            "تسوية للمزامنة", "sync-adjustment-" + UUID.randomUUID(), 200L)
+        val queued = sync.pendingOutbox().single()
+        assertEquals("INVENTORY_ADJUSTMENT", queued.entityType)
+        assertEquals("POST_INVENTORY_ADJUSTMENT", queued.operationType)
+        assertTrue(queued.payloadJson.contains(productId))
+    }
+
 }
