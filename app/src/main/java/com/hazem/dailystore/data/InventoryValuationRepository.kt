@@ -59,6 +59,19 @@ class InventoryValuationRepository(context: Context) {
         val deficits = mutableMapOf<String, Double>()
         val balances = mutableMapOf<String, Double>()
         val affectedProducts = mutableSetOf<String>()
+        val layerIdsByMovement = mutableMapOf<String, String>()
+        db.rawQuery("SELECT id,source_movement_id FROM inventory_cost_layers", null).use { c ->
+            while (c.moveToNext()) layerIdsByMovement[c.getString(1)] = c.getString(0)
+        }
+        val supplierReturnAllocations = mutableMapOf<String, MutableList<Pair<String, Double>>>()
+        db.rawQuery(
+            "SELECT inventory_movement_id,source_cost_layer_id,quantity FROM supplier_return_cost_allocations",
+            null
+        ).use { c ->
+            while (c.moveToNext()) supplierReturnAllocations
+                .getOrPut(c.getString(0)) { mutableListOf() }
+                .add(c.getString(1) to c.getDouble(2))
+        }
 
         db.rawQuery(
             """SELECT p.id,ib.warehouse_id,COALESCE(SUM(ib.quantity),0)
@@ -98,20 +111,13 @@ class InventoryValuationRepository(context: Context) {
                         if (deficits[key]!! <= 0.0000001) deficits.remove(key)
                     }
                     if (incoming > 0.0000001) {
-                        val layerId = db.rawQuery(
-                            "SELECT id FROM inventory_cost_layers WHERE source_movement_id=?",
-                            arrayOf(movementId)
-                        ).use { c -> if (c.moveToFirst()) c.getString(0) else movementId }
+                        val layerId = layerIdsByMovement[movementId] ?: movementId
                         queue.add(Lot(layerId, incoming, unitCost.takeIf { it > 0L }))
                     }
                 } else if (delta < 0.0 && movementType == "PURCHASE_RETURN") {
                     // A supplier return must remove the exact source purchase layer,
                     // not whichever layer happens to be oldest at the time of valuation.
-                    val allocations = mutableListOf<Pair<String,Double>>()
-                    db.rawQuery(
-                        "SELECT source_cost_layer_id,quantity FROM supplier_return_cost_allocations WHERE inventory_movement_id=?",
-                        arrayOf(movementId)
-                    ).use { c -> while (c.moveToNext()) allocations.add(c.getString(0) to c.getDouble(1)) }
+                    val allocations = supplierReturnAllocations[movementId].orEmpty()
                     var unmatched = 0.0
                     allocations.forEach { (sourceLayerId, quantity) ->
                         val source = queue.firstOrNull { it.layerId == sourceLayerId }
