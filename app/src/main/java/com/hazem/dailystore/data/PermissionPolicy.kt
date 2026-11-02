@@ -8,6 +8,8 @@ import java.util.UUID
  * Central permission catalogue and database-backed authorization.
  * Unknown permissions and users who have not completed password rotation are denied.
  */
+data class RolePermissionSetting(val key: String, val description: String, val allowed: Boolean)
+
 object PermissionPolicy {
     const val USERS_MANAGE = "users.manage"
     const val CATALOG_MANAGE = "catalog.manage"
@@ -133,6 +135,17 @@ object PermissionPolicy {
             })
             db.setTransactionSuccessful()
         } finally { db.endTransaction() }
+    }
+
+    fun listRolePermissions(db: SQLiteDatabase, roleKey: String): List<RolePermissionSetting> {
+        require(roleKey in setOf("ADMIN", "CASHIER")) { "الدور غير صالح" }
+        return descriptions.map { (key, description) ->
+            val allowed = db.rawQuery(
+                "SELECT allowed FROM role_permissions WHERE role_key=? AND permission_key=?",
+                arrayOf(roleKey, key)
+            ).use { c -> c.moveToFirst() && c.getInt(0) == 1 }
+            RolePermissionSetting(key, description, allowed)
+        }
     }
 
     fun allPermissionKeys(): Set<String> = descriptions.keys
