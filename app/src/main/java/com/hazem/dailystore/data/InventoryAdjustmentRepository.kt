@@ -33,6 +33,7 @@ data class InventoryAdjustmentResult(
  * oldest layers without creating fake sales or sale-item COGS allocations.
  */
 class InventoryAdjustmentRepository(context: Context) {
+    private val context = context.applicationContext
     private val database = AppDatabase.getInstance(context)
 
     fun postAdjustment(
@@ -196,6 +197,17 @@ class InventoryAdjustmentRepository(context: Context) {
                     .put("cost_usd_cents", cost).put("reason", cleanReason).toString())
                 put("created_at", now)
             })
+            SyncProtocolRepository(context).enqueueLocalOperation(
+                db, actorUserId, operationId, "POST_INVENTORY_ADJUSTMENT", "INVENTORY_ADJUSTMENT",
+                adjustmentId, "CREATE",
+                org.json.JSONObject().put("adjustment_id", adjustmentId).put("movement_id", movementId)
+                    .put("product_id", productId).put("warehouse_id", resolvedWarehouse)
+                    .put("adjustment_type", type).put("quantity", absoluteQuantity.toPlainString())
+                    .put("quantity_before", before.toPlainString()).put("quantity_after", after.toPlainString())
+                    .put("unit_cost_usd_cents", unitCostUsdCents ?: org.json.JSONObject.NULL)
+                    .put("cost_usd_cents", cost ?: org.json.JSONObject.NULL)
+                    .put("reason", cleanReason).put("created_at", now).toString()
+            )
             db.setTransactionSuccessful()
             return InventoryAdjustmentResult(
                 adjustmentId, movementId, productId, resolvedWarehouse, type,
