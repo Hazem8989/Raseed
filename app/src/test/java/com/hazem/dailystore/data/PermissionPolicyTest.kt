@@ -88,6 +88,21 @@ class PermissionPolicyTest {
     }
 
     @Test
+    fun managerCanDeactivateCashierButCannotDeactivateLastAdminOrSelf() {
+        auth.setUserActive(adminId, cashierId, false)
+        assertFalse(allowed(cashierId, PermissionPolicy.SALES_CHECKOUT))
+        val history = database.readableDatabase.rawQuery(
+            "SELECT COUNT(*) FROM audit_log WHERE entity_type='USER' AND entity_id=? AND action='USER_DEACTIVATED'",
+            arrayOf(cashierId)
+        ).use { c -> assertTrue(c.moveToFirst()); c.getInt(0) }
+        assertEquals(1, history)
+        try {
+            auth.setUserActive(adminId, adminId, false)
+            fail("Expected self-deactivation to be rejected")
+        } catch (_: IllegalArgumentException) { }
+    }
+
+    @Test
     fun administratorCannotRevokeAdministratorPermission() {
         try {
             PermissionPolicy.setRolePermission(
