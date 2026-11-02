@@ -43,6 +43,7 @@ class AppDatabase private constructor(context: Context) :
         db.beginTransaction()
         try {
             SCHEMA.forEach(db::execSQL)
+            PermissionPolicy.ensureDefaults(db)
             ensureFifoSchema(db)
             db.execSQL(
                 """INSERT INTO app_settings(setting_key, setting_value, updated_at)
@@ -348,6 +349,16 @@ class AppDatabase private constructor(context: Context) :
                 db.endTransaction()
             }
         }
+        if (version < 12) {
+            db.beginTransaction()
+            try {
+                PermissionPolicy.ensureDefaults(db)
+                db.setTransactionSuccessful()
+                version = 12
+            } finally {
+                db.endTransaction()
+            }
+        }
         if (version != newVersion) {
             throw IllegalStateException("Missing database migration from version $version to $newVersion")
         }
@@ -442,7 +453,7 @@ class AppDatabase private constructor(context: Context) :
 
     companion object {
         const val DATABASE_NAME = "the_daily_shop.db"
-        const val DATABASE_VERSION = 11
+        const val DATABASE_VERSION = 12
 
         @Volatile
         private var INSTANCE: AppDatabase? = null
