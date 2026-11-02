@@ -370,6 +370,16 @@ class AppDatabase private constructor(context: Context) :
                 db.endTransaction()
             }
         }
+        if (version < 14) {
+            db.beginTransaction()
+            try {
+                PermissionPolicy.ensureDefaults(db)
+                db.setTransactionSuccessful()
+                version = 14
+            } finally {
+                db.endTransaction()
+            }
+        }
         if (version != newVersion) {
             throw IllegalStateException("Missing database migration from version $version to $newVersion")
         }
@@ -506,7 +516,7 @@ class AppDatabase private constructor(context: Context) :
 
     companion object {
         const val DATABASE_NAME = "the_daily_shop.db"
-        const val DATABASE_VERSION = 13
+        const val DATABASE_VERSION = 14
 
         @Volatile
         private var INSTANCE: AppDatabase? = null
