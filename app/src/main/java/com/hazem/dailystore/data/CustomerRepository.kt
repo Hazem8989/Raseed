@@ -43,10 +43,12 @@ class CustomerRepository(context: Context) {
     fun get(customerId: String): CustomerSummary? =
         list(true).firstOrNull { it.id == customerId }
 
-    fun create(name: String, phone: String? = null, address: String? = null,
+    fun create(actorUserId: String, name: String, phone: String? = null, address: String? = null,
                notes: String? = null): CustomerSummary {
         val cleanName = name.trim()
         require(cleanName.isNotEmpty()) { "اسم الزبون مطلوب" }
+        val db = database.writableDatabase
+        PermissionPolicy.require(db, actorUserId, PermissionPolicy.CUSTOMERS_CREATE)
         val id = UUID.randomUUID().toString()
         val now = timestamp()
         val values = ContentValues().apply {
@@ -56,32 +58,36 @@ class CustomerRepository(context: Context) {
             put("opening_balance_minor", 0L); put("opening_balance_currency", "SYP")
             put("is_active", 1); put("created_at", now); put("updated_at", now)
         }
-        database.writableDatabase.insertOrThrow("customers", null, values)
+        db.insertOrThrow("customers", null, values)
         return get(id) ?: error("تعذر قراءة الزبون بعد الحفظ")
     }
 
-    fun update(customerId: String, name: String, phone: String? = null,
+    fun update(actorUserId: String, customerId: String, name: String, phone: String? = null,
                address: String? = null, notes: String? = null): CustomerSummary {
         require(customerId.isNotBlank()) { "معرّف الزبون مطلوب" }
         val cleanName = name.trim()
         require(cleanName.isNotEmpty()) { "اسم الزبون مطلوب" }
+        val db = database.writableDatabase
+        PermissionPolicy.require(db, actorUserId, PermissionPolicy.CUSTOMERS_MANAGE)
         val values = ContentValues().apply {
             put("name", cleanName); putNullable("phone", phone)
             putNullable("address", address); putNullable("notes", notes)
             put("updated_at", timestamp())
         }
-        require(database.writableDatabase.update(
+        require(db.update(
             "customers", values, "id=? AND is_active=1", arrayOf(customerId)
         ) == 1) { "الزبون غير موجود أو موقوف" }
         return get(customerId) ?: error("تعذر قراءة بيانات الزبون")
     }
 
-    fun setActive(customerId: String, active: Boolean) {
+    fun setActive(actorUserId: String, customerId: String, active: Boolean) {
         require(customerId.isNotBlank()) { "معرّف الزبون مطلوب" }
+        val db = database.writableDatabase
+        PermissionPolicy.require(db, actorUserId, PermissionPolicy.CUSTOMERS_MANAGE)
         val values = ContentValues().apply {
             put("is_active", if (active) 1 else 0); put("updated_at", timestamp())
         }
-        require(database.writableDatabase.update(
+        require(db.update(
             "customers", values, "id=?", arrayOf(customerId)
         ) == 1) { "الزبون غير موجود" }
     }
