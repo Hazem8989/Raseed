@@ -87,12 +87,19 @@ class PartyStatementRepository(context: Context) {
                         else if (invoiceRate > 0L) CurrencyConverter.sypToUsdCents(amount, invoiceRate) else 0L
                     else -> 0L
                 }
-                if (usd == 0L && amount > 0L) unpriced++
+                val effectiveRate = if (rate > 0L) rate else invoiceRate
+                val sypEquivalent = when (currency) {
+                    "SYP" -> amount
+                    "USD" -> if (effectiveRate > 0L)
+                        CurrencyConverter.usdCentsToSyp(amount, effectiveRate) else 0L
+                    else -> 0L
+                }
+                if ((usd == 0L || sypEquivalent == 0L) && amount > 0L) unpriced++
                 rows.add(PartyStatementEntry(
                     c.getString(0), c.getString(5).take(10), "CUSTOMER_COLLECTION",
                     c.getString(6), "تحصيل على فاتورة آجلة",
                     creditUsdCents = usd,
-                    creditSypMinor = if (currency == "SYP") amount else 0L,
+                    creditSypMinor = sypEquivalent,
                     sortAt = "${c.getString(8)}|${c.getString(5)}"
                 ))
             }
