@@ -69,6 +69,10 @@ class OperatingExpenseRepositoryTest {
         assertEquals(1,profit.operatingExpenseCount)
         assertEquals(1000L,profit.operatingExpensesUsdCents)
         assertEquals(-1000L,profit.netOperatingProfitUsdCents)
+        val daily=DailyBalanceRepository(RuntimeEnvironment.getApplication()).dailyReport("2026-11-02")
+        val dailyAccount=daily.accounts.first { it.accountId==sypAccountId }
+        assertEquals(100000L,dailyAccount.operatingExpensesMinor)
+        assertEquals(900000L,dailyAccount.closingMinor)
     }
 
     @Test fun usdExpenseIsRecordedWithoutRevaluingItAtLaterExchangeRates() {
