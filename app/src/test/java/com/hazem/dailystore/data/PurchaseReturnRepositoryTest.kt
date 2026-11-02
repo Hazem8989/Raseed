@@ -78,6 +78,9 @@ class PurchaseReturnRepositoryTest {
         assertEquals(7.0,stock(),0.000001)
         val invoice=payments.listPurchaseInvoices().first { it.id==invoiceId }
         assertEquals(700000L,invoice.outstandingSypMinor)
+        val salesProfit=SalesProfitRepository(RuntimeEnvironment.getApplication()).allTime()
+        assertEquals(0L,salesProfit.returnUsdCents)
+        assertEquals(0,salesProfit.returnCount)
         val layerRemaining=db.readableDatabase.rawQuery(
             "SELECT remaining_quantity FROM inventory_cost_layers WHERE source_item_id=?",arrayOf(purchaseItemId)
         ).use { it.moveToFirst();it.getDouble(0) }
