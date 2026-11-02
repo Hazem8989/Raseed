@@ -181,69 +181,6 @@ class SyncProtocolRepository(private val context: Context, private val credentia
         val localDeviceId = SyncDeviceIdentity.getOrCreate(context)
         require(localDeviceId != primaryDeviceId) { "هذا الهاتف هو الجهاز الأساسي بالفعل" }
         val db = database.writableDatabase
-        val vault = credentialVault
-        db.beginTransaction()
-        try {
-            PermissionPolicy.require(db, actorUserId, PermissionPolicy.SYNC_MANAGE)
-            val oldRole = state(db, "local_device_role")
-            require(oldRole == null || oldRole == "SECONDARY") {
-                "لا يمكن تحويل جهاز أساسي قائم إلى ثانوي تلقائياً"
-            }
-            val now = timestamp()
-            db.insertWithOnConflict("sync_devices", null, ContentValues().apply {
-                put("device_id", primaryDeviceId); put("display_name", "الجهاز الأساسي")
-                put("device_role", "PRIMARY"); put("status", "ACTIVE"); put("created_at", now)
-                put("last_seen_at", now)
-            }, SQLiteDatabase.CONFLICT_IGNORE)
-            db.insertWithOnConflict("sync_devices", null, ContentValues().apply {
-                put("device_id", localDeviceId); put("display_name", displayName.trim())
-                put("device_role", "SECONDARY"); put("status", "ACTIVE")
-                put("enrolled_by", actorUserId); put("created_at", now); put("last_seen_at", now)
-            }, SQLiteDatabase.CONFLICT_IGNORE)
-            db.update("sync_devices", ContentValues().apply {
-                put("display_name", displayName.trim()); put("status", "ACTIVE"); putNull("revoked_at")
-            }, "device_id=?", arrayOf(localDeviceId))
-            db.insertWithOnConflict("sync_cursors", null, ContentValues().apply {
-                put("device_id", primaryDeviceId); put("last_sequence", 0L); put("updated_at", now)
-            }, SQLiteDatabase.CONFLICT_IGNORE)
-            putState(db, "authority_device_id", primaryDeviceId, now)
-            putState(db, "local_device_role", "SECONDARY", now)
-            putState(db, "store_id", storeId, now)
-            vault.save(localDeviceId, secret)
-            audit(db, actorUserId, "SYNC_SECONDARY_CONFIGURED", localDeviceId, null,
-                JSONObject().put("primary_device_id", primaryDeviceId)
-                    .put("store_id", storeId).put("display_name", displayName.trim()).toString(), now)
-            db.setTransactionSuccessful()
-        } catch (error: Exception) {
-            vault.remove(localDeviceId)
-            throw error
-        } finally { db.endTransaction() }
-        secret.fill(0)
-    }
-
-    fun secondaryCredential(): ByteArray? {
-        if (state(database.readableDatabase, "local_device_role") != "SECONDARY") return null
-        return SyncCredentialVault(context).load(SyncDeviceIdentity.getOrCreate(context))
-    }
-
-    fun isConfiguredSecondary(): Boolean =
-        state(database.readableDatabase, "local_device_role") == "SECONDARY" &&
-            !state(database.readableDatabase, "authority_device_id").isNullOrBlank()
-
-    /** Called on a secondary after a future TLS-pinned pairing handshake. */
-    fun configureAsSecondary(
-        actorUserId: String, storeId: String, primaryDeviceId: String,
-        credential: String, displayName: String
-    ) {
-        require(storeId.isNotBlank() && displayName.trim().isNotEmpty() && displayName.length <= 80)
-        require(runCatching { UUID.fromString(primaryDeviceId) }.isSuccess) { "معرّف الجهاز الأساسي غير صالح" }
-        val secret = runCatching {
-            Base64.decode(credential, Base64.URL_SAFE or Base64.NO_WRAP or Base64.NO_PADDING)
-        }.getOrElse { throw IllegalArgumentException("بيانات اعتماد الجهاز غير صالحة") }
-        require(secret.size == 32) { "بيانات اعتماد الجهاز يجب أن تكون 256 بت" }
-        val localDeviceId = SyncDeviceIdentity.getOrCreate(context)
-        require(localDeviceId != primaryDeviceId) { "هذا الهاتف هو الجهاز الأساسي بالفعل" }
-        val db = database.writableDatabase
         var credentialSaved = false
         db.beginTransaction()
         try {
