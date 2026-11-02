@@ -18,6 +18,13 @@ class SupplierRepositoryTest {
 
     private val database = AppDatabase.getInstance(context)
     private val suppliers = SupplierRepository(context)
+    private fun managerId(): String {
+        val auth = AuthRepository(context)
+        auth.ensureInitialAdmin()
+        val admin = auth.authenticate("admin", "1234")!!
+        auth.changePassword(admin.id, "1234", "TestAdmin123")
+        return admin.id
+    }
 
     @After
     fun tearDown() {
@@ -26,7 +33,7 @@ class SupplierRepositoryTest {
 
     @Test
     fun createsAndListsSupplierWithOptionalContactDetails() {
-        val created = suppliers.create("مورد اختبار", "0999000000", "دمشق")
+        val created = suppliers.create(managerId(), "مورد اختبار", "0999000000", "دمشق")
         val found = suppliers.listActive().first { it.id == created.id }
 
         assertEquals("مورد اختبار", found.name)
@@ -37,7 +44,7 @@ class SupplierRepositoryTest {
     @Test
     fun rejectsBlankSupplierName() {
         try {
-            suppliers.create("   ")
+            suppliers.create(managerId(), "   ")
             throw AssertionError("A blank supplier name must be rejected")
         } catch (_: IllegalArgumentException) {
             // Expected validation.
