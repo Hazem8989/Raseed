@@ -29,6 +29,16 @@ class SyncDomainApplier(context: Context) {
     fun applyReceivedInvoice(operationId: String): ApplyResult = synchronized(APPLY_LOCK) {
         require(operationId.isNotBlank()) { "معرّف الأمر مطلوب" }
         val db = database.writableDatabase
+        val localDeviceId = SyncDeviceIdentity.getOrCreate(appContext)
+        val primaryAuthority = db.rawQuery(
+            "SELECT state_value FROM sync_protocol_state WHERE state_key='authority_device_id'", null
+        ).use { c -> if (c.moveToFirst()) c.getString(0) else null }
+        val localRole = db.rawQuery(
+            "SELECT state_value FROM sync_protocol_state WHERE state_key='local_device_role'", null
+        ).use { c -> if (c.moveToFirst()) c.getString(0) else null }
+        require(localRole == "PRIMARY" && primaryAuthority == localDeviceId) {
+            "تطبيق الأوامر الواردة مسموح على الجهاز الأساسي المعتمد فقط"
+        }
         val row = db.rawQuery(
             """SELECT i.origin_device_id,i.entity_type,i.entity_id,i.payload_json,i.status,
                       m.primary_user_id
