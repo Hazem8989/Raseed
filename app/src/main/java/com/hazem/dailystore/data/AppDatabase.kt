@@ -47,6 +47,7 @@ class AppDatabase private constructor(context: Context) :
             ensureFifoSchema(db)
             ensureSalesReturnSchema(db)
             ensureInventoryAdjustmentSchema(db)
+            ensureSupplierReturnSchema(db)
             db.execSQL(
                 """INSERT INTO app_settings(setting_key, setting_value, updated_at)
                    VALUES('base_currency', 'USD', strftime('%Y-%m-%dT%H:%M:%fZ','now'))"""
@@ -391,6 +392,16 @@ class AppDatabase private constructor(context: Context) :
                 db.endTransaction()
             }
         }
+        if (version < 16) {
+            db.beginTransaction()
+            try {
+                ensureSupplierReturnSchema(db)
+                db.setTransactionSuccessful()
+                version = 16
+            } finally {
+                db.endTransaction()
+            }
+        }
         if (version != newVersion) {
             throw IllegalStateException("Missing database migration from version $version to $newVersion")
         }
@@ -462,6 +473,45 @@ class AppDatabase private constructor(context: Context) :
             )
         """.trimIndent())
         db.execSQL("CREATE INDEX IF NOT EXISTS idx_inventory_adjustments_product_date ON inventory_adjustments(product_id,created_at)")
+    }
+
+    /**
+     * Supplier returns share the immutable return header/line ledger, but use
+     * their own source-item link and inbound cash-refund allocations. This
+     * keeps customer refund semantics and supplier credits separate.
+     */
+    private fun ensureSupplierReturnSchema(db: SQLiteDatabase) {
+        fun ensureColumn(table: String, column: String, definition: String) {
+            var exists = false
+            db.rawQuery("PRAGMA table_info($table)", null).use { c ->
+                while (c.moveToNext()) if (c.getString(1) == column) exists = true
+            }
+            if (!exists) db.execSQL("ALTER TABLE $table ADD COLUMN $column $definition")
+        }
+        ensureColumn("return_items", "original_purchase_item_id", "TEXT")
+        ensureColumn("returns", "supplier_credit_reduction_syp_minor",
+            "INTEGER NOT NULL DEFAULT 0 CHECK(supplier_credit_reduction_syp_minor >= 0)")
+        ensureColumn("returns", "supplier_cash_refund_syp_minor",
+            "INTEGER NOT NULL DEFAULT 0 CHECK(supplier_cash_refund_syp_minor >= 0)")
+        db.execSQL("CREATE INDEX IF NOT EXISTS idx_return_items_original_purchase_item ON return_items(original_purchase_item_id)")
+        db.execSQL("""
+            CREATE TABLE IF NOT EXISTS supplier_return_refund_allocations (
+                id TEXT PRIMARY KEY NOT NULL,
+                return_id TEXT NOT NULL,
+                cash_account_id TEXT NOT NULL,
+                cash_transaction_id TEXT NOT NULL UNIQUE,
+                operation_id TEXT NOT NULL UNIQUE,
+                amount_minor INTEGER NOT NULL CHECK(amount_minor > 0),
+                currency_code TEXT NOT NULL CHECK(currency_code IN ('USD','SYP')),
+                exchange_rate_syp_per_usd_milli INTEGER NOT NULL CHECK(exchange_rate_syp_per_usd_milli > 0),
+                refund_equivalent_syp_minor INTEGER NOT NULL CHECK(refund_equivalent_syp_minor > 0),
+                created_at TEXT NOT NULL,
+                FOREIGN KEY(return_id) REFERENCES returns(id) ON UPDATE RESTRICT ON DELETE RESTRICT,
+                FOREIGN KEY(cash_account_id) REFERENCES cash_accounts(id) ON UPDATE RESTRICT ON DELETE RESTRICT,
+                FOREIGN KEY(cash_transaction_id) REFERENCES cash_transactions(id) ON UPDATE RESTRICT ON DELETE RESTRICT
+            )
+        """.trimIndent())
+        db.execSQL("CREATE INDEX IF NOT EXISTS idx_supplier_return_refunds_return ON supplier_return_refund_allocations(return_id)")
     }
 
     private fun ensureFifoSchema(db: SQLiteDatabase) {
@@ -553,7 +603,7 @@ class AppDatabase private constructor(context: Context) :
 
     companion object {
         const val DATABASE_NAME = "the_daily_shop.db"
-        const val DATABASE_VERSION = 15
+        const val DATABASE_VERSION = 16
 
         @Volatile
         private var INSTANCE: AppDatabase? = null
