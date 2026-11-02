@@ -1819,6 +1819,10 @@ class MainActivity : Activity() {
     }
 
     private fun showCustomerEditor(customerId: String?, onSaved: () -> Unit) {
+        if (customerId != null && !isManager()) {
+            Toast.makeText(this, "تعديل بيانات العملاء متاح للمدير فقط", Toast.LENGTH_SHORT).show()
+            return
+        }
         val repository = CustomerRepository(this)
         val existing = customerId?.let { repository.get(it) }
         if (customerId != null && existing == null) {
@@ -1848,8 +1852,10 @@ class MainActivity : Activity() {
                     val cleanName = name.text.toString().trim()
                     require(cleanName.isNotEmpty()) { "اسم الزبون مطلوب" }
                     if (existing == null) repository.create(
+                        currentUserId ?: error("جلسة المستخدم غير صالحة"),
                         cleanName, phone.text.toString(), address.text.toString(), notes.text.toString()
                     ) else repository.update(
+                        currentUserId ?: error("جلسة المستخدم غير صالحة"),
                         existing.id, cleanName, phone.text.toString(),
                         address.text.toString(), notes.text.toString()
                     )
