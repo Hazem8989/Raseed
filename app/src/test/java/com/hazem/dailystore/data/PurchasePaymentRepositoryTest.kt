@@ -63,7 +63,7 @@ class PurchasePaymentRepositoryTest {
         invoiceId = draft.invoiceId
         assertTrue(invoices.postPurchase(invoiceId, "payment-post-${UUID.randomUUID()}"))
         accountId = cashAccounts.create(
-            "صندوق اختبار ${UUID.randomUUID()}", "CASH_BOX", "USD", 50000L
+            adminId, "صندوق اختبار ${UUID.randomUUID()}", "CASH_BOX", "USD", 50000L
         ).id
     }
 
