@@ -60,6 +60,7 @@ import com.hazem.dailystore.data.SalesRefundAllocationInput
 import com.hazem.dailystore.data.PurchaseReturnRepository
 import com.hazem.dailystore.data.PurchaseReturnItemInput
 import com.hazem.dailystore.data.SupplierRefundAllocationInput
+import com.hazem.dailystore.data.OperatingExpenseRepository
 import java.math.BigDecimal
 import java.math.RoundingMode
 import java.text.DecimalFormat
@@ -378,6 +379,7 @@ class MainActivity : Activity() {
             "PRODUCTS" -> showProductManagement()
             "PURCHASES" -> showPurchases()
             "PURCHASE_RETURNS" -> showPurchaseReturns()
+            "EXPENSES" -> showExpenses()
             "SUPPLIERS" -> showSuppliers()
             "SUPPLIER_DETAILS" -> showSupplierDetails(activeScreenArgument ?: "")
             "CUSTOMERS" -> showCustomers()
@@ -1050,6 +1052,7 @@ class MainActivity : Activity() {
             "تسويات المخزون" to "تسجيل فروقات الجرد بالزيادة أو النقصان",
             "مرتجعات المبيعات" to "إرجاع أصناف ورد المبالغ للعملاء",
             "مرتجعات المشتريات" to "إرجاع البضاعة وتسوية مستحقات المورد",
+            "المصاريف التشغيلية" to "تسجيل المصروفات وربطها بالصندوق وصافي الربح",
             "المشتريات" to "فواتير الشراء والموردون",
             "العملاء والديون" to "ملفات العملاء والأرصدة",
             "الصناديق والمحافظ" to "الحركة النقدية والحسابات",
@@ -1063,6 +1066,7 @@ class MainActivity : Activity() {
             when (entry.first) {
                 "تسويات المخزون" -> hasPermission(PermissionPolicy.INVENTORY_ADJUST)
                 "مرتجعات المبيعات", "مرتجعات المشتريات" -> isManager() && hasPermission(PermissionPolicy.RETURNS_PROCESS)
+                "المصاريف التشغيلية" -> isManager() && hasPermission(PermissionPolicy.EXPENSES_MANAGE)
                 "المنتجات والمخزون", "المشتريات", "التقارير", "النسخ الاحتياطي والاستعادة", "المستخدمون والصلاحيات" -> isManager()
                 else -> true
             }
@@ -1081,6 +1085,7 @@ class MainActivity : Activity() {
                         "تسويات المخزون" -> showInventoryAdjustments()
                         "مرتجعات المبيعات" -> showSalesReturns()
                         "مرتجعات المشتريات" -> showPurchaseReturns()
+                        "المصاريف التشغيلية" -> showExpenses()
                         "المشتريات" -> showPurchases()
                         "العملاء والديون" -> showCustomers()
                         "الصناديق والمحافظ" -> showCashAccounts()
@@ -2611,9 +2616,13 @@ class MainActivity : Activity() {
         profitCard.addView(label("مرتجعات المبيعات: ${formatDualMoney(todayProfit.returnUsdCents, rate)}", 13f, textColor, false, Gravity.RIGHT))
         profitCard.addView(label("صافي الإيراد بعد المرتجعات: ${formatDualMoney(todayProfit.netRevenueUsdCents, rate)}", 13f, textColor, true, Gravity.RIGHT))
         profitCard.addView(label("تكلفة FIFO المباعة: ${formatDualMoney(todayProfit.cogsUsdCents, rate)} • تكلفة المرتجع: ${formatDualMoney(todayProfit.returnedCogsUsdCents, rate)}", 12f, mutedColor, false, Gravity.RIGHT))
+        profitCard.addView(label("المصاريف التشغيلية اليوم: ${formatDualMoney(todayProfit.operatingExpensesUsdCents, rate)} • عددها: ${todayProfit.operatingExpenseCount}",
+            13f, textColor, false, Gravity.RIGHT))
         if (todayProfit.isComplete) {
             profitCard.addView(label("مجمل الربح بعد المرتجعات وقبل المصاريف: ${formatDualMoney(todayProfit.grossProfitUsdCents, rate)}",
-                15f, green, true, Gravity.RIGHT).apply { setPadding(0, dp(5), 0, 0) })
+                14f, mutedColor, true, Gravity.RIGHT).apply { setPadding(0, dp(5), 0, 0) })
+            profitCard.addView(label("صافي نتيجة التشغيل بعد المصاريف: ${formatDualMoney(todayProfit.netOperatingProfitUsdCents, rate)}",
+                16f, green, true, Gravity.RIGHT).apply { setPadding(0, dp(3), 0, 0) })
         } else {
             profitCard.addView(label("الربح غير مكتمل: فواتير بلا تكلفة FIFO: ${todayProfit.uncostedInvoiceCount} • مرتجعات بلا تكلفة معروفة: ${todayProfit.uncostedReturnCount}. راجعها قبل الاعتماد.",
                 12f, Color.rgb(170, 80, 45), true, Gravity.RIGHT).apply { setPadding(0, dp(5), 0, 0) })
@@ -2621,15 +2630,19 @@ class MainActivity : Activity() {
         val allProfit = profitRepo.allTime()
         profitCard.addView(label("منذ بداية التشغيل • المبيعات: ${formatDualMoney(allProfit.revenueUsdCents, rate)} • المرتجعات: ${formatDualMoney(allProfit.returnUsdCents, rate)}",
             11f, mutedColor, false, Gravity.RIGHT).apply { setPadding(0, dp(8), 0, 0) })
+        profitCard.addView(label("المصاريف التشغيلية التراكمية: ${formatDualMoney(allProfit.operatingExpensesUsdCents, rate)} • عددها: ${allProfit.operatingExpenseCount}",
+            11f, mutedColor, false, Gravity.RIGHT))
         if (allProfit.isComplete) {
             profitCard.addView(label("مجمل الربح التراكمي بعد المرتجعات وقبل المصاريف: ${formatDualMoney(allProfit.grossProfitUsdCents, rate)}",
-                13f, green, true, Gravity.RIGHT))
+                12f, mutedColor, true, Gravity.RIGHT))
+            profitCard.addView(label("صافي نتيجة التشغيل التراكمية بعد المصاريف: ${formatDualMoney(allProfit.netOperatingProfitUsdCents, rate)}",
+                14f, green, true, Gravity.RIGHT))
         } else {
             profitCard.addView(label("الربح التراكمي غير مكتمل؛ فواتير بلا تكلفة: ${allProfit.uncostedInvoiceCount} • مرتجعات بلا تكلفة: ${allProfit.uncostedReturnCount}",
                 11f, Color.rgb(170, 80, 45), true, Gravity.RIGHT))
         }
         content.addView(profitCard, fieldParams(-2, dp(12)))
-        content.addView(label("ملاحظة محاسبية: هذا مجمل ربح البضاعة بعد احتساب المرتجعات وتكلفتها وفق FIFO، وليس صافي ربح المتجر؛ لا يشمل المصاريف التشغيلية.",
+        content.addView(label("صافي نتيجة التشغيل = مجمل الربح بعد مرتجعات المبيعات − المصاريف التشغيلية المسجلة. لا يشمل الضرائب أو البنود غير المسجلة.",
             11f, mutedColor, false, Gravity.RIGHT).apply { setPadding(0, 0, 0, dp(12)) })
         content.addView(sectionHeading("ملخص المخزون"))
         content.addView(label("عدد الأصناف التي تتبع المخزون: ${products.size}", 15f, textColor, true, Gravity.RIGHT)
@@ -3562,6 +3575,140 @@ class MainActivity : Activity() {
             }
         }
         dialog.show()
+    }
+
+    private fun showExpenses() {
+        if (!isManager() || !hasPermission(PermissionPolicy.EXPENSES_MANAGE)) {
+            Toast.makeText(this,"إدارة المصاريف التشغيلية متاحة للمدير المخوّل فقط",Toast.LENGTH_SHORT).show()
+            return
+        }
+        markScreen("EXPENSES")
+        val repository=OperatingExpenseRepository(this)
+        val page=LinearLayout(this).apply { orientation=LinearLayout.VERTICAL; setBackgroundColor(backgroundColor) }
+        val header=LinearLayout(this).apply {
+            orientation=LinearLayout.HORIZONTAL; gravity=Gravity.CENTER_VERTICAL
+            setPadding(dp(14),dp(10),dp(14),dp(10)); setBackgroundColor(Color.WHITE)
+        }
+        header.addView(Button(this).apply {
+            text="‹"; textSize=25f; isAllCaps=false; setTextColor(green)
+            setBackgroundColor(Color.TRANSPARENT); setOnClickListener { showGeneralReports() }
+        },LinearLayout.LayoutParams(dp(48),dp(48)))
+        header.addView(label("المصاريف التشغيلية",19f,green,true,Gravity.CENTER),
+            LinearLayout.LayoutParams(0,-2,1f))
+        val content=LinearLayout(this).apply {
+            orientation=LinearLayout.VERTICAL; setPadding(dp(16),dp(16),dp(16),dp(24))
+        }
+        val total=repository.totalUsdCents()
+        content.addView(label("إجمالي المصاريف المسجلة: "+moneyText(total)+" USD",17f,green,true,Gravity.RIGHT))
+        content.addView(label("كل مصروف يُسجّل كحركة خروج نقدية، ويُحفظ سعر الصرف وقت تسجيله حتى لا تتغير قيمته التاريخية لاحقاً.",
+            12f,mutedColor,false,Gravity.RIGHT).apply { setPadding(0,dp(5),0,dp(12)) })
+        val actions=LinearLayout(this).apply { orientation=LinearLayout.HORIZONTAL }
+        actions.addView(smallButton("＋ تسجيل مصروف") { showExpenseEditor() },
+            LinearLayout.LayoutParams(0,dp(46),1f).apply { marginEnd=dp(6) })
+        actions.addView(smallButton("＋ تصنيف جديد") { showExpenseCategoryDialog() },
+            LinearLayout.LayoutParams(0,dp(46),1f))
+        content.addView(actions,fieldParams(dp(46),dp(10)))
+        content.addView(sectionHeading("آخر المصاريف"))
+        val expenses=repository.listExpenses(limit=150)
+        if(expenses.isEmpty()) content.addView(label("لا توجد مصاريف مسجلة بعد.",13f,mutedColor,false,Gravity.CENTER))
+        else expenses.forEach { expense ->
+            val card=LinearLayout(this).apply {
+                orientation=LinearLayout.VERTICAL; setPadding(dp(12),dp(10),dp(12),dp(10)); background=cardBackground()
+            }
+            card.addView(label(expense.categoryName+" • "+expense.date,15f,green,true,Gravity.RIGHT))
+            card.addView(label("المبلغ: "+formatAccountBalance(expense.amountMinor,expense.currencyCode)+
+                " • الحساب: "+expense.accountName,13f,textColor,false,Gravity.RIGHT))
+            card.addView(label("المكافئ المحاسبي: "+moneyText(expense.amountUsdCents)+" USD"+
+                (expense.reference?.let { " • المرجع: "+it } ?: ""),12f,mutedColor,false,Gravity.RIGHT))
+            if(!expense.notes.isNullOrBlank()) card.addView(label(expense.notes,12f,mutedColor,false,Gravity.RIGHT))
+            content.addView(card,fieldParams(-2,dp(7)))
+        }
+        page.addView(header,matchWidth())
+        page.addView(ScrollView(this).apply { isFillViewport=true; addView(content) },
+            LinearLayout.LayoutParams(-1,0,1f))
+        setContentView(page)
+    }
+
+    private fun showExpenseCategoryDialog() {
+        val actor=currentUserId ?: return
+        val repository=OperatingExpenseRepository(this)
+        val field=fieldForDialog("اسم تصنيف المصروف")
+        AlertDialog.Builder(this).setTitle("إضافة تصنيف مصروف").setView(field)
+            .setNegativeButton("إلغاء",null).setPositiveButton("حفظ") { _,_ ->
+                try {
+                    val category=repository.createCategory(actor,field.text.toString())
+                    Toast.makeText(this,"تمت إضافة التصنيف "+category.name,Toast.LENGTH_SHORT).show()
+                    showExpenses()
+                } catch(e: Exception) {
+                    Toast.makeText(this,e.message ?: "تعذر حفظ التصنيف",Toast.LENGTH_LONG).show()
+                }
+            }.show()
+    }
+
+    private fun showExpenseEditor() {
+        val actor=currentUserId ?: return
+        val repository=OperatingExpenseRepository(this)
+        val categories=repository.listCategories()
+        val accounts=CashAccountRepository(this).listActive().filter {
+            it.currencyCode=="USD" || it.currencyCode=="SYP"
+        }
+        if(categories.isEmpty()) {
+            Toast.makeText(this,"أضف تصنيفاً للمصروف أولاً",Toast.LENGTH_LONG).show()
+            return
+        }
+        if(accounts.isEmpty()) {
+            Toast.makeText(this,"لا يوجد صندوق أو محفظة نشطة بعملة USD أو SYP",Toast.LENGTH_LONG).show()
+            return
+        }
+        val content=LinearLayout(this).apply {
+            orientation=LinearLayout.VERTICAL; setPadding(dp(16),dp(8),dp(16),dp(8))
+        }
+        val categorySpinner=Spinner(this)
+        categorySpinner.adapter=ArrayAdapter(this,android.R.layout.simple_spinner_dropdown_item,categories.map { it.name })
+        val accountSpinner=Spinner(this)
+        accountSpinner.adapter=ArrayAdapter(this,android.R.layout.simple_spinner_dropdown_item,
+            accounts.map { it.name+" • "+it.currencyCode+" • "+formatAccountBalance(it.balanceMinor,it.currencyCode) })
+        val amount=fieldForDialog("قيمة المصروف",type=InputType.TYPE_CLASS_NUMBER or InputType.TYPE_NUMBER_FLAG_DECIMAL)
+        val date=fieldForDialog("تاريخ المصروف",SimpleDateFormat("yyyy-MM-dd",Locale.US).format(Date()))
+        val reference=fieldForDialog("رقم فاتورة أو مرجع (اختياري)")
+        val notes=fieldForDialog("بيان المصروف (اختياري)")
+        content.addView(label("التصنيف",13f,textColor,true,Gravity.RIGHT))
+        content.addView(categorySpinner,fieldParams(dp(44),dp(3)))
+        content.addView(label("الصندوق أو المحفظة",13f,textColor,true,Gravity.RIGHT))
+        content.addView(accountSpinner,fieldParams(dp(44),dp(3)))
+        content.addView(amount,fieldParams(dp(46),dp(5)))
+        content.addView(date,fieldParams(dp(44),dp(5)))
+        content.addView(reference,fieldParams(dp(44),dp(5)))
+        content.addView(notes,fieldParams(dp(44),dp(5)))
+        AlertDialog.Builder(this).setTitle("تسجيل مصروف تشغيلي")
+            .setView(ScrollView(this).apply { isFillViewport=true; addView(content) })
+            .setNegativeButton("إلغاء",null)
+            .setPositiveButton("اعتماد المصروف",null)
+            .create().also { dialog ->
+                dialog.setOnShowListener {
+                    dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener {
+                        try {
+                            val raw=amount.text.toString().trim().replace(',','.')
+                            require(raw.isNotEmpty()) { "أدخل قيمة المصروف" }
+                            val account=accounts[accountSpinner.selectedItemPosition]
+                            val minor=BigDecimal(raw).multiply(BigDecimal.valueOf(
+                                if(account.currencyCode=="USD") 100L else 1L
+                            )).setScale(0,RoundingMode.UNNECESSARY).longValueExact()
+                            val result=repository.postExpense(
+                                actor,UUID.randomUUID().toString(),categories[categorySpinner.selectedItemPosition].id,
+                                account.id,minor,date.text.toString().trim(),reference.text.toString(),notes.text.toString()
+                            )
+                            Toast.makeText(this,"تم تسجيل المصروف بقيمة "+formatAccountBalance(result.amountMinor,result.currencyCode),
+                                Toast.LENGTH_LONG).show()
+                            dialog.dismiss()
+                            showExpenses()
+                        } catch(e: Exception) {
+                            Toast.makeText(this,e.message ?: "تعذر تسجيل المصروف",Toast.LENGTH_LONG).show()
+                        }
+                    }
+                }
+                dialog.show()
+            }
     }
 
     private fun showInventoryAdjustments() {
