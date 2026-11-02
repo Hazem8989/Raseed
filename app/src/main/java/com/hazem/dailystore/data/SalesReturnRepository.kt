@@ -36,6 +36,7 @@ data class SalesReturnPreview(
 
 /** Atomic customer sales returns. Purchase returns use a separate supplier-credit workflow. */
 class SalesReturnRepository(context: Context) {
+    private val context = context.applicationContext
     private val database = AppDatabase.getInstance(context)
 
     private data class OriginalInvoice(
@@ -296,6 +297,15 @@ class SalesReturnRepository(context: Context) {
                 put("payload_hash", payloadHash); put("status", "COMPLETED")
                 put("result_reference", returnId); put("created_at", now); put("completed_at", now)
             })
+            SyncProtocolRepository(context).enqueueLocalOperation(
+                db, actorUserId, operationId, "POST_SALES_RETURN", "SALES_RETURN", returnId, "CREATE",
+                org.json.JSONObject().put("original_invoice_id", originalInvoiceId)
+                    .put("return_id", returnId).put("return_number", number).put("return_date", returnDate)
+                    .put("reason", reason.trim()).put("total_usd_cents", totalReturn)
+                    .put("credit_reduction_usd_cents", creditReduction)
+                    .put("cash_refund_usd_cents", cashRefund)
+                    .put("returned_cogs_usd_cents", totalCogs).toString()
+            )
             db.setTransactionSuccessful()
             return SalesReturnResult(returnId, number, totalReturn, creditReduction, cashRefund, totalCogs, false)
         } finally { db.endTransaction() }
