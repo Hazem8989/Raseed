@@ -995,8 +995,13 @@ class MainActivity : Activity() {
             "المستخدمون والصلاحيات" to "إضافة الموظفين والتحكم بصلاحياتهم"
         )
         lateinit var popup: PopupWindow
-        val visibleEntries = if (isManager()) entries else entries.filterNot {
-            it.first in setOf("المنتجات والمخزون", "تسويات المخزون", "مرتجعات المبيعات", "المشتريات", "التقارير", "النسخ الاحتياطي والاستعادة", "المستخدمون والصلاحيات")
+        val visibleEntries = entries.filter { entry ->
+            when (entry.first) {
+                "تسويات المخزون" -> hasPermission(PermissionPolicy.INVENTORY_ADJUST)
+                "مرتجعات المبيعات" -> hasPermission(PermissionPolicy.RETURNS_PROCESS)
+                "المنتجات والمخزون", "المشتريات", "التقارير", "النسخ الاحتياطي والاستعادة", "المستخدمون والصلاحيات" -> isManager()
+                else -> true
+            }
         }
         visibleEntries.forEach { (title, description) ->
             val item = LinearLayout(this).apply {
@@ -1896,6 +1901,16 @@ class MainActivity : Activity() {
     }
 
     private fun isManager(): Boolean = currentUserRole == "ADMIN" && !currentUserId.isNullOrBlank()
+
+    private fun hasPermission(permissionKey: String): Boolean {
+        val actor = currentUserId ?: return false
+        return try {
+            PermissionPolicy.require(AppDatabase.getInstance(this).readableDatabase, actor, permissionKey)
+            true
+        } catch (_: Exception) {
+            false
+        }
+    }
 
     private fun showUserManagement() {
         if (!isManager()) {
