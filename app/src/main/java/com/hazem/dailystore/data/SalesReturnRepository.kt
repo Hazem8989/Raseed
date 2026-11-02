@@ -576,6 +576,12 @@ class SalesReturnRepository(context: Context) {
         return "SR-" + date.replace("-", "") + "-" + count.toString().padStart(4, '0')
     }
 
+    private fun productName(db: SQLiteDatabase, productId: String): String =
+        db.rawQuery("SELECT name FROM products WHERE id=?", arrayOf(productId)).use { c ->
+            require(c.moveToFirst()) { "الصنف غير موجود" }
+            c.getString(0)
+        }
+
     private fun hash(value: String): String =
         MessageDigest.getInstance("SHA-256").digest(value.toByteArray(Charsets.UTF_8))
             .joinToString("") { "%02x".format(it) }
