@@ -146,7 +146,8 @@ class OperatingExpenseRepositoryTest {
             10000L,"2026-11-02","مصروف للمزامنة",null)
         val queued=sync.pendingOutbox().single()
         assertEquals("OPERATING_EXPENSE",queued.entityType)
-        assertEquals("POST_OPERATING_EXPENSE",queued.operationType)
+        assertEquals("CREATE",queued.operationType)
+        assertTrue(queued.payloadJson.contains("POST_OPERATING_EXPENSE"))
         assertTrue(queued.payloadJson.contains("amount_usd_cents"))
     }
 
