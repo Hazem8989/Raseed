@@ -968,64 +968,6 @@ class MainActivity : Activity() {
         dialog.show()
     }
 
-    private fun showCashierPermissions() {
-        val actorId = currentUserId
-        if (!isManager() || actorId.isNullOrBlank()) {
-            Toast.makeText(this, "إدارة الصلاحيات متاحة للمدير فقط", Toast.LENGTH_SHORT).show()
-            return
-        }
-        val db = AppDatabase.getInstance(this).writableDatabase
-        val current = try {
-            PermissionPolicy.rolePermissions(db, "CASHIER")
-        } catch (e: Exception) {
-            Toast.makeText(this, e.message ?: "تعذر قراءة الصلاحيات", Toast.LENGTH_LONG).show()
-            return
-        }
-        val content = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            setPadding(dp(16), dp(8), dp(16), dp(8))
-        }
-        content.addView(label(
-            "هذه الإعدادات تنطبق على جميع حسابات الموظفين من نوع موظف صندوق. المدير يحتفظ بصلاحياته الإدارية.",
-            12f, mutedColor, false, Gravity.RIGHT
-        ).apply { setPadding(0, 0, 0, dp(12)) })
-        val scroll = ScrollView(this)
-        scroll.addView(content)
-        PermissionPolicy.permissionDescriptions().forEach { (key, description) ->
-            val check = CheckBox(this).apply {
-                text = description
-                textSize = 14f
-                setTextColor(textColor)
-                isChecked = current[key] == true
-            }
-            var changing = false
-            check.setOnCheckedChangeListener { _, allowed ->
-                if (changing) return@setOnCheckedChangeListener
-                try {
-                    PermissionPolicy.setRolePermission(db, actorId, "CASHIER", key, allowed)
-                    Toast.makeText(
-                        this,
-                        if (allowed) "تم منح الصلاحية: $description" else "تم سحب الصلاحية: $description",
-                        Toast.LENGTH_SHORT
-                    ).show()
-                } catch (e: Exception) {
-                    changing = true
-                    check.isChecked = !allowed
-                    changing = false
-                    Toast.makeText(this, e.message ?: "تعذر تعديل الصلاحية", Toast.LENGTH_LONG).show()
-                }
-            }
-            content.addView(check, LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT
-            ).apply { topMargin = dp(3); bottomMargin = dp(3) })
-        }
-        AlertDialog.Builder(this)
-            .setTitle("صلاحيات موظفي الصندوق")
-            .setView(scroll)
-            .setPositiveButton("إغلاق", null)
-            .show()
-    }
-
     private fun showNavigationMenu(anchor: View) {
         val menu = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
@@ -1043,13 +985,12 @@ class MainActivity : Activity() {
             "الصناديق والمحافظ" to "الحركة النقدية والحسابات",
             "تحويل رصيد" to "سيرياتيل العادي وكاش وشام كاش",
             "التقارير" to "المبيعات والأرباح والمخزون",
-            "صلاحيات الموظفين" to "تحديد ما يستطيع موظفو الصندوق تنفيذه",
             "النسخ الاحتياطي والاستعادة" to "حفظ بيانات المتجر واستعادتها بأمان",
             "المستخدمون والصلاحيات" to "إضافة الموظفين والتحكم بصلاحياتهم"
         )
         lateinit var popup: PopupWindow
         val visibleEntries = if (isManager()) entries else entries.filterNot {
-            it.first in setOf("المنتجات والمخزون", "المشتريات", "التقارير", "صلاحيات الموظفين", "النسخ الاحتياطي والاستعادة")
+            it.first in setOf("المنتجات والمخزون", "المشتريات", "التقارير", "النسخ الاحتياطي والاستعادة", "المستخدمون والصلاحيات")
         }
         visibleEntries.forEach { (title, description) ->
             val item = LinearLayout(this).apply {
@@ -1067,7 +1008,6 @@ class MainActivity : Activity() {
                         "الصناديق والمحافظ" -> showCashAccounts()
                         "تحويل رصيد" -> showServiceTransfers()
                         "التقارير" -> showGeneralReports()
-                        "صلاحيات الموظفين" -> showCashierPermissions()
                         "النسخ الاحتياطي والاستعادة" -> showBackupRestoreOptions()
                         "المستخدمون والصلاحيات" -> showUserManagement()
                         else -> Toast.makeText(this@MainActivity, "قسم $title سيُفعّل في مرحلته", Toast.LENGTH_SHORT).show()
