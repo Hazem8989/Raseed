@@ -68,6 +68,23 @@ class CustomerPaymentRepositoryTest {
     fun tearDown() { database.close() }
 
     @Test
+    fun customerStatementReconcilesCreditInvoiceAndCollectionInUsdReference() {
+        val invoiceId = createCreditInvoice()
+        val before = PartyStatementRepository(RuntimeEnvironment.getApplication()).customer(customerId)
+        assertEquals(1, before.entries.size)
+        assertEquals(500L, before.closingBalanceUsdCents)
+        assertEquals(75000L, before.closingBalanceSypMinor)
+
+        payments.addPayment(adminId, invoiceId, "customer-statement-collection", cashDrawerId, 15_000L)
+        val statement = PartyStatementRepository(RuntimeEnvironment.getApplication()).customer(customerId)
+        assertEquals(2, statement.entries.size)
+        assertEquals(400L, statement.closingBalanceUsdCents)
+        assertEquals(60_000L, statement.closingBalanceSypMinor)
+        assertEquals(1, statement.entries.count { it.type == "CUSTOMER_COLLECTION" })
+        assertEquals(0, statement.unpricedEntryCount)
+    }
+
+    @Test
     fun sypCashCollectionIsFinancialOnlyAndIdempotent() {
         val invoiceId = createCreditInvoice()
         val stockBefore = stockQuantity()
