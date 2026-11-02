@@ -117,7 +117,9 @@ class AppDatabaseTest {
                 "service_wallet_transactions", "service_transfers", "service_wallet_account_links",
                 "system_cash_account_roles", "inventory_cost_layers", "sales_item_cost_allocations",
                 "return_cost_allocations", "inventory_adjustments", "supplier_return_refund_allocations",
-                "supplier_return_cost_allocations", "expense_categories", "operating_expenses"
+                "supplier_return_cost_allocations", "expense_categories", "operating_expenses", "sync_devices", "sync_pairing_invitations",
+                "sync_protocol_state", "sync_operation_envelopes", "sync_inbox",
+                "sync_acknowledgements", "sync_cursors"
             ).forEach { table ->
                 upgraded.rawQuery(
                     "SELECT 1 FROM sqlite_master WHERE type='table' AND name=?",

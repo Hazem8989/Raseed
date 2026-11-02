@@ -49,6 +49,7 @@ class AppDatabase private constructor(context: Context) :
             ensureInventoryAdjustmentSchema(db)
             ensureSupplierReturnSchema(db)
             ensureOperatingExpenseSchema(db)
+            ensureSyncProtocolSchema(db)
             db.execSQL(
                 """INSERT INTO app_settings(setting_key, setting_value, updated_at)
                    VALUES('base_currency', 'USD', strftime('%Y-%m-%dT%H:%M:%fZ','now'))"""
@@ -413,6 +414,17 @@ class AppDatabase private constructor(context: Context) :
                 db.endTransaction()
             }
         }
+        if (version < 18) {
+            db.beginTransaction()
+            try {
+                ensureSyncProtocolSchema(db)
+                PermissionPolicy.ensureDefaults(db)
+                db.setTransactionSuccessful()
+                version = 18
+            } finally {
+                db.endTransaction()
+            }
+        }
         if (version != newVersion) {
             throw IllegalStateException("Missing database migration from version $version to $newVersion")
         }
@@ -491,6 +503,106 @@ class AppDatabase private constructor(context: Context) :
      * their own source-item link and inbound cash-refund allocations. This
      * keeps customer refund semantics and supplier credits separate.
      */
+    private fun ensureSyncProtocolSchema(db: SQLiteDatabase) {
+        db.execSQL("""
+            CREATE TABLE IF NOT EXISTS sync_devices (
+                device_id TEXT PRIMARY KEY NOT NULL,
+                display_name TEXT NOT NULL,
+                device_role TEXT NOT NULL CHECK(device_role IN ('PRIMARY','SECONDARY')),
+                credential_hash TEXT,
+                status TEXT NOT NULL CHECK(status IN ('ACTIVE','REVOKED')),
+                enrolled_by TEXT,
+                created_at TEXT NOT NULL,
+                last_seen_at TEXT,
+                revoked_at TEXT,
+                FOREIGN KEY(enrolled_by) REFERENCES users(id)
+                    ON UPDATE RESTRICT ON DELETE RESTRICT
+            )
+        """.trimIndent())
+        db.execSQL("""
+            CREATE TABLE IF NOT EXISTS sync_pairing_invitations (
+                invitation_id TEXT PRIMARY KEY NOT NULL,
+                invitation_hash TEXT NOT NULL UNIQUE,
+                created_by TEXT NOT NULL,
+                expires_at TEXT NOT NULL,
+                consumed_at TEXT,
+                created_at TEXT NOT NULL,
+                FOREIGN KEY(created_by) REFERENCES users(id)
+                    ON UPDATE RESTRICT ON DELETE RESTRICT
+            )
+        """.trimIndent())
+        db.execSQL("""
+            CREATE TABLE IF NOT EXISTS sync_protocol_state (
+                state_key TEXT PRIMARY KEY NOT NULL,
+                state_value TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            )
+        """.trimIndent())
+        db.execSQL("""
+            CREATE TABLE IF NOT EXISTS sync_operation_envelopes (
+                operation_id TEXT PRIMARY KEY NOT NULL,
+                sequence_number INTEGER NOT NULL UNIQUE CHECK(sequence_number > 0),
+                origin_device_id TEXT NOT NULL,
+                actor_user_id TEXT NOT NULL,
+                operation_type TEXT NOT NULL,
+                entity_type TEXT NOT NULL,
+                entity_id TEXT NOT NULL,
+                payload_json TEXT NOT NULL,
+                payload_sha256 TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                FOREIGN KEY(origin_device_id) REFERENCES sync_devices(device_id)
+                    ON UPDATE RESTRICT ON DELETE RESTRICT,
+                FOREIGN KEY(actor_user_id) REFERENCES users(id)
+                    ON UPDATE RESTRICT ON DELETE RESTRICT
+            )
+        """.trimIndent())
+        db.execSQL("""
+            CREATE TABLE IF NOT EXISTS sync_inbox (
+                operation_id TEXT PRIMARY KEY NOT NULL,
+                origin_device_id TEXT NOT NULL,
+                sequence_number INTEGER NOT NULL CHECK(sequence_number > 0),
+                operation_type TEXT NOT NULL,
+                entity_type TEXT NOT NULL,
+                entity_id TEXT NOT NULL,
+                payload_json TEXT NOT NULL,
+                payload_sha256 TEXT NOT NULL,
+                status TEXT NOT NULL CHECK(status IN ('RECEIVED','APPLIED','REJECTED','CONFLICT')),
+                received_at TEXT NOT NULL,
+                applied_at TEXT,
+                rejection_reason TEXT,
+                FOREIGN KEY(origin_device_id) REFERENCES sync_devices(device_id)
+                    ON UPDATE RESTRICT ON DELETE RESTRICT
+            )
+        """.trimIndent())
+        db.execSQL("""
+            CREATE TABLE IF NOT EXISTS sync_acknowledgements (
+                operation_id TEXT NOT NULL,
+                device_id TEXT NOT NULL,
+                sequence_number INTEGER NOT NULL CHECK(sequence_number > 0),
+                status TEXT NOT NULL CHECK(status IN ('RECEIVED','APPLIED','REJECTED')),
+                acknowledged_at TEXT NOT NULL,
+                PRIMARY KEY(operation_id, device_id),
+                FOREIGN KEY(operation_id) REFERENCES sync_operation_envelopes(operation_id)
+                    ON UPDATE RESTRICT ON DELETE RESTRICT,
+                FOREIGN KEY(device_id) REFERENCES sync_devices(device_id)
+                    ON UPDATE RESTRICT ON DELETE RESTRICT
+            )
+        """.trimIndent())
+        db.execSQL("""
+            CREATE TABLE IF NOT EXISTS sync_cursors (
+                device_id TEXT PRIMARY KEY NOT NULL,
+                last_sequence INTEGER NOT NULL DEFAULT 0 CHECK(last_sequence >= 0),
+                updated_at TEXT NOT NULL,
+                FOREIGN KEY(device_id) REFERENCES sync_devices(device_id)
+                    ON UPDATE RESTRICT ON DELETE RESTRICT
+            )
+        """.trimIndent())
+        db.execSQL("CREATE INDEX IF NOT EXISTS idx_sync_devices_status ON sync_devices(status, device_role)")
+        db.execSQL("CREATE INDEX IF NOT EXISTS idx_sync_inbox_status_sequence ON sync_inbox(status, sequence_number)")
+        db.execSQL("CREATE INDEX IF NOT EXISTS idx_sync_envelopes_sequence ON sync_operation_envelopes(sequence_number)")
+        db.execSQL("CREATE INDEX IF NOT EXISTS idx_sync_invitations_expiry ON sync_pairing_invitations(expires_at, consumed_at)")
+    }
+
     private fun ensureOperatingExpenseSchema(db: SQLiteDatabase) {
         db.execSQL("""
             CREATE TABLE IF NOT EXISTS expense_categories (
@@ -686,7 +798,7 @@ class AppDatabase private constructor(context: Context) :
 
     companion object {
         const val DATABASE_NAME = "the_daily_shop.db"
-        const val DATABASE_VERSION = 17
+        const val DATABASE_VERSION = 18
 
         @Volatile
         private var INSTANCE: AppDatabase? = null

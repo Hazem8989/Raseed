@@ -32,6 +32,7 @@ object PermissionPolicy {
     const val INVENTORY_ADJUST = "inventory.adjust"
     const val RETURNS_PROCESS = "returns.process"
     const val EXPENSES_MANAGE = "expenses.manage"
+    const val SYNC_MANAGE = "sync.manage"
 
     private val descriptions = linkedMapOf(
         USERS_MANAGE to "إدارة المستخدمين والصلاحيات",
@@ -54,7 +55,8 @@ object PermissionPolicy {
         BACKUP_MANAGE to "النسخ الاحتياطي والاستعادة",
         INVENTORY_ADJUST to "تسويات وجرد المخزون",
         RETURNS_PROCESS to "تنفيذ المرتجعات ورد الأموال",
-        EXPENSES_MANAGE to "إدارة المصاريف"
+        EXPENSES_MANAGE to "إدارة المصاريف",
+        SYNC_MANAGE to "إدارة الأجهزة والمزامنة"
     )
 
     // Conservative cashier defaults: sell, view/create customers, and collect customer debts.
