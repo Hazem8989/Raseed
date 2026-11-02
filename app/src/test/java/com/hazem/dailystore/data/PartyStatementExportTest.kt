@@ -7,10 +7,8 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
-import org.robolectric.annotation.Config
 
 @RunWith(RobolectricTestRunner::class)
-@Config(sdk = [35])
 class PartyStatementExportTest {
     private fun statement() = PartyStatement(
         partyId = "party-1",
@@ -57,8 +55,11 @@ class PartyStatementExportTest {
         assertTrue(sheet.contains("1250"))
     }
 
-    @Test fun pdfStartsWithPdfSignature() {
-        val bytes = PartyStatementExport.pdf(statement())
-        assertEquals("%PDF", String(bytes, 0, 4, Charsets.US_ASCII))
+    @Test fun pdfContentContainsArabicIdentityAndCorrectCurrencyUnits() {
+        val lines = PartyStatementExport.pdfLines(statement())
+        assertTrue(lines.first().contains("عميل اختبار"))
+        assertTrue(lines[1].contains("12.50 USD"))
+        assertTrue(lines.last().contains("فاتورة بيع آجل"))
+        assertTrue(lines.last().contains("1,250"))
     }
 }
