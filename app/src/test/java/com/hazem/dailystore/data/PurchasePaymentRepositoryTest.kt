@@ -74,14 +74,14 @@ class PurchasePaymentRepositoryTest {
 
     @Test
     fun partialAndFinalPaymentsUpdateInvoiceAndCashBalances() {
-        val first = payments.addPayment(invoiceId, "pay-part-1-${UUID.randomUUID()}",
+        val first = payments.addPayment(adminId, invoiceId, "pay-part-1-${UUID.randomUUID()}",
             accountId, 4000L, "دفعة أولى")
         assertEquals(4000L, first.paidUsdCents)
         assertEquals(6000L, first.outstandingUsdCents)
         assertEquals("PARTIALLY_PAID", first.paymentStatus)
         assertEquals(46000L, cashAccounts.balance(accountId))
 
-        val second = payments.addPayment(invoiceId, "pay-part-2-${UUID.randomUUID()}",
+        val second = payments.addPayment(adminId, invoiceId, "pay-part-2-${UUID.randomUUID()}",
             accountId, 6000L, "تسديد نهائي")
         assertEquals(10000L, second.paidUsdCents)
         assertEquals(0L, second.outstandingUsdCents)
@@ -93,8 +93,8 @@ class PurchasePaymentRepositoryTest {
     @Test
     fun retryWithSameOperationDoesNotCreateSecondPaymentOrCashOutflow() {
         val operation = "pay-retry-${UUID.randomUUID()}"
-        val first = payments.addPayment(invoiceId, operation, accountId, 2500L)
-        val retry = payments.addPayment(invoiceId, operation, accountId, 2500L)
+        val first = payments.addPayment(adminId, invoiceId, operation, accountId, 2500L)
+        val retry = payments.addPayment(adminId, invoiceId, operation, accountId, 2500L)
         assertFalse(first.replayed)
         assertTrue(retry.replayed)
         assertEquals(first.paymentId, retry.paymentId)
@@ -105,7 +105,7 @@ class PurchasePaymentRepositoryTest {
     @Test
     fun rejectsPaymentAboveOutstandingWithoutChangingCashOrInvoice() {
         try {
-            payments.addPayment(invoiceId, "pay-over-${UUID.randomUUID()}", accountId, 10001L)
+            payments.addPayment(adminId, invoiceId, "pay-over-${UUID.randomUUID()}", accountId, 10001L)
             throw AssertionError("Overpayment must be rejected")
         } catch (_: IllegalArgumentException) {
             // Expected validation.
@@ -120,7 +120,7 @@ class PurchasePaymentRepositoryTest {
         val poor = cashAccounts.create(adminId, "صندوق محدود ${UUID.randomUUID()}",
             "CASH_BOX", "USD", 100L)
         try {
-            payments.addPayment(invoiceId, "pay-poor-${UUID.randomUUID()}", poor.id, 200L)
+            payments.addPayment(adminId, invoiceId, "pay-poor-${UUID.randomUUID()}", poor.id, 200L)
             throw AssertionError("Insufficient cash balance must be rejected")
         } catch (_: IllegalArgumentException) {
             // Expected validation.
@@ -142,7 +142,7 @@ class PurchasePaymentRepositoryTest {
         database.writableDatabase.insertOrThrow("exchange_rates", null, rateValues)
         val syp = cashAccounts.create(adminId, "محفظة ليرة ${UUID.randomUUID()}",
             "WALLET", "SYP", 500000L)
-        val result = payments.addPayment(invoiceId, "pay-syp-${UUID.randomUUID()}",
+        val result = payments.addPayment(adminId, invoiceId, "pay-syp-${UUID.randomUUID()}",
             syp.id, 100000L)
         assertEquals(1000L, result.paidUsdCents)
         assertEquals(9000L, result.outstandingUsdCents)
@@ -169,7 +169,7 @@ class PurchasePaymentRepositoryTest {
     fun supplierBalanceStaysAtPurchaseRateAfterExchangeRateChanges() {
         val syp = cashAccounts.create(adminId, "محفظة ليرة ثابتة ${UUID.randomUUID()}",
             "WALLET", "SYP", 500000L)
-        val first = payments.addPayment(invoiceId, "fixed-syp-first-${UUID.randomUUID()}",
+        val first = payments.addPayment(adminId, invoiceId, "fixed-syp-first-${UUID.randomUUID()}",
             syp.id, 100000L)
         assertEquals(100000L, first.paidSypMinor)
         assertEquals(900000L, first.outstandingSypMinor)
@@ -188,7 +188,7 @@ class PurchasePaymentRepositoryTest {
         assertEquals(100000L, afterRateChange.paidSypMinor)
         assertEquals(900000L, afterRateChange.outstandingSypMinor)
 
-        val usdPayment = payments.addPayment(invoiceId, "fixed-usd-after-change-${UUID.randomUUID()}",
+        val usdPayment = payments.addPayment(adminId, invoiceId, "fixed-usd-after-change-${UUID.randomUUID()}",
             accountId, 1000L)
         assertEquals(200000L, usdPayment.paidSypMinor)
         assertEquals(800000L, usdPayment.outstandingSypMinor)
@@ -206,11 +206,11 @@ class PurchasePaymentRepositoryTest {
         // This test uses the current operating date; remove only the prior test allocation.
         database.writableDatabase.delete("daily_supplier_rollovers", null, null)
         daily.setSupplierRollover(adminId, supplierCash.id, 100000L, "اختبار تخصيص يومي")
-        val paid = payments.addPayment(invoiceId, "rollover-payment-" + UUID.randomUUID(), supplierCash.id, 100000L)
+        val paid = payments.addPayment(adminId, invoiceId, "rollover-payment-" + UUID.randomUUID(), supplierCash.id, 100000L)
         assertEquals(100000L, paid.paidSypMinor)
         assertEquals(0L, daily.currentSupplierRollover()!!.availableMinor)
         try {
-            payments.addPayment(invoiceId, "rollover-overrun-" + UUID.randomUUID(), supplierCash.id, 1L)
+            payments.addPayment(adminId, invoiceId, "rollover-overrun-" + UUID.randomUUID(), supplierCash.id, 1L)
             throw AssertionError("Supplier payment must not exceed the daily rollover allocation")
         } catch (_: IllegalArgumentException) { }
         assertEquals(400000L, cashAccounts.balance(supplierCash.id))
@@ -219,7 +219,7 @@ class PurchasePaymentRepositoryTest {
 
     @Test
     fun managerCanCorrectPaymentAmountAndAccountAtomically() {
-        val payment = payments.addPayment(invoiceId, "pay-edit-${UUID.randomUUID()}", accountId, 4000L, "قبل التصحيح")
+        val payment = payments.addPayment(adminId, invoiceId, "pay-edit-${UUID.randomUUID()}", accountId, 4000L, "قبل التصحيح")
         val replacement = cashAccounts.create(adminId, "صندوق بديل ${UUID.randomUUID()}", "CASH_BOX", "USD", 10000L)
 
         val corrected = payments.editPayment(
@@ -247,7 +247,7 @@ class PurchasePaymentRepositoryTest {
 
     @Test
     fun cashierCannotCorrectSupplierPayment() {
-        val payment = payments.addPayment(invoiceId, "pay-edit-denied-${UUID.randomUUID()}", accountId, 2000L)
+        val payment = payments.addPayment(adminId, invoiceId, "pay-edit-denied-${UUID.randomUUID()}", accountId, 2000L)
         try {
             payments.editPayment("CASHIER", "cashier-id", payment.paymentId, accountId, 1000L, "غير مسموح")
             throw AssertionError("Cashier must not edit supplier payments")
@@ -258,7 +258,7 @@ class PurchasePaymentRepositoryTest {
 
     @Test
     fun supplierSummaryMatchesInvoicesAndPayments() {
-        payments.addPayment(invoiceId, "pay-supplier-${UUID.randomUUID()}", accountId, 3000L)
+        payments.addPayment(adminId, invoiceId, "pay-supplier-${UUID.randomUUID()}", accountId, 3000L)
         val supplier = payments.listSupplierSummaries().first { it.id == supplierId }
         assertEquals(10000L, supplier.totalPurchaseUsdCents)
         assertEquals(3000L, supplier.paidUsdCents)
