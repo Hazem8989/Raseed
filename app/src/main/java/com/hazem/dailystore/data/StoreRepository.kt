@@ -582,12 +582,7 @@ class StoreRepository(context: Context) {
     }
 
     private fun requireManager(db: android.database.sqlite.SQLiteDatabase, actorUserId: String) {
-        require(actorUserId.isNotBlank()) { "جلسة المدير غير صالحة" }
-        val allowed = db.rawQuery(
-            "SELECT 1 FROM users WHERE id=? AND role_key='ADMIN' AND is_active=1 AND must_change_password=0",
-            arrayOf(actorUserId)
-        ).use { it.moveToFirst() }
-        require(allowed) { "هذا الإجراء متاح لمدير نشط أكمل تغيير كلمة المرور فقط" }
+        PermissionPolicy.require(db, actorUserId, PermissionPolicy.CATALOG_MANAGE)
     }
 
     private fun insertAudit(
