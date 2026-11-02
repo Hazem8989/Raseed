@@ -200,12 +200,12 @@ class CustomerPaymentRepositoryTest {
 
     @Test
     fun cashSaleCannotReceiveCustomerCreditCollection() {
-        val draft = invoices.saveSalesDraft(
+        val draft = invoices.saveSalesDraft(adminId, 
             "customer-cash-draft-" + UUID.randomUUID(), null, customerId, "2026-10-31",
             0L, null, listOf(InvoiceLineInput(productId, BigDecimal.ONE, 500L)),
             saleType = "CASH"
         )
-        invoices.postCashSale(draft.invoiceId, "customer-cash-post-" + UUID.randomUUID(), cashDrawerId)
+        invoices.postCashSale(adminId, draft.invoiceId, "customer-cash-post-" + UUID.randomUUID(), cashDrawerId)
         val receiptsBefore = payments.listPayments(draft.invoiceId).size
         try {
             payments.addPayment(draft.invoiceId, "customer-cash-payment-" + UUID.randomUUID(), cashDrawerId, 1000L)
@@ -231,12 +231,12 @@ class CustomerPaymentRepositoryTest {
     }
 
     private fun createCreditInvoice(): String {
-        val draft = invoices.saveSalesDraft(
+        val draft = invoices.saveSalesDraft(adminId, 
             "customer-credit-draft-" + UUID.randomUUID(), null, customerId, "2026-10-31",
             0L, null, listOf(InvoiceLineInput(productId, BigDecimal.ONE, 500L)),
             saleType = "CREDIT"
         )
-        invoices.postSale(draft.invoiceId, "customer-credit-post-" + UUID.randomUUID())
+        invoices.postSale(adminId, draft.invoiceId, "customer-credit-post-" + UUID.randomUUID())
         return draft.invoiceId
     }
 
