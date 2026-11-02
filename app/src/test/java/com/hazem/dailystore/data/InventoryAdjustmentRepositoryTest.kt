@@ -180,7 +180,8 @@ class InventoryAdjustmentRepositoryTest {
             "تسوية للمزامنة", "sync-adjustment-" + UUID.randomUUID(), 200L)
         val queued = sync.pendingOutbox().single()
         assertEquals("INVENTORY_ADJUSTMENT", queued.entityType)
-        assertEquals("POST_INVENTORY_ADJUSTMENT", queued.operationType)
+        assertEquals("CREATE", queued.operationType)
+        assertTrue(queued.payloadJson.contains("POST_INVENTORY_ADJUSTMENT"))
         assertTrue(queued.payloadJson.contains(productId))
     }
 
