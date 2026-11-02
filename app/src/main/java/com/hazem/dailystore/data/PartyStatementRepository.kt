@@ -118,7 +118,7 @@ class PartyStatementRepository(context: Context) {
                     creditSypMinor = if (rate > 0L) CurrencyConverter.usdCentsToSyp(credit, rate) else 0L,
                     cashRefundUsdCents = refunds.first,
                     cashRefundSypMinor = refunds.second,
-                    sortAt = c.getString(5)
+                    sortAt = "${c.getString(2)}|${c.getString(5)}"
                 ))
             }
         }
@@ -146,7 +146,7 @@ class PartyStatementRepository(context: Context) {
                     c.getString(0), c.getString(2), "PURCHASE_INVOICE", c.getString(1),
                     "فاتورة شراء", debitUsdCents = c.getLong(3),
                     debitSypMinor = if (rate > 0L) CurrencyConverter.usdCentsToSyp(c.getLong(3), rate) else 0L,
-                    sortAt = c.getString(5)
+                    sortAt = "${c.getString(2)}|${c.getString(5)}"
                 ))
             }
         }
