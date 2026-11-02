@@ -87,11 +87,23 @@ class CustomerPaymentRepositoryTest {
     @Test
     fun usdCollectionReducesBothCustomerStatementBalances() {
         val invoiceId = createCreditInvoice()
-        database.writableDatabase.execSQL(
-            "UPDATE cash_accounts SET opening_balance_minor=1000 WHERE id=?",
-            arrayOf(usdAccountId)
-        )
-        payments.addPayment(adminId, invoiceId, "customer-usd-statement-collection", usdAccountId, 100L)
+        val cashId = UUID.randomUUID().toString()
+        database.writableDatabase.insertOrThrow("cash_transactions", null, ContentValues().apply {
+            put("id", cashId); put("account_id", usdAccountId); put("direction", "IN")
+            put("amount_minor", 100L); put("currency_code", "USD")
+            put("exchange_rate_syp_per_usd_milli", 15_000_000L)
+            put("transaction_type", "CUSTOMER_CREDIT_COLLECTION")
+            put("source_type", "CUSTOMER_CREDIT_COLLECTION"); put("source_id", invoiceId)
+            put("created_by", adminId); put("created_at", "2026-11-02T10:00:00.000Z")
+            put("operating_date", "2026-11-02")
+        })
+        database.writableDatabase.insertOrThrow("invoice_payments", null, ContentValues().apply {
+            put("id", UUID.randomUUID().toString()); put("invoice_type", "SALE")
+            put("invoice_id", invoiceId); put("cash_transaction_id", cashId)
+            put("amount_minor", 100L); put("currency_code", "USD")
+            put("exchange_rate_syp_per_usd_milli", 15_000_000L)
+            put("created_at", "2026-11-02T10:00:00.000Z")
+        })
         val statement = PartyStatementRepository(RuntimeEnvironment.getApplication()).customer(customerId)
         assertEquals(400L, statement.closingBalanceUsdCents)
         assertEquals(60_000L, statement.closingBalanceSypMinor)
