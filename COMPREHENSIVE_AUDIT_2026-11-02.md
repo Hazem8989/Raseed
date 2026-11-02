@@ -142,3 +142,31 @@ This list does not imply device acceptance or that omitted edge cases are fully 
 ## Scope and limits of this audit
 
 This is a source-code and GitHub Actions review of the current branch. It did not inspect a live production database, execute the app on the user's phone, perform penetration testing, verify physical barcode hardware, or prove real-world accounting reconciliation against actual store transactions. Those remain explicit acceptance tasks.
+
+
+## Remediation update — 2026-11-02
+
+The first corrective batch for the highest-risk authorization and stock-integrity findings has now been implemented on the development branch.
+
+Implemented:
+- Product/catalog create and edit, product activation/deactivation, category creation, product import, opening-stock registration, and exchange-rate changes now require an active `ADMIN` user whose forced password rotation is complete.
+- Financial-account creation now requires the same manager state and writes an audit entry including its opening balance.
+- Manager-only catalog and backup entries are hidden from cashier navigation; product-management and account-creation screens also check the role.
+- Product changes now reject tracked-inventory items with zero purchase cost, zero sale price, non-finite opening quantities, opening quantities beyond unit precision, and opening stock on non-inventory items.
+- After inventory movement or a non-zero balance exists, changing a product's inventory-tracking flag or unit of measure is rejected.
+- Product create/update/deactivation, category creation, and exchange-rate changes write actor-attributed audit records.
+- Product-setup opening movements now record the acting user and a stable operation identifier.
+- Privileged manager checks in daily-balance controls, supplier-payment correction, and service-transfer manager operations now also require completed password rotation.
+- Added negative tests for cashier account/catalog/FX/stock-opening attempts, product stock-tracking/unit safeguards, and account-creation audit provenance.
+
+Verification:
+- GitHub Actions run: `41365521758`.
+- Head tested: `a2563ca6ec41326ffd0abe8138377e1c688ef338`.
+- Android unit-test task: passed.
+- Debug APK build: passed.
+- APK v1 and v2 signature verification: passed.
+- Artifact uploaded as `the-daily-shop-debug-development-only`.
+- Permanent release signing was not configured; the release build was skipped. This debug artifact is not an approved in-place release update.
+- Main branch remains at `63b233cd4fb3085d0ade05e3e4c1007efcae30ca`.
+
+**Authorization is improved but not complete.** The `permissions`/`role_permissions` tables still do not form a configurable permission matrix. Purchase access, supplier/customer master-data permissions, and broader actor provenance still need an explicit policy and implementation. The return/refund, stock-adjustment, and expense findings above remain open. CI success does not equal device acceptance or production readiness.
