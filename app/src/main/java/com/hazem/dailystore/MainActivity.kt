@@ -3262,7 +3262,7 @@ class MainActivity : Activity() {
             if (raw.isEmpty()) null else {
                 val account = accounts[spinner.selectedItemPosition]
                 val minor = BigDecimal(raw).multiply(BigDecimal.valueOf(if (account.currencyCode == "USD") 100L else 1L))
-                    .setScale(0, RoundingMode.HALF_UP).longValueExact()
+                    .setScale(0, RoundingMode.UNNECESSARY).longValueExact()
                 SalesRefundAllocationInput(account.id, minor)
             }
         }
