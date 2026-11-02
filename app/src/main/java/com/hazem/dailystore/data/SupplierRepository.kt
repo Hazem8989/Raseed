@@ -39,9 +39,11 @@ class SupplierRepository(context: Context) {
         return result
     }
 
-    fun create(name: String, phone: String? = null, address: String? = null): SupplierSummary {
+    fun create(actorUserId: String, name: String, phone: String? = null, address: String? = null): SupplierSummary {
         val cleanName = name.trim()
         require(cleanName.isNotEmpty()) { "اسم المورد مطلوب" }
+        val db = database.writableDatabase
+        PermissionPolicy.require(db, actorUserId, PermissionPolicy.SUPPLIERS_MANAGE)
         val now = timestamp()
         val id = UUID.randomUUID().toString()
         val values = ContentValues().apply {
@@ -52,7 +54,16 @@ class SupplierRepository(context: Context) {
             put("created_at", now)
             put("updated_at", now)
         }
-        database.writableDatabase.insertOrThrow("suppliers", null, values)
+        db.beginTransaction()
+        try {
+            db.insertOrThrow("suppliers", null, values)
+            db.insertOrThrow("audit_log", null, ContentValues().apply {
+                put("id", UUID.randomUUID().toString()); put("user_id", actorUserId)
+                put("action", "CREATE"); put("entity_type", "SUPPLIER"); put("entity_id", id)
+                put("created_at", now)
+            })
+            db.setTransactionSuccessful()
+        } finally { db.endTransaction() }
         return SupplierSummary(id, cleanName, phone?.trim()?.takeIf { it.isNotEmpty() },
             address?.trim()?.takeIf { it.isNotEmpty() })
     }
