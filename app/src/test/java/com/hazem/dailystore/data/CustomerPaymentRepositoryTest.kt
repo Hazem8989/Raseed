@@ -324,8 +324,8 @@ class CustomerPaymentRepositoryTest {
             cashDrawerId, 15000L, "تحصيل للمزامنة")
         val queued = sync.pendingOutbox()
         assertEquals(before + 2, queued.size)
-        assertTrue(queued.any { it.entityType == "CUSTOMER_PAYMENT" &&
-            it.operationType == "CUSTOMER_CREDIT_COLLECTION" })
+        assertTrue(queued.any { it.entityType == "CUSTOMER_PAYMENT" && it.operationType == "CREATE" &&
+            it.payloadJson.contains("CUSTOMER_CREDIT_COLLECTION") })
     }
 
 }
