@@ -1535,7 +1535,7 @@ class MainActivity : Activity() {
                         .setNegativeButton("إلغاء", null)
                         .setPositiveButton("إيقاف") { _, _ ->
                             try {
-                                repository.setActive(customer.id, false)
+                                repository.setActive(currentUserId ?: error("جلسة المستخدم غير صالحة"), customer.id, false)
                                 showCustomers()
                             } catch (e: Exception) {
                                 Toast.makeText(this@MainActivity, e.message, Toast.LENGTH_LONG).show()
