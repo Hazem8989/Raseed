@@ -51,6 +51,7 @@ import com.hazem.dailystore.data.SpreadsheetProductImporter
 import com.hazem.dailystore.data.InventoryValuationRepository
 import com.hazem.dailystore.data.SalesProfitRepository
 import com.hazem.dailystore.data.PermissionPolicy
+import com.hazem.dailystore.data.InventoryAdjustmentRepository
 import java.math.BigDecimal
 import java.math.RoundingMode
 import java.text.DecimalFormat
@@ -980,6 +981,7 @@ class MainActivity : Activity() {
         val entries = listOf(
             "نقطة البيع" to "واجهة البيع الرئيسية",
             "المنتجات والمخزون" to "إدارة المنتجات والكميات",
+            "تسويات المخزون" to "تسجيل فروقات الجرد بالزيادة أو النقصان",
             "المشتريات" to "فواتير الشراء والموردون",
             "العملاء والديون" to "ملفات العملاء والأرصدة",
             "الصناديق والمحافظ" to "الحركة النقدية والحسابات",
@@ -990,7 +992,7 @@ class MainActivity : Activity() {
         )
         lateinit var popup: PopupWindow
         val visibleEntries = if (isManager()) entries else entries.filterNot {
-            it.first in setOf("المنتجات والمخزون", "المشتريات", "التقارير", "النسخ الاحتياطي والاستعادة", "المستخدمون والصلاحيات")
+            it.first in setOf("المنتجات والمخزون", "تسويات المخزون", "المشتريات", "التقارير", "النسخ الاحتياطي والاستعادة", "المستخدمون والصلاحيات")
         }
         visibleEntries.forEach { (title, description) ->
             val item = LinearLayout(this).apply {
@@ -1003,6 +1005,7 @@ class MainActivity : Activity() {
                     when (title) {
                         "نقطة البيع" -> showPointOfSale()
                         "المنتجات والمخزون" -> showProductManagement()
+                        "تسويات المخزون" -> showInventoryAdjustments()
                         "المشتريات" -> showPurchases()
                         "العملاء والديون" -> showCustomers()
                         "الصناديق والمحافظ" -> showCashAccounts()
@@ -3128,6 +3131,93 @@ class MainActivity : Activity() {
         this.hint = hint; setText(value); inputType = type
         textSize = 14f; setSingleLine(true); setPadding(dp(12), 0, dp(12), 0)
         background = inputBackground()
+    }
+
+
+    private fun showInventoryAdjustments() {
+        val actor = currentUserId ?: return
+        val store = StoreRepository(this)
+        val adjustments = InventoryAdjustmentRepository(this)
+        markScreen("INVENTORY_ADJUSTMENTS")
+        val page = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setBackgroundColor(backgroundColor) }
+        val header = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL
+            setPadding(dp(14), dp(10), dp(14), dp(10)); setBackgroundColor(Color.WHITE)
+        }
+        header.addView(Button(this).apply {
+            text = "‹"; textSize = 25f; isAllCaps = false; setTextColor(green)
+            setBackgroundColor(Color.TRANSPARENT); setOnClickListener { showPointOfSale() }
+        }, LinearLayout.LayoutParams(dp(48), dp(48)))
+        header.addView(label("تسويات المخزون", 19f, green, true, Gravity.CENTER),
+            LinearLayout.LayoutParams(0, -2, 1f))
+        val content = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL; setPadding(dp(16), dp(16), dp(16), dp(24))
+        }
+        content.addView(label("تسجيل فرق الجرد", 21f, green, true, Gravity.RIGHT))
+        content.addView(label(
+            "أدخل الفرق موجباً للزيادة وسالباً للنقصان. تكلفة الزيادة مطلوبة بالدولار للوحدة، أما النقص فيُحسب تلقائياً وفق FIFO.",
+            13f, mutedColor, false, Gravity.RIGHT
+        ).apply { setPadding(0, dp(5), 0, dp(12)) })
+        val tracked = store.listProducts().filter { it.tracksInventory }
+        if (tracked.isEmpty()) {
+            content.addView(label("لا توجد أصناف تتبع المخزون.", 14f, mutedColor, false, Gravity.CENTER))
+        } else {
+            val productSpinner = Spinner(this)
+            productSpinner.adapter = ArrayAdapter(this, android.R.layout.simple_spinner_dropdown_item,
+                tracked.map { it.name + " • الرصيد " + it.stock })
+            val delta = fieldForDialog("فرق الكمية: مثال 3 أو -2",
+                type = InputType.TYPE_CLASS_NUMBER or InputType.TYPE_NUMBER_FLAG_SIGNED or InputType.TYPE_NUMBER_FLAG_DECIMAL)
+            val unitCost = fieldForDialog("تكلفة شراء الوحدة بالدولار (للزيادة فقط)",
+                type = InputType.TYPE_CLASS_NUMBER or InputType.TYPE_NUMBER_FLAG_DECIMAL)
+            val reason = fieldForDialog("سبب التسوية")
+            content.addView(label("الصنف", 13f, textColor, true, Gravity.RIGHT))
+            content.addView(productSpinner, fieldParams(dp(48), dp(5)))
+            content.addView(delta, fieldParams(dp(48), dp(8)))
+            content.addView(unitCost, fieldParams(dp(48), dp(8)))
+            content.addView(reason, fieldParams(dp(48), dp(8)))
+            content.addView(smallButton("اعتماد تسوية المخزون") {
+                try {
+                    val quantity = BigDecimal(delta.text.toString().trim().replace(',', '.'))
+                    val costText = unitCost.text.toString().trim().replace(',', '.')
+                    val cost = if (quantity.signum() > 0) {
+                        BigDecimal(costText).multiply(BigDecimal.valueOf(100L))
+                            .setScale(0, RoundingMode.HALF_UP).longValueExact()
+                    } else {
+                        require(costText.isEmpty()) { "لا تدخل تكلفة للنقص؛ تُحسب تلقائياً وفق FIFO" }
+                        null
+                    }
+                    val result = adjustments.postAdjustment(
+                        actor, tracked[productSpinner.selectedItemPosition].id, quantity,
+                        reason.text.toString(), UUID.randomUUID().toString(), cost
+                    )
+                    Toast.makeText(this, "تمت التسوية. الرصيد الجديد: " + result.quantityAfter, Toast.LENGTH_LONG).show()
+                    showInventoryAdjustments()
+                } catch (e: Exception) {
+                    Toast.makeText(this, e.message ?: "تعذر تسجيل التسوية", Toast.LENGTH_LONG).show()
+                }
+            }, fieldParams(dp(48), dp(10)))
+        }
+        content.addView(sectionHeading("آخر تسويات الجرد"))
+        adjustments.listRecent(50).forEach { item ->
+            val productName = tracked.firstOrNull { it.id == item.productId }?.name ?: item.productId
+            val card = LinearLayout(this).apply {
+                orientation = LinearLayout.VERTICAL; setPadding(dp(12), dp(10), dp(12), dp(10))
+                background = cardBackground()
+            }
+            card.addView(label(productName, 15f, green, true, Gravity.RIGHT))
+            card.addView(label(
+                (if (item.adjustmentType == "INCREASE") "زيادة " else "نقصان ") +
+                    item.quantity.toPlainString() + " • " + item.quantityBefore.toPlainString() +
+                    " ← " + item.quantityAfter.toPlainString(),
+                13f, textColor, true, Gravity.RIGHT
+            ))
+            card.addView(label("السبب: " + item.reason, 12f, mutedColor, false, Gravity.RIGHT))
+            content.addView(card, fieldParams(-2, dp(7)))
+        }
+        val scroll = ScrollView(this).apply { isFillViewport = true; addView(content) }
+        page.addView(header, matchWidth())
+        page.addView(scroll, LinearLayout.LayoutParams(-1, 0, 1f))
+        setContentView(page)
     }
 
     private fun showProductManagement() {
