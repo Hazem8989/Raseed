@@ -169,7 +169,7 @@ class PurchaseReturnRepository(context: Context) {
             db.insertOrThrow("audit_log",null,ContentValues().apply {
                 put("id",UUID.randomUUID().toString()); put("user_id",actorUserId)
                 put("action","PURCHASE_RETURN_POSTED"); put("entity_type","PURCHASE_RETURN"); put("entity_id",returnId)
-                put("after_json","""{"original_invoice_id":" + invoice.id + "","total_usd_cents":" + preview.totalUsdCents + ","supplier_credit_reduction_syp_minor":" + preview.supplierCreditReductionSypMinor + ","supplier_cash_refund_syp_minor":" + preview.supplierCashRefundSypMinor + "}""")
+                put("after_json","{\"original_invoice_id\":\""+invoice.id+"\",\"total_usd_cents\":"+preview.totalUsdCents+",\"supplier_credit_reduction_syp_minor\":"+preview.supplierCreditReductionSypMinor+",\"supplier_cash_refund_syp_minor\":"+preview.supplierCashRefundSypMinor+"}")
                 put("created_at",now)
             })
             db.insertOrThrow("operation_registry",null,ContentValues().apply {
