@@ -203,4 +203,33 @@ class SalesReturnRepositoryTest {
             throw AssertionError("Expected return permission denial")
         } catch (_: IllegalArgumentException) { }
     }
+
+    @Test
+    fun cashRefundCanBeSplitAcrossUsdAndSypAccountsWithoutRoundingDrift() {
+        val context = RuntimeEnvironment.getApplication()
+        val accounts = CashAccountRepository(context)
+        val sypAccountId = accounts.create(
+            adminId, "صندوق ليرة للمرتجعات ${UUID.randomUUID()}",
+            "CASH_BOX", "SYP", 10_000L
+        ).id
+        val draft = invoices.saveSalesDraft(
+            adminId, "return-split-draft", null, null, "2026-11-02", 0L, null,
+            listOf(InvoiceLineInput(productId, BigDecimal("3"), 250L))
+        )
+        assertTrue(invoices.postCashSale(adminId, draft.invoiceId, "return-split-sale", cashAccountId))
+        val result = returns.postSalesReturn(
+            adminId, draft.invoiceId, "return-split-op", "2026-11-02",
+            "رد موزع على حسابين",
+            listOf(SalesReturnItemInput(saleItemId(draft.invoiceId), BigDecimal.ONE)),
+            listOf(
+                SalesRefundAllocationInput(cashAccountId, 200L),
+                SalesRefundAllocationInput(sypAccountId, 7_500L)
+            )
+        )
+        assertEquals(250L, result.cashRefundUsdCents)
+        assertEquals(550L, accounts.balance(cashAccountId))
+        assertEquals(2_500L, accounts.balance(sypAccountId))
+        assertEquals(8.0, stock(), 0.000001)
+    }
+
 }
