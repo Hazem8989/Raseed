@@ -123,6 +123,10 @@ class OperatingExpenseRepository(context: Context) {
                 require(c.moveToFirst() && c.getInt(1)==1) { "الحساب المالي غير موجود أو موقوف" }
                 Triple(c.getString(0),c.getInt(1),c.getLong(2))
             }
+            require(!db.rawQuery(
+                "SELECT 1 FROM system_cash_account_roles WHERE role_key='SUPPLIER_ROLLOVER' AND account_id=?",
+                arrayOf(cashAccountId)
+            ).use { it.moveToFirst() }) { "لا يمكن تسجيل مصروف من مخصص دفعات الموردين اليومي" }
             val currency=account.first
             require(currency=="USD" || currency=="SYP") { "عملة الحساب غير مدعومة لتسجيل المصروف" }
             val rate=currentRate(db)
