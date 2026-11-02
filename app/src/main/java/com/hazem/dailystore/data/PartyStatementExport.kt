@@ -85,11 +85,11 @@ object PartyStatementExport {
         rows.add("التاريخ | النوع | المرجع | البيان | مدين | دائن | الرصيد")
         statement.entries.forEach { row ->
             val debit = if (statement.partyType == "CUSTOMER") money(row.debitUsdCents) + " USD"
-                else money(row.debitSypMinor) + " ل.س"
+                else syp(row.debitSypMinor) + " ل.س"
             val credit = if (statement.partyType == "CUSTOMER") money(row.creditUsdCents) + " USD"
-                else money(row.creditSypMinor) + " ل.س"
+                else syp(row.creditSypMinor) + " ل.س"
             val balance = if (statement.partyType == "CUSTOMER") money(row.balanceUsdCents) + " USD"
-                else money(row.balanceSypMinor) + " ل.س"
+                else syp(row.balanceSypMinor) + " ل.س"
             rows.add("${row.date} | ${row.type} | ${row.reference} | ${row.description} | $debit | $credit | $balance")
         }
         if (statement.unpricedEntryCount > 0) rows.add("تنبيه: ${statement.unpricedEntryCount} حركات بلا سعر صرف موثوق لم تدخل في الرصيد.")
@@ -157,8 +157,13 @@ object PartyStatementExport {
         zip.closeEntry()
     }
 
-    private fun csvCell(value: String): String = "\"" + value.replace("\"", "\"\"") + "\""
+    private fun csvCell(value: String): String {
+        val safe = if (value.trimStart().startsWith("=") || value.trimStart().startsWith("+") ||
+            value.trimStart().startsWith("-") || value.trimStart().startsWith("@")) "'$value" else value
+        return "\"" + safe.replace("\"", "\"\"") + "\""
+    }
     private fun xmlEscape(value: String): String = value.replace("&", "&amp;")
         .replace("<", "&lt;").replace(">", "&gt;").replace("\"", "&quot;").replace("'", "&apos;")
     private fun money(value: Long): String = String.format(java.util.Locale.US, "%.2f", value / 100.0)
+    private fun syp(value: Long): String = String.format(java.util.Locale.US, "%,d", value)
 }
