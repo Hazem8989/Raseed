@@ -56,7 +56,7 @@ class StoreRepositoryImportTest {
         db.delete("products", "name=?", arrayOf(productName))
         db.delete("audit_log", "user_id=?", arrayOf(actorId))
         db.delete("categories", "name=?", arrayOf(categoryName))
-        db.delete("users", "id=?", arrayOf(actorId))
+        // Keep the manager row until the isolated test database is closed; stock/audit rows may reference it.
     }
 
     @Test
