@@ -165,7 +165,7 @@ class InvoiceRepositoryTest {
         AppDatabase.resetForTests(RuntimeEnvironment.getApplication(), deleteExisting = false)
         database = AppDatabase.getInstance(RuntimeEnvironment.getApplication())
         val upgraded = database.writableDatabase
-        assertEquals(11, upgraded.version)
+        assertEquals(12, upgraded.version)
         val restored = upgraded.rawQuery(
             "SELECT posted_at,posted_operating_date FROM sales_invoices WHERE id=?",
             arrayOf(sale.invoiceId)
@@ -224,7 +224,7 @@ class InvoiceRepositoryTest {
         AppDatabase.resetForTests(RuntimeEnvironment.getApplication(), deleteExisting = false)
         database = AppDatabase.getInstance(RuntimeEnvironment.getApplication())
         val upgraded = database.writableDatabase
-        assertEquals(11, upgraded.version)
+        assertEquals(12, upgraded.version)
         upgraded.rawQuery(
             "SELECT remaining_quantity FROM inventory_cost_layers WHERE product_id=?",
             arrayOf(productId)
