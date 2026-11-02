@@ -32,7 +32,7 @@ data class DailyInventoryCapital(
  */
 class InventoryValuationRepository(context: Context) {
     private val db = AppDatabase.getInstance(context).readableDatabase
-    private data class Lot(var quantity: Double, val unitCostUsdCents: Long?)
+    private data class Lot(val layerId: String, var quantity: Double, val unitCostUsdCents: Long?)
 
     fun dailyCapital(): DailyInventoryCapital {
         val now = Date()
@@ -73,17 +73,19 @@ class InventoryValuationRepository(context: Context) {
         }
 
         db.rawQuery(
-            """SELECT m.product_id,m.warehouse_id,m.quantity_delta,m.unit_cost_usd_cents
+            """SELECT m.id,m.product_id,m.warehouse_id,m.quantity_delta,m.unit_cost_usd_cents,m.movement_type
                FROM inventory_movements m JOIN products p ON p.id=m.product_id
                WHERE p.track_inventory=1 AND m.created_at<=?
                ORDER BY m.created_at ASC,m.rowid ASC""".trimIndent(),
             arrayOf(cutoffText)
         ).use { cursor ->
             while (cursor.moveToNext()) {
-                val productId = cursor.getString(0)
-                val key = productId + "|" + cursor.getString(1)
-                val delta = cursor.getDouble(2)
-                val unitCost = cursor.getLong(3)
+                val movementId = cursor.getString(0)
+                val productId = cursor.getString(1)
+                val key = productId + "|" + cursor.getString(2)
+                val delta = cursor.getDouble(3)
+                val unitCost = cursor.getLong(4)
+                val movementType = cursor.getString(5)
                 val queue = layers.getOrPut(key) { mutableListOf() }
 
                 if (delta > 0.0) {
@@ -96,8 +98,32 @@ class InventoryValuationRepository(context: Context) {
                         if (deficits[key]!! <= 0.0000001) deficits.remove(key)
                     }
                     if (incoming > 0.0000001) {
-                        queue.add(Lot(incoming, unitCost.takeIf { it > 0L }))
+                        val layerId = db.rawQuery(
+                            "SELECT id FROM inventory_cost_layers WHERE source_movement_id=?",
+                            arrayOf(movementId)
+                        ).use { c -> if (c.moveToFirst()) c.getString(0) else movementId }
+                        queue.add(Lot(layerId, incoming, unitCost.takeIf { it > 0L }))
                     }
+                } else if (delta < 0.0 && movementType == "PURCHASE_RETURN") {
+                    // A supplier return must remove the exact source purchase layer,
+                    // not whichever layer happens to be oldest at the time of valuation.
+                    val allocations = mutableListOf<Pair<String,Double>>()
+                    db.rawQuery(
+                        "SELECT source_cost_layer_id,quantity FROM supplier_return_cost_allocations WHERE inventory_movement_id=?",
+                        arrayOf(movementId)
+                    ).use { c -> while (c.moveToNext()) allocations.add(c.getString(0) to c.getDouble(1)) }
+                    var unmatched = 0.0
+                    allocations.forEach { (sourceLayerId, quantity) ->
+                        val source = queue.firstOrNull { it.layerId == sourceLayerId }
+                        if (source == null || source.quantity + 0.0000001 < quantity) {
+                            unmatched += quantity
+                        } else {
+                            source.quantity -= quantity
+                            if (source.quantity <= 0.0000001) queue.remove(source)
+                        }
+                    }
+                    if (allocations.isEmpty()) unmatched = -delta
+                    if (unmatched > 0.0000001) deficits[key] = (deficits[key] ?: 0.0) + unmatched
                 } else if (delta < 0.0) {
                     var outgoing = -delta
                     while (outgoing > 0.0000001 && queue.isNotEmpty()) {
