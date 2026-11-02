@@ -85,6 +85,20 @@ class CustomerPaymentRepositoryTest {
     }
 
     @Test
+    fun usdCollectionReducesBothCustomerStatementBalances() {
+        val invoiceId = createCreditInvoice()
+        database.writableDatabase.execSQL(
+            "UPDATE cash_accounts SET opening_balance_minor=1000 WHERE id=?",
+            arrayOf(usdAccountId)
+        )
+        payments.addPayment(adminId, invoiceId, "customer-usd-statement-collection", usdAccountId, 100L)
+        val statement = PartyStatementRepository(RuntimeEnvironment.getApplication()).customer(customerId)
+        assertEquals(400L, statement.closingBalanceUsdCents)
+        assertEquals(60_000L, statement.closingBalanceSypMinor)
+        assertEquals(0, statement.unpricedEntryCount)
+    }
+
+    @Test
     fun sypCashCollectionIsFinancialOnlyAndIdempotent() {
         val invoiceId = createCreditInvoice()
         val stockBefore = stockQuantity()
