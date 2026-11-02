@@ -45,6 +45,7 @@ class AppDatabase private constructor(context: Context) :
             SCHEMA.forEach(db::execSQL)
             PermissionPolicy.ensureDefaults(db)
             ensureFifoSchema(db)
+            ensureSalesReturnSchema(db)
             db.execSQL(
                 """INSERT INTO app_settings(setting_key, setting_value, updated_at)
                    VALUES('base_currency', 'USD', strftime('%Y-%m-%dT%H:%M:%fZ','now'))"""
@@ -359,9 +360,61 @@ class AppDatabase private constructor(context: Context) :
                 db.endTransaction()
             }
         }
+        if (version < 13) {
+            db.beginTransaction()
+            try {
+                ensureSalesReturnSchema(db)
+                db.setTransactionSuccessful()
+                version = 13
+            } finally {
+                db.endTransaction()
+            }
+        }
         if (version != newVersion) {
             throw IllegalStateException("Missing database migration from version $version to $newVersion")
         }
+    }
+
+    private fun ensureSalesReturnSchema(db: SQLiteDatabase) {
+        fun ensureColumn(table: String, column: String, definition: String) {
+            var exists = false
+            db.rawQuery("PRAGMA table_info($table)", null).use { c ->
+                while (c.moveToNext()) if (c.getString(1) == column) exists = true
+            }
+            if (!exists) db.execSQL("ALTER TABLE $table ADD COLUMN $column $definition")
+        }
+        ensureColumn("returns", "operation_id", "TEXT")
+        ensureColumn("returns", "posted_at", "TEXT")
+        ensureColumn("returns", "cash_refund_usd_cents", "INTEGER NOT NULL DEFAULT 0 CHECK(cash_refund_usd_cents >= 0)")
+        ensureColumn("returns", "credit_reduction_usd_cents", "INTEGER NOT NULL DEFAULT 0 CHECK(credit_reduction_usd_cents >= 0)")
+        ensureColumn("returns", "returned_cogs_usd_cents", "INTEGER CHECK(returned_cogs_usd_cents IS NULL OR returned_cogs_usd_cents >= 0)")
+        ensureColumn("returns", "exchange_rate_syp_per_usd_milli", "INTEGER")
+        ensureColumn("return_items", "original_sales_item_id", "TEXT")
+        ensureColumn("return_items", "returned_cogs_usd_cents", "INTEGER CHECK(returned_cogs_usd_cents IS NULL OR returned_cogs_usd_cents >= 0)")
+        ensureColumn("return_refund_allocations", "operation_id", "TEXT")
+        ensureColumn("return_refund_allocations", "cash_transaction_id", "TEXT")
+        ensureColumn("return_refund_allocations", "refund_equivalent_syp_minor", "INTEGER NOT NULL DEFAULT 0 CHECK(refund_equivalent_syp_minor >= 0)")
+        db.execSQL("CREATE UNIQUE INDEX IF NOT EXISTS idx_returns_operation_id ON returns(operation_id) WHERE operation_id IS NOT NULL")
+        db.execSQL("CREATE INDEX IF NOT EXISTS idx_returns_original_invoice ON returns(original_invoice_type,original_invoice_id,status)")
+        db.execSQL("CREATE INDEX IF NOT EXISTS idx_return_items_original_sales_item ON return_items(original_sales_item_id)")
+        db.execSQL("CREATE UNIQUE INDEX IF NOT EXISTS idx_return_refund_operation_id ON return_refund_allocations(operation_id) WHERE operation_id IS NOT NULL")
+        db.execSQL("CREATE UNIQUE INDEX IF NOT EXISTS idx_return_refund_cash_transaction ON return_refund_allocations(cash_transaction_id) WHERE cash_transaction_id IS NOT NULL")
+        db.execSQL("""
+            CREATE TABLE IF NOT EXISTS return_cost_allocations (
+                id TEXT PRIMARY KEY NOT NULL,
+                return_item_id TEXT NOT NULL,
+                source_sale_allocation_id TEXT NOT NULL,
+                inventory_movement_id TEXT,
+                quantity REAL NOT NULL CHECK(quantity > 0),
+                unit_cost_usd_cents INTEGER CHECK(unit_cost_usd_cents IS NULL OR unit_cost_usd_cents > 0),
+                cost_usd_cents INTEGER CHECK(cost_usd_cents IS NULL OR cost_usd_cents >= 0),
+                created_at TEXT NOT NULL,
+                FOREIGN KEY(return_item_id) REFERENCES return_items(id) ON UPDATE RESTRICT ON DELETE RESTRICT,
+                FOREIGN KEY(source_sale_allocation_id) REFERENCES sales_item_cost_allocations(id) ON UPDATE RESTRICT ON DELETE RESTRICT,
+                FOREIGN KEY(inventory_movement_id) REFERENCES inventory_movements(id) ON UPDATE RESTRICT ON DELETE RESTRICT
+            )
+        """.trimIndent())
+        db.execSQL("CREATE INDEX IF NOT EXISTS idx_return_cost_source ON return_cost_allocations(source_sale_allocation_id)")
     }
 
     private fun ensureFifoSchema(db: SQLiteDatabase) {
@@ -453,7 +506,7 @@ class AppDatabase private constructor(context: Context) :
 
     companion object {
         const val DATABASE_NAME = "the_daily_shop.db"
-        const val DATABASE_VERSION = 12
+        const val DATABASE_VERSION = 13
 
         @Volatile
         private var INSTANCE: AppDatabase? = null
