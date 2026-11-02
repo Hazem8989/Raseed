@@ -103,6 +103,8 @@ class SyncProtocolRepository(private val context: Context, private val credentia
         require(remoteDeviceId != SyncDeviceIdentity.getOrCreate(context)) { "لا يمكن تسجيل الجهاز الأساسي كجهاز ثانوي" }
         require(invitationToken.length in 32..128) { "رمز الاقتران غير صالح" }
         val db = database.writableDatabase
+        val secretBytes = ByteArray(32)
+        var credentialSaved = false
         db.beginTransaction()
         try {
             requirePrimaryManager(db, actorUserId)
@@ -114,6 +116,11 @@ class SyncProtocolRepository(private val context: Context, private val credentia
             ).use { if (it.moveToFirst()) it.getString(0) else null }
                 ?: throw IllegalArgumentException("رمز الاقتران غير صالح أو منتهي الصلاحية أو مستخدم سابقاً")
             val credential = randomToken()
+            val decodedCredential = Base64.decode(
+                credential, Base64.URL_SAFE or Base64.NO_WRAP or Base64.NO_PADDING
+            )
+            require(decodedCredential.size == 32)
+            decodedCredential.copyInto(secretBytes)
             val existing = db.rawQuery(
                 "SELECT status FROM sync_devices WHERE device_id=?", arrayOf(remoteDeviceId)
             ).use { if (it.moveToFirst()) it.getString(0) else null }
@@ -138,6 +145,8 @@ class SyncProtocolRepository(private val context: Context, private val credentia
             db.insertWithOnConflict("sync_cursors", null, ContentValues().apply {
                 put("device_id", remoteDeviceId); put("last_sequence", 0L); put("updated_at", now)
             }, SQLiteDatabase.CONFLICT_REPLACE)
+            credentialVault.save(remoteDeviceId, secretBytes)
+            credentialSaved = true
             audit(db, actorUserId, "SYNC_DEVICE_ENROLLED", remoteDeviceId, null,
                 JSONObject().put("display_name", cleanName).put("device_role", "SECONDARY").toString(), now)
             db.setTransactionSuccessful()
@@ -146,7 +155,13 @@ class SyncProtocolRepository(private val context: Context, private val credentia
                 state(db, "store_id") ?: error("معرّف المتجر غير مهيأ"),
                 SyncDeviceIdentity.getOrCreate(context)
             )
-        } finally { db.endTransaction() }
+        } catch (error: Exception) {
+            if (credentialSaved) credentialVault.remove(remoteDeviceId)
+            throw error
+        } finally {
+            db.endTransaction()
+            secretBytes.fill(0)
+        }
     }
 
     /**
@@ -283,6 +298,66 @@ class SyncProtocolRepository(private val context: Context, private val credentia
     fun isConfiguredSecondary(): Boolean =
         state(database.readableDatabase, "local_device_role") == "SECONDARY" &&
             !state(database.readableDatabase, "authority_device_id").isNullOrBlank()
+
+    fun authenticatedOutbox(operationId: String, recipientDeviceId: String): AuthenticatedSyncEnvelope {
+        require(operationId.isNotBlank() && recipientDeviceId.isNotBlank())
+        val secret = credentialVault.load(recipientDeviceId)
+            ?: throw IllegalArgumentException("لا توجد بيانات اعتماد آمنة لهذا الجهاز")
+        try {
+            val storeId = state(database.readableDatabase, "store_id")
+                ?: error("معرّف المتجر غير مهيأ")
+            val envelope = database.readableDatabase.rawQuery(
+                """SELECT operation_id,sequence_number,origin_device_id,actor_user_id,
+                          operation_type,entity_type,entity_id,payload_json,created_at
+                   FROM sync_operation_envelopes WHERE operation_id=?""".trimIndent(),
+                arrayOf(operationId)
+            ).use { c ->
+                require(c.moveToFirst()) { "عملية المزامنة غير موجودة" }
+                SyncEnvelopeSecurity.create(
+                    storeId, c.getString(0), c.getLong(1), c.getString(2), c.getString(3),
+                    c.getString(4), c.getString(5), c.getString(6), 0L,
+                    c.getString(7), c.getString(8), secret
+                )
+            }
+            return envelope
+        } finally { secret.fill(0) }
+    }
+
+    fun verifyIncomingFromPrimary(encodedEnvelope: String): AuthenticatedSyncEnvelope {
+        val envelope = SyncEnvelopeSecurity.decode(encodedEnvelope)
+        val db = database.readableDatabase
+        require(state(db, "local_device_role") == "SECONDARY") { "هذا الجهاز ليس جهازاً ثانوياً مسجلاً" }
+        require(envelope.originDeviceId == state(db, "authority_device_id")) {
+            "مصدر الرسالة ليس الجهاز الأساسي المعتمد"
+        }
+        require(envelope.storeId == state(db, "store_id")) { "الرسالة تخص متجراً آخر" }
+        val secret = credentialVault.load(SyncDeviceIdentity.getOrCreate(context))
+            ?: throw IllegalArgumentException("بيانات اعتماد الجهاز الأساسي غير متوفرة")
+        try {
+            require(SyncEnvelopeSecurity.verify(envelope, secret)) { "فشل التحقق من توقيع المزامنة" }
+            return envelope
+        } finally { secret.fill(0) }
+    }
+
+    fun verifyIncomingFromSecondary(encodedEnvelope: String): AuthenticatedSyncEnvelope {
+        val envelope = SyncEnvelopeSecurity.decode(encodedEnvelope)
+        val db = database.readableDatabase
+        require(state(db, "authority_device_id") == SyncDeviceIdentity.getOrCreate(context)) {
+            "هذا الهاتف ليس الجهاز الأساسي"
+        }
+        require(envelope.storeId == state(db, "store_id")) { "الرسالة تخص متجراً آخر" }
+        val enrolled = db.rawQuery(
+            "SELECT 1 FROM sync_devices WHERE device_id=? AND device_role='SECONDARY' AND status='ACTIVE'",
+            arrayOf(envelope.originDeviceId)
+        ).use { it.moveToFirst() }
+        require(enrolled) { "الجهاز المرسل غير مسجل أو تم إلغاء تسجيله" }
+        val secret = credentialVault.load(envelope.originDeviceId)
+            ?: throw IllegalArgumentException("بيانات اعتماد الجهاز المرسل غير متوفرة")
+        try {
+            require(SyncEnvelopeSecurity.verify(envelope, secret)) { "فشل التحقق من توقيع الجهاز المرسل" }
+            return envelope
+        } finally { secret.fill(0) }
+    }
 
     fun authenticateDevice(deviceId: String, credential: String): Boolean {
         if (deviceId.isBlank() || credential.isBlank()) return false
