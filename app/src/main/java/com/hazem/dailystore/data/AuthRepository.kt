@@ -16,6 +16,11 @@ import javax.crypto.spec.PBEKeySpec
 
 data class AuthenticatedUser(val id: String, val username: String, val displayName: String, val roleKey: String, val mustChangePassword: Boolean = false)
 
+data class ManagedUserSummary(
+    val id: String, val username: String, val displayName: String,
+    val roleKey: String, val isActive: Boolean, val mustChangePassword: Boolean
+)
+
 /** Database-backed authentication and role checks. Passwords are never stored in plain text. */
 class AuthRepository(context: Context) {
     private val database = AppDatabase.getInstance(context)
@@ -117,6 +122,64 @@ class AuthRepository(context: Context) {
         password.length >= 10 &&
             password.any(Char::isLetter) &&
             password.any(Char::isDigit)
+
+    fun listUsers(): List<ManagedUserSummary> {
+        val result = mutableListOf<ManagedUserSummary>()
+        database.readableDatabase.rawQuery(
+            "SELECT id,username,display_name,role_key,is_active,must_change_password FROM users ORDER BY created_at,id",
+            null
+        ).use { c ->
+            while (c.moveToNext()) result.add(ManagedUserSummary(
+                c.getString(0), c.getString(1), c.getString(2), c.getString(3),
+                c.getInt(4) == 1, c.getInt(5) == 1
+            ))
+        }
+        return result
+    }
+
+    fun setUserActive(actorUserId: String, targetUserId: String, active: Boolean) {
+        require(targetUserId.isNotBlank()) { "معرّف المستخدم مطلوب" }
+        val db = database.writableDatabase
+        db.beginTransaction()
+        try {
+            PermissionPolicy.require(db, actorUserId, PermissionPolicy.USERS_MANAGE)
+            require(actorUserId != targetUserId || active) {
+                "لا يمكن إيقاف حسابك أثناء استخدامه؛ سجّل الخروج من الحساب الآخر أولاً"
+            }
+            val target = db.rawQuery(
+                "SELECT username,role_key,is_active FROM users WHERE id=?",
+                arrayOf(targetUserId)
+            ).use { c ->
+                require(c.moveToFirst()) { "المستخدم غير موجود" }
+                Triple(c.getString(0), c.getString(1), c.getInt(2) == 1)
+            }
+            if (target.second == "ADMIN" && target.third && !active) {
+                val otherAdmins = db.rawQuery(
+                    "SELECT COUNT(*) FROM users WHERE role_key='ADMIN' AND is_active=1 AND id<>?",
+                    arrayOf(targetUserId)
+                ).use { c -> c.moveToFirst(); c.getInt(0) }
+                require(otherAdmins > 0) { "لا يمكن إيقاف آخر حساب مدير نشط" }
+            }
+            if (target.third != active) {
+                val now = timestamp()
+                require(db.update(
+                    "users", ContentValues().apply {
+                        put("is_active", if (active) 1 else 0)
+                        put("updated_at", now)
+                    }, "id=?", arrayOf(targetUserId)
+                ) == 1) { "تعذر تحديث حالة المستخدم" }
+                db.insertOrThrow("audit_log", null, ContentValues().apply {
+                    put("id", UUID.randomUUID().toString()); put("user_id", actorUserId)
+                    put("action", if (active) "USER_ACTIVATED" else "USER_DEACTIVATED")
+                    put("entity_type", "USER"); put("entity_id", targetUserId)
+                    put("before_json", "{\\"is_active\\":${target.third}}")
+                    put("after_json", "{\\"is_active\\":$active}")
+                    put("created_at", now)
+                })
+            }
+            db.setTransactionSuccessful()
+        } finally { db.endTransaction() }
+    }
 
     fun createUser(
         actorRole: String, actorUserId: String, username: String, displayName: String,
