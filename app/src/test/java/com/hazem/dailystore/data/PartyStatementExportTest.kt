@@ -36,6 +36,16 @@ class PartyStatementExportTest {
         assertTrue(csv.contains("1250"))
     }
 
+    @Test fun csvProtectsFormulaTextWithoutCorruptingNegativeNumericBalances() {
+        val base = statement()
+        val unsafe = base.copy(entries = listOf(base.entries.first().copy(
+            reference = "=1+1", balanceUsdCents = -100L
+        )))
+        val csv = String(PartyStatementExport.csv(unsafe), Charsets.UTF_8)
+        assertTrue(csv.contains("'=1+1"))
+        assertTrue(csv.contains("\"-100\""))
+    }
+
     @Test fun xlsxIsAValidOpenXmlZipWithRightToLeftSheet() {
         val bytes = PartyStatementExport.xlsx(statement())
         assertEquals('P'.code.toByte(), bytes[0])
