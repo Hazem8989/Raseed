@@ -81,4 +81,56 @@ class AuthRepositoryTest {
             assertEquals(1, it.getInt(0))
         }
     }
+
+    @Test fun cashierDefaultsAllowSalesAndCustomerCollectionButDenyPurchasingAndCatalogChanges() {
+        val admin = auth.authenticate("admin", "1234")!!
+        auth.changePassword(admin.id, "1234", "ManagerPass2026")
+        val cashierId = auth.createUser(admin.roleKey, admin.id,
+            "cashierperm", "موظف صلاحيات", "Cashier5678", "CASHIER")
+        auth.changePassword(cashierId, "Cashier5678", "CashierPass2026")
+        val db = database.writableDatabase
+
+        PermissionPolicy.require(db, cashierId, PermissionPolicy.SALES_CHECKOUT)
+        PermissionPolicy.require(db, cashierId, PermissionPolicy.CUSTOMERS_READ)
+        PermissionPolicy.require(db, cashierId, PermissionPolicy.CUSTOMERS_CREATE)
+        PermissionPolicy.require(db, cashierId, PermissionPolicy.CUSTOMERS_COLLECT)
+
+        listOf(
+            PermissionPolicy.PURCHASES_MANAGE,
+            PermissionPolicy.SUPPLIERS_MANAGE,
+            PermissionPolicy.CATALOG_MANAGE,
+            PermissionPolicy.ACCOUNTS_MANAGE,
+            PermissionPolicy.RETURNS_PROCESS,
+            PermissionPolicy.INVENTORY_ADJUST,
+            PermissionPolicy.EXPENSES_MANAGE,
+            PermissionPolicy.BACKUP_MANAGE
+        ).forEach { key ->
+            try {
+                PermissionPolicy.require(db, cashierId, key)
+                fail("Cashier unexpectedly received $key")
+            } catch (_: IllegalArgumentException) { }
+        }
+    }
+
+    @Test fun managerCanGrantAndRevokeCashierPermissionWithAuditTrail() {
+        val admin = auth.authenticate("admin", "1234")!!
+        auth.changePassword(admin.id, "1234", "ManagerPass2026")
+        val cashierId = auth.createUser(admin.roleKey, admin.id,
+            "cashiergrant", "موظف قابل للصلاحيات", "Cashier5678", "CASHIER")
+        auth.changePassword(cashierId, "Cashier5678", "CashierPass2026")
+        val db = database.writableDatabase
+
+        PermissionPolicy.setRolePermission(db, admin.id, "CASHIER", PermissionPolicy.PURCHASES_MANAGE, true)
+        PermissionPolicy.require(db, cashierId, PermissionPolicy.PURCHASES_MANAGE)
+        PermissionPolicy.setRolePermission(db, admin.id, "CASHIER", PermissionPolicy.PURCHASES_MANAGE, false)
+        try {
+            PermissionPolicy.require(db, cashierId, PermissionPolicy.PURCHASES_MANAGE)
+            fail("Revoked permission must be denied")
+        } catch (_: IllegalArgumentException) { }
+
+        db.rawQuery(
+            "SELECT COUNT(*) FROM audit_log WHERE user_id=? AND action='ROLE_PERMISSION_CHANGE'",
+            arrayOf(admin.id)
+        ).use { assertTrue(it.moveToFirst()); assertEquals(2, it.getInt(0)) }
+    }
 }
