@@ -47,7 +47,7 @@ class InvoiceRepository(context: Context) {
         notes: String?,
         lines: List<InvoiceLineInput>
     ): InvoiceSaveResult = saveDraft(
-        "PURCHASE", actorUserId, operationId, invoiceId, supplierId,
+        "PURCHASE", actorUserId, operationId, invoiceId, supplierId, invoiceDate,
         discountUsdCents, notes, lines, null
     )
 
