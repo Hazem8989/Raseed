@@ -312,4 +312,20 @@ class CustomerPaymentRepositoryTest {
             "SELECT COUNT(*) FROM inventory_movements WHERE source_id=? AND source_type='SALES_INVOICE'",
             arrayOf(invoiceId)
         ).use { it.moveToFirst(); it.getInt(0) }
+
+    @Test
+    fun primaryCustomerCollectionIsAddedToOutboxAtomically() {
+        val context = RuntimeEnvironment.getApplication()
+        val sync = SyncProtocolRepository(context)
+        sync.configureAsPrimary(adminId, "الهاتف الرئيسي")
+        val before = sync.pendingOutbox().size
+        val invoiceId = createCreditInvoice()
+        payments.addPayment(adminId, invoiceId, "sync-customer-collection-" + UUID.randomUUID(),
+            cashDrawerId, 15000L, "تحصيل للمزامنة")
+        val queued = sync.pendingOutbox()
+        assertEquals(before + 2, queued.size)
+        assertTrue(queued.any { it.entityType == "CUSTOMER_PAYMENT" &&
+            it.operationType == "CUSTOMER_CREDIT_COLLECTION" })
+    }
+
 }
