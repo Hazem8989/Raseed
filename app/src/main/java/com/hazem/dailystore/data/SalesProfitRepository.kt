@@ -17,17 +17,21 @@ data class SalesProfitSummary(
     val returnCount: Int = 0,
     val returnUsdCents: Long = 0L,
     val returnedCogsUsdCents: Long = 0L,
-    val uncostedReturnCount: Int = 0
+    val uncostedReturnCount: Int = 0,
+    val operatingExpenseCount: Int = 0,
+    val operatingExpensesUsdCents: Long = 0L
 ) {
     val netRevenueUsdCents: Long get() = Math.subtractExact(revenueUsdCents, returnUsdCents)
     val netCogsUsdCents: Long get() = Math.subtractExact(cogsUsdCents, returnedCogsUsdCents)
+    val netOperatingProfitUsdCents: Long
+        get() = if (isComplete) Math.subtractExact(grossProfitUsdCents, operatingExpensesUsdCents) else 0L
 }
 
 /**
  * Gross trading result from posted sales and their immutable FIFO allocations.
  * Collections on credit invoices do not create revenue a second time.
- * Posted returns reduce revenue and reverse the returned portion of FIFO COGS.
- * Expenses and other operating costs are not included.
+ * Posted sales returns reverse revenue and FIFO COGS; operating expenses are
+ * converted at their posting-time exchange rate and deducted from gross profit.
  */
 class SalesProfitRepository(context: Context) {
     private val db = AppDatabase.getInstance(context).readableDatabase
@@ -98,13 +102,20 @@ class SalesProfitRepository(context: Context) {
         // Returns are recognized on their own return date, even if the original sale
         // belongs to an earlier reporting period. A valid COGS reversal can therefore
         // exceed this period's sales COGS and produce a negative net COGS for the period.
+        val expenseWhere = if (fromDate == null) "" else " WHERE expense_date>=? AND expense_date<=?"
+        val expenseArgs = if (fromDate == null) null else arrayOf(fromDate, throughDate!!)
+        val expenseTotals = db.rawQuery(
+            "SELECT COUNT(*),COALESCE(SUM(amount_usd_cents),0) FROM operating_expenses$expenseWhere",
+            expenseArgs
+        ).use { c -> c.moveToFirst(); c.getInt(0) to c.getLong(1) }
         val complete = uncosted == 0 && uncostedReturns == 0
         val netRevenue = Math.subtractExact(revenue, returnRevenue)
         val netCogs = Math.subtractExact(knownCogs, returnedCogs)
         return SalesProfitSummary(
             fromDate, throughDate, count, revenue, knownCogs,
             if (complete) Math.subtractExact(netRevenue, netCogs) else 0L,
-            uncosted, complete, returnCount, returnRevenue, returnedCogs, uncostedReturns
+            uncosted, complete, returnCount, returnRevenue, returnedCogs, uncostedReturns,
+            expenseTotals.first, expenseTotals.second
         )
     }
 
