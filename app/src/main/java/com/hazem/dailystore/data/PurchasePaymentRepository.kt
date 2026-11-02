@@ -57,7 +57,8 @@ class PurchasePaymentRepository(context: Context) {
                 val outstandingSyp=(totalSyp-paidSyp-supplierCreditSyp).coerceAtLeast(0L)
                 val paidUsd=if(rate>0L) CurrencyConverter.sypToUsdCents(paidSyp,rate)
                     else paidUsdCentsLegacy(database.readableDatabase,id)
-                val outstandingUsd=(totalUsd-paidUsd).coerceAtLeast(0L)
+                val creditUsd=if(rate>0L) CurrencyConverter.sypToUsdCents(supplierCreditSyp,rate) else 0L
+                val outstandingUsd=(totalUsd-paidUsd-creditUsd).coerceAtLeast(0L)
                 val paymentStatus=when {
                     invoiceStatus=="CANCELLED" -> "CANCELLED"
                     invoiceStatus=="DRAFT" -> "DRAFT"
