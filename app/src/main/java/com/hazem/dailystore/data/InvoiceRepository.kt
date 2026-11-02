@@ -195,6 +195,10 @@ class InvoiceRepository(context: Context) {
         val payloadHash = hash(if (cashAccountId == null) "$type|$invoiceId" else "$type|$invoiceId|$cashAccountId")
         db.beginTransaction()
         try {
+            PermissionPolicy.require(
+                db, actorUserId,
+                if (type == "PURCHASE") PermissionPolicy.PURCHASES_MANAGE else PermissionPolicy.SALES_CHECKOUT
+            )
             findOperation(db, operationId)?.let { existing ->
                 require(existing.type == operationType && existing.payloadHash == payloadHash && existing.reference == invoiceId) {
                     "معرّف الاعتماد مستخدم لعملية مختلفة"
