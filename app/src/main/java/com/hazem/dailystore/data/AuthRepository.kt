@@ -172,8 +172,8 @@ class AuthRepository(context: Context) {
                     put("id", UUID.randomUUID().toString()); put("user_id", actorUserId)
                     put("action", if (active) "USER_ACTIVATED" else "USER_DEACTIVATED")
                     put("entity_type", "USER"); put("entity_id", targetUserId)
-                    put("before_json", "{\\"is_active\\":${target.third}}")
-                    put("after_json", "{\\"is_active\\":$active}")
+                    put("before_json", org.json.JSONObject().put("is_active", target.third).toString())
+                    put("after_json", org.json.JSONObject().put("is_active", active).toString())
                     put("created_at", now)
                 })
             }
