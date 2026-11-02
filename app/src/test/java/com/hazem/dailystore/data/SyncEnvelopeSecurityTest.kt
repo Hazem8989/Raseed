@@ -3,6 +3,7 @@ package com.hazem.dailystore.data
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
+import org.json.JSONObject
 import org.junit.Assert.fail
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -67,5 +68,12 @@ class SyncEnvelopeSecurityTest {
         ))
         assertFalse(SyncEnvelopeSecurity.verify(signed.copy(sequenceNumber = 2L), secret))
         assertFalse(SyncEnvelopeSecurity.verify(signed.copy(entityType = "USERS"), secret))
+
+        // Decoding must preserve received bytes; canonicalizing here would hide tampering.
+        val nonCanonicalWire = JSONObject(SyncEnvelopeSecurity.encode(signed))
+            .put("payload_json", """{"z":3,"a":{"y":2,"x":1}}""").toString()
+        val decodedNonCanonical = SyncEnvelopeSecurity.decode(nonCanonicalWire)
+        assertEquals("""{"z":3,"a":{"y":2,"x":1}}""", decodedNonCanonical.payloadJson)
+        assertFalse(SyncEnvelopeSecurity.verify(decodedNonCanonical, secret))
     }
 }
