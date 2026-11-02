@@ -2036,7 +2036,7 @@ class MainActivity : Activity() {
                     textSize = 14f
                     setTextColor(textColor)
                     isChecked = permission.allowed
-                    setOnCheckedChangeListener { button, checked ->
+                    setOnCheckedChangeListener { _, checked ->
                         try {
                             PermissionPolicy.setRolePermission(
                                 AppDatabase.getInstance(this@MainActivity).writableDatabase,
@@ -2044,22 +2044,8 @@ class MainActivity : Activity() {
                             )
                             Toast.makeText(this@MainActivity, "تم تحديث صلاحية الموظف", Toast.LENGTH_SHORT).show()
                         } catch (e: Exception) {
-                            button.setOnCheckedChangeListener(null)
-                            button.isChecked = permission.allowed
-                            button.setOnCheckedChangeListener { view, value ->
-                                runCatching {
-                                    PermissionPolicy.setRolePermission(
-                                        AppDatabase.getInstance(this@MainActivity).writableDatabase,
-                                        actor, "CASHIER", permission.key, value
-                                    )
-                                }.onFailure {
-                                    view.setOnCheckedChangeListener(null)
-                                    view.isChecked = !value
-                                    view.setOnCheckedChangeListener(null)
-                                    Toast.makeText(this@MainActivity, it.message ?: "تعذر تغيير الصلاحية", Toast.LENGTH_LONG).show()
-                                }
-                            }
                             Toast.makeText(this@MainActivity, e.message ?: "تعذر تغيير الصلاحية", Toast.LENGTH_LONG).show()
+                            showUserManagement()
                         }
                     }
                 }
