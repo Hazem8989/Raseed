@@ -38,8 +38,8 @@ class TwoPeerSyncSimulationTest {
         context.deleteDatabase(SECONDARY_DB)
         primary = PeerDb(context, PRIMARY_DB)
         secondary = PeerDb(context, SECONDARY_DB)
-        primary.initialize(storeId, primaryId, secondaryId, secret, initialStock = 5)
-        secondary.initialize(storeId, secondaryId, primaryId, secret, initialStock = 0)
+        primary.initialize(storeId, primaryId, secondaryId, secondaryId, secret, initialStock = 5)
+        secondary.initialize(storeId, secondaryId, primaryId, secondaryId, secret, initialStock = 0)
     }
 
     @After fun tearDown() {
@@ -117,7 +117,13 @@ class TwoPeerSyncSimulationTest {
     @Test fun invalidCredentialWrongStoreAndRevokedPeerCannotPost() {
         val envelope = secondary.queueSale("op-auth", 1L, 1, 300L)
         assertEquals("AUTHENTICATION_FAILED", primary.receive(envelope, ByteArray(32) { 99 }).status)
-        assertEquals("WRONG_STORE", primary.receive(envelope.copy(storeId = "other-store"), secret).status)
+        val foreignStoreEnvelope = SyncEnvelopeSecurity.create(
+            "other-store", envelope.operationId, envelope.sequenceNumber, secondaryId, actorId,
+            "CREATE", "SALES_INVOICE", "sale-foreign-store", 0L,
+            """{"quantity":1,"total_cents":300}""",
+            "2026-11-03T12:00:00Z", secret
+        )
+        assertEquals("WRONG_STORE", primary.receive(foreignStoreEnvelope, secret).status)
         primary.revoke(secondaryId)
         assertEquals("DEVICE_REVOKED", primary.receive(envelope, secret).status)
         assertEquals(0, primary.effectCount())
@@ -174,14 +180,14 @@ class TwoPeerSyncSimulationTest {
         }
         override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) = Unit
 
-        fun initialize(store: String, localId: String, peerId: String, credential: ByteArray, initialStock: Int) {
+        fun initialize(store: String, localId: String, peerId: String, secondaryDeviceId: String, credential: ByteArray, initialStock: Int) {
             val db = writableDatabase
             db.beginTransaction()
             try {
                 db.insertOrThrow("peer_meta", null, ContentValues().apply { put("k", "store_id"); put("v", store) })
                 db.insertOrThrow("peer_meta", null, ContentValues().apply { put("k", "local_device_id"); put("v", localId) })
                 db.insertOrThrow("peer_meta", null, ContentValues().apply { put("k", "primary_device_id"); put("v", if (localId == primaryId) localId else peerId) })
-                db.insertOrThrow("device_cursors", null, ContentValues().apply { put("device_id", secondaryId); put("last_sequence", 0L) })
+                db.insertOrThrow("device_cursors", null, ContentValues().apply { put("device_id", secondaryDeviceId); put("last_sequence", 0L) })
                 db.insertOrThrow("enrolled_devices", null, ContentValues().apply {
                     put("device_id", peerId); put("secret", credential); put("active", 1)
                 })
