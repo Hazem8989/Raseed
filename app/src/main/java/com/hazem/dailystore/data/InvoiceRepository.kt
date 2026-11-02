@@ -39,7 +39,7 @@ class InvoiceRepository(context: Context) {
     private val database = AppDatabase.getInstance(context)
 
     fun savePurchaseDraft(
-        operationId: String,
+        actorUserId: String, operationId: String,
         invoiceId: String?,
         supplierId: String?,
         invoiceDate: String,
@@ -47,12 +47,12 @@ class InvoiceRepository(context: Context) {
         notes: String?,
         lines: List<InvoiceLineInput>
     ): InvoiceSaveResult = saveDraft(
-        "PURCHASE", operationId, invoiceId, supplierId, invoiceDate,
+        "PURCHASE", actorUserId, operationId, invoiceId, supplierId,
         discountUsdCents, notes, lines, null
     )
 
     fun saveSalesDraft(
-        operationId: String,
+        actorUserId: String, operationId: String,
         invoiceId: String?,
         customerId: String?,
         invoiceDate: String,
@@ -66,13 +66,14 @@ class InvoiceRepository(context: Context) {
             "يجب تحديد الزبون للبيع الآجل"
         }
         return saveDraft(
-            "SALE", operationId, invoiceId, customerId, invoiceDate,
+            "SALE", actorUserId, operationId, invoiceId, customerId, invoiceDate,
             discountUsdCents, notes, lines, saleType
         )
     }
 
     private fun saveDraft(
         type: String,
+        actorUserId: String,
         operationId: String,
         invoiceId: String?,
         partyId: String?,
@@ -93,6 +94,10 @@ class InvoiceRepository(context: Context) {
         val payloadHash = hashPayload(type, invoiceId, partyId, invoiceDate, discountUsdCents, notes, lines, saleType)
         db.beginTransaction()
         try {
+            PermissionPolicy.require(
+                db, actorUserId,
+                if (type == "PURCHASE") PermissionPolicy.PURCHASES_MANAGE else PermissionPolicy.SALES_CHECKOUT
+            )
             findOperation(db, operationId)?.let { existing ->
                 require(existing.type == "SAVE_${type}_DRAFT" && existing.payloadHash == payloadHash) {
                     "معرّف العملية مستخدم لنوع أو بيانات مختلفة"
@@ -159,19 +164,19 @@ class InvoiceRepository(context: Context) {
         }
     }
 
-    fun postPurchase(invoiceId: String, operationId: String): Boolean =
-        postInvoice("PURCHASE", invoiceId, operationId)
+    fun postPurchase(actorUserId: String, invoiceId: String, operationId: String): Boolean =
+        postInvoice("PURCHASE", actorUserId, invoiceId, operationId)
 
-    fun postSale(invoiceId: String, operationId: String): Boolean =
-        postInvoice("SALE", invoiceId, operationId, null)
+    fun postSale(actorUserId: String, invoiceId: String, operationId: String): Boolean =
+        postInvoice("SALE", actorUserId, invoiceId, operationId, null)
 
     /**
      * Completes a CASH sale and its full receipt in the same transaction as stock posting.
      * A cash sale cannot be posted without choosing the account that receives the money.
      */
-    fun postCashSale(invoiceId: String, operationId: String, cashAccountId: String): Boolean {
+    fun postCashSale(actorUserId: String, invoiceId: String, operationId: String, cashAccountId: String): Boolean {
         require(cashAccountId.isNotBlank()) { "يجب اختيار الصندوق أو المحفظة المستلمة" }
-        return postInvoice("SALE", invoiceId, operationId, cashAccountId)
+        return postInvoice("SALE", actorUserId, invoiceId, operationId, cashAccountId)
     }
 
     private data class CashSaleReceipt(
@@ -179,7 +184,7 @@ class InvoiceRepository(context: Context) {
     )
 
     private fun postInvoice(
-        type: String, invoiceId: String, operationId: String, cashAccountId: String? = null
+        type: String, actorUserId: String, invoiceId: String, operationId: String, cashAccountId: String? = null
     ): Boolean {
         require(invoiceId.isNotBlank() && operationId.isNotBlank()) { "بيانات اعتماد الفاتورة غير مكتملة" }
         val db = database.writableDatabase
