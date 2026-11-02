@@ -67,6 +67,17 @@ class PurchaseReturnRepositoryTest {
         PurchaseReturnItemInput(purchaseItemId,BigDecimal(quantity))
     )
 
+    @Test fun supplierStatementReconcilesPurchaseAndReturnCredit() {
+        returns.postPurchaseReturn(adminId,invoiceId,"supplier-statement-return-"+UUID.randomUUID(),
+            "2026-11-02","مرتجع لاختبار كشف الحساب",item("3"),emptyList())
+        val statement=PartyStatementRepository(RuntimeEnvironment.getApplication()).supplier(supplierId)
+        assertEquals(2,statement.entries.size)
+        assertEquals(10000L,statement.entries.first { it.type=="PURCHASE_INVOICE" }.debitUsdCents)
+        assertEquals(300000L,statement.entries.first { it.type=="PURCHASE_RETURN" }.creditSypMinor)
+        assertEquals(700000L,statement.closingBalanceSypMinor)
+        assertEquals(0,statement.unpricedEntryCount)
+    }
+
     @Test fun unpaidReturnReducesSupplierPayableAndRestoresSourceLayerOnce() {
         val op="purchase-return-idempotent-"+UUID.randomUUID()
         val first=returns.postPurchaseReturn(adminId,invoiceId,op,"2026-11-02","إرجاع جزء من البضاعة",
