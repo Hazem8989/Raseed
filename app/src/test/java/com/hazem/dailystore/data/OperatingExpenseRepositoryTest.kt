@@ -137,4 +137,17 @@ class OperatingExpenseRepositoryTest {
         } catch (_: IllegalArgumentException) { }
         assertEquals(0,repository.listExpenses().size)
     }
+
+    @Test fun primaryOperatingExpenseIsAddedToOutboxAtomically() {
+        val context=RuntimeEnvironment.getApplication()
+        val sync=SyncProtocolRepository(context)
+        sync.configureAsPrimary(adminId,"الهاتف الرئيسي")
+        repository.postExpense(adminId,"sync-expense-"+UUID.randomUUID(),categoryId,sypAccountId,
+            10000L,"2026-11-02","مصروف للمزامنة",null)
+        val queued=sync.pendingOutbox().single()
+        assertEquals("OPERATING_EXPENSE",queued.entityType)
+        assertEquals("POST_OPERATING_EXPENSE",queued.operationType)
+        assertTrue(queued.payloadJson.contains("amount_usd_cents"))
+    }
+
 }
