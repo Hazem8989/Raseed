@@ -118,10 +118,10 @@ object SyncEnvelopeSecurity {
 
     private fun canonical(value: Any?): String = when {
         value == null || value === JSONObject.NULL -> "null"
-        value is JSONObject -> value.keys().asSequence().toList().sorted().joinToString("{", "}") {
+        value is JSONObject -> value.keys().asSequence().toList().sorted().joinToString(separator = ",", prefix = "{", postfix = "}") {
             JSONObject.quote(it) + ":" + canonical(value.get(it))
         }
-        value is JSONArray -> (0 until value.length()).joinToString("[", "]") { canonical(value.get(it)) }
+        value is JSONArray -> (0 until value.length()).joinToString(separator = ",", prefix = "[", postfix = "]") { canonical(value.get(it)) }
         value is String -> JSONObject.quote(value)
         value is Boolean -> value.toString()
         value is Number -> value.toString()

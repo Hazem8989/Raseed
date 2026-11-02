@@ -381,8 +381,8 @@ class InvoiceRepository(context: Context) {
             db.insertOrThrow("audit_log", null, ContentValues().apply {
                 put("id", UUID.randomUUID().toString())
                 put("user_id", actorUserId)
-                put("action", "POST_\${type}_INVOICE")
-                put("entity_type", "\${type}_INVOICE")
+                put("action", "POST_${type}_INVOICE")
+                put("entity_type", "${type}_INVOICE")
                 put("entity_id", invoiceId)
                 put("before_json", """{"status":"DRAFT"}""")
                 put("after_json", """{"status":"$finalStatus","total_usd_cents":$invoiceTotal,"operation_id":"$operationId","cash_account_id":$cashAccountJson}""")
