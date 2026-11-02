@@ -151,6 +151,17 @@ class AppDatabaseTest {
             if (exists) db.execSQL("ALTER TABLE $table DROP COLUMN $column")
         }
 
+        if (targetVersion < 18) {
+            listOf(
+                "idx_sync_devices_status", "idx_sync_inbox_status_sequence",
+                "idx_sync_envelopes_sequence", "idx_sync_invitations_expiry"
+            ).forEach(::dropIndex)
+            listOf(
+                "sync_cursors", "sync_acknowledgements", "sync_inbox",
+                "sync_operation_envelopes", "sync_protocol_state",
+                "sync_pairing_invitations", "sync_devices"
+            ).forEach(::dropTable)
+        }
         if (targetVersion < 17) {
             dropIndex("idx_operating_expenses_date")
             dropIndex("idx_operating_expenses_category")
