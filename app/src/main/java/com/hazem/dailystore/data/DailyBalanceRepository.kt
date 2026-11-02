@@ -315,7 +315,7 @@ class DailyBalanceRepository(context:Context) {
         db.insertOrThrow("audit_log",null,v)
     }
     private fun manager(db:SQLiteDatabase,id:String){PermissionPolicy.require(db,id,PermissionPolicy.DAILY_CASH_MANAGE)}
-    private fun typeName(t:String)=when(t){"SALE_RECEIPT"->"قبض مبيعات";"CUSTOMER_CREDIT_COLLECTION"->"تحصيل ديون";"PURCHASE_PAYMENT"->"دفعة مورد";"PERSONAL_WITHDRAWAL"->"مسحوبات شخصية";"ACCOUNT_TRANSFER_IN","ACCOUNT_TRANSFER_OUT"->"تحويل داخلي – تصريف محفظة";"WALLET_TOP_UP"->"تغذية محفظة";"SERVICE_TRANSFER_RECEIPT"->"مقبوض تحويل رصيد";"SERVICE_RECHARGE"->"شراء رصيد خدمة";"OPERATING_EXPENSE"->"مصروف تشغيلي";else->t}
+    private fun typeName(t:String)=when(t){"SALE_RECEIPT"->"قبض مبيعات";"CUSTOMER_CREDIT_COLLECTION"->"تحصيل ديون";"PURCHASE_PAYMENT"->"دفعة مورد";"PERSONAL_WITHDRAWAL"->"مسحوبات شخصية";"ACCOUNT_TRANSFER_IN","ACCOUNT_TRANSFER_OUT"->"تحويل داخلي – تصريف محفظة";"WALLET_TOP_UP"->"تغذية محفظة";"SERVICE_TRANSFER_RECEIPT"->"مقبوض تحويل رصيد";"SERVICE_RECHARGE"->"شراء رصيد خدمة";"OPERATING_EXPENSE"->"مصروف تشغيلي";"SALE_RETURN_REFUND"->"رد مبلغ مرتجع للعميل";"PURCHASE_RETURN_REFUND"->"مبلغ مسترد من المورد";else->t}
     private fun esc(s:String)=s.replace("\\","\\\\").replace("\"","\\\"").replace("\n","\\n").replace("\r","\\r")
     private fun hash(s:String)=MessageDigest.getInstance("SHA-256").digest(s.toByteArray(Charsets.UTF_8)).joinToString(""){"%02x".format(it)}
     private fun today()=SimpleDateFormat("yyyy-MM-dd",Locale.US).format(Date())
