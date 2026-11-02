@@ -56,12 +56,12 @@ class PurchasePaymentRepositoryTest {
             null, "صنف دفع ${UUID.randomUUID()}", null, null, category.id, unit.id,
             500, 1000, true, 0.0, adminId
         )
-        val draft = invoices.savePurchaseDraft(
+        val draft = invoices.savePurchaseDraft(adminId, 
             "payment-draft-${UUID.randomUUID()}", null, supplierId, "2026-10-31",
             0L, null, listOf(InvoiceLineInput(productId, BigDecimal.ONE, 10000L))
         )
         invoiceId = draft.invoiceId
-        assertTrue(invoices.postPurchase(invoiceId, "payment-post-${UUID.randomUUID()}"))
+        assertTrue(invoices.postPurchase(adminId, invoiceId, "payment-post-${UUID.randomUUID()}"))
         accountId = cashAccounts.create(
             adminId, "صندوق اختبار ${UUID.randomUUID()}", "CASH_BOX", "USD", 50000L
         ).id
