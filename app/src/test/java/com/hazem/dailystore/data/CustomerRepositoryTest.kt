@@ -46,7 +46,7 @@ class CustomerRepositoryTest {
 
     @Test
     fun customerCanBeCreatedUpdatedAndDeactivatedWithoutDeletingHistory() {
-        val customer = customers.create("زبون اختبار ${UUID.randomUUID()}", "0999000000")
+        val customer = customers.create(adminId, "زبون اختبار ${UUID.randomUUID()}", "0999000000")
         assertEquals("0999000000", customer.phone)
         val updated = customers.update(customer.id, "اسم معدل", "0999111111")
         assertEquals("اسم معدل", updated.name)
@@ -57,7 +57,7 @@ class CustomerRepositoryTest {
 
     @Test
     fun creditSaleRequiresCustomerAndIsExplicitlyStored() {
-        val customer = customers.create("زبون آجل ${UUID.randomUUID()}")
+        val customer = customers.create(adminId, "زبون آجل ${UUID.randomUUID()}")
         val rate = ContentValues().apply {
             put("id", UUID.randomUUID().toString()); put("currency_code", "SYP")
             put("rate_syp_per_usd_milli", 15000000L)
