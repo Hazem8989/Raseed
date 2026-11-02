@@ -332,7 +332,10 @@ class SyncProtocolRepository(private val context: Context, private val credentia
             entityType.isNotBlank() && entityId.isNotBlank()) { "بيانات حدث المزامنة غير مكتملة" }
         require(changeKind in setOf("CREATE", "UPDATE", "DELETE")) { "نوع تغيير المزامنة غير صالح" }
         require(payloadJson.length in 2..MAX_PAYLOAD_CHARS) { "حجم بيانات المزامنة غير صالح" }
-        JSONObject(payloadJson)
+        val payloadObject = JSONObject(payloadJson)
+        val payloadWithAction = JSONObject(payloadObject.toString())
+            .put("business_operation", operationType)
+        val canonicalPayload = SyncEnvelopeSecurity.canonicalObject(payloadWithAction.toString())
         val deviceId = SyncDeviceIdentity.getOrCreate(context)
         if (state(db, "authority_device_id") != deviceId) return null
         val activePrimary = db.rawQuery(
@@ -340,13 +343,13 @@ class SyncProtocolRepository(private val context: Context, private val credentia
             arrayOf(deviceId)
         ).use { it.moveToFirst() }
         check(activePrimary) { "هوية الجهاز الأساسي غير مفعلة" }
-        val payloadHash = sha256(payloadJson)
+        val payloadHash = sha256(canonicalPayload)
         val existing = db.rawQuery(
             "SELECT sequence_number,payload_sha256,operation_type,entity_type,entity_id FROM sync_operation_envelopes WHERE operation_id=?",
             arrayOf(operationId)
         ).use { c ->
             if (c.moveToFirst()) {
-                require(c.getString(1) == payloadHash && c.getString(2) == operationType &&
+                require(c.getString(1) == payloadHash && c.getString(2) == changeKind &&
                     c.getString(3) == entityType && c.getString(4) == entityId) {
                     "أعيد استخدام معرّف العملية بمحتوى مزامنة مختلف"
                 }
@@ -361,13 +364,13 @@ class SyncProtocolRepository(private val context: Context, private val credentia
         db.insertOrThrow("sync_operation_envelopes", null, ContentValues().apply {
             put("operation_id", operationId); put("sequence_number", next)
             put("origin_device_id", deviceId); put("actor_user_id", actorUserId)
-            put("operation_type", operationType); put("entity_type", entityType); put("entity_id", entityId)
-            put("payload_json", payloadJson); put("payload_sha256", payloadHash); put("created_at", now)
+            put("operation_type", changeKind); put("entity_type", entityType); put("entity_id", entityId)
+            put("payload_json", canonicalPayload); put("payload_sha256", payloadHash); put("created_at", now)
         })
         db.insertOrThrow("sync_queue", null, ContentValues().apply {
             put("id", UUID.randomUUID().toString()); put("operation_id", operationId)
             put("entity_type", entityType); put("entity_id", entityId); put("operation_type", changeKind)
-            put("payload_json", payloadJson); put("status", "PENDING"); put("retry_count", 0)
+            put("payload_json", canonicalPayload); put("status", "PENDING"); put("retry_count", 0)
             put("created_at", now); put("updated_at", now)
         })
         db.update("sync_devices", ContentValues().apply { put("last_seen_at", now) },
@@ -433,7 +436,7 @@ class SyncProtocolRepository(private val context: Context, private val credentia
             header.put("cash_receipts", receipts)
         }
         return enqueueLocalOperation(
-            db, actorUserId, operationId, "CREATE",
+            db, actorUserId, operationId, "POST_${invoiceType}_INVOICE",
             if (invoiceType == "SALE") "SALES_INVOICE" else "PURCHASE_INVOICE",
             invoiceId, "CREATE", header.toString()
         )
