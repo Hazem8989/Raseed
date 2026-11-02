@@ -31,9 +31,10 @@ import javax.crypto.spec.SecretKeySpec
  * the restored database has opened and passed integrity checks.
  */
 class BackupRestoreManager(private val context: Context) {
-    fun createBackup(actorUserId: String, password: CharArray, destination: OutputStream) {
+    fun createBackup(actorUserId: String, password: CharArray, destination: OutputStream, onProgress: ((String) -> Unit)? = null) {
         requireBackupPermission(actorUserId)
         validatePassword(password)
+        onProgress?.invoke("إغلاق قاعدة البيانات وتجهيز لقطة آمنة...")
         synchronized(LOCK) {
             val snapshot = File(context.cacheDir, "tds-backup-snapshot-${System.nanoTime()}.db")
             val encrypted = File(context.cacheDir, "tds-backup-encrypted-${System.nanoTime()}.bin")
@@ -42,10 +43,14 @@ class BackupRestoreManager(private val context: Context) {
                 val live = context.getDatabasePath(AppDatabase.DATABASE_NAME)
                 check(live.isFile && live.length() > 0L) { "قاعدة البيانات غير موجودة أو فارغة" }
                 check(live.length() <= MAX_DATABASE_BYTES) { "حجم قاعدة البيانات يتجاوز الحد المدعوم للنسخ الاحتياطي" }
+                onProgress?.invoke("نسخ قاعدة البيانات إلى ملف مؤقت...")
                 copyFile(live, snapshot)
+                onProgress?.invoke("تشفير النسخة وحمايتها...")
                 encryptSnapshot(snapshot, encrypted, password)
+                onProgress?.invoke("حفظ ملف النسخة المشفّرة...")
                 FileInputStream(encrypted).use { input -> input.copyTo(destination) }
                 destination.flush()
+                onProgress?.invoke("اكتمل إنشاء النسخة الاحتياطية.")
             } finally {
                 snapshot.delete()
                 encrypted.delete()
@@ -53,9 +58,10 @@ class BackupRestoreManager(private val context: Context) {
         }
     }
 
-    fun restoreBackup(actorUserId: String, password: CharArray, source: InputStream) {
+    fun restoreBackup(actorUserId: String, password: CharArray, source: InputStream, onProgress: ((String) -> Unit)? = null) {
         requireBackupPermission(actorUserId)
         validatePassword(password)
+        onProgress?.invoke("فك تشفير النسخة والتحقق من كلمة المرور...")
         synchronized(LOCK) {
             val staged = File(context.getDatabasePath(AppDatabase.DATABASE_NAME).parentFile,
                 "the_daily_shop.restore-${System.nanoTime()}.db")
@@ -64,8 +70,10 @@ class BackupRestoreManager(private val context: Context) {
             var liveWasMoved = false
             try {
                 decryptToFile(source, staged, password)
+                onProgress?.invoke("التحقق من سلامة قاعدة البيانات والعلاقات...")
                 validateDatabase(staged)
 
+                onProgress?.invoke("إغلاق قاعدة البيانات الحالية وحفظ نقطة التراجع...")
                 AppDatabase.getInstance(context).checkpointAndCloseForBackup()
                 deleteSidecars(live)
                 if (rollback.exists() && !rollback.delete()) {
@@ -75,11 +83,13 @@ class BackupRestoreManager(private val context: Context) {
                     check(live.renameTo(rollback)) { "تعذر حفظ قاعدة البيانات الحالية للتراجع" }
                     liveWasMoved = true
                 }
+                onProgress?.invoke("استبدال قاعدة البيانات بالنسخة المتحقق منها...")
                 check(staged.renameTo(live)) { "تعذر وضع قاعدة البيانات المستعادة" }
 
                 try {
                     val restored = AppDatabase.getInstance(context).writableDatabase
                     validateOpenDatabase(restored)
+                    onProgress?.invoke("اعتماد قاعدة البيانات المستعادة...")
                     rollback.delete()
                 } catch (restoreFailure: Exception) {
                     AppDatabase.getInstance(context).close()
@@ -104,6 +114,38 @@ class BackupRestoreManager(private val context: Context) {
                 staged.delete()
                 if (rollback.exists() && live.exists()) rollback.delete()
             }
+        }
+    }
+
+    /** Recovers a restore interrupted after the previous live database was moved aside. */
+    fun recoverInterruptedRestore() {
+        synchronized(LOCK) {
+            val live = context.getDatabasePath(AppDatabase.DATABASE_NAME)
+            val rollback = File(live.parentFile, "${live.name}.restore-rollback")
+            if (rollback.exists()) {
+                AppDatabase.getInstance(context).close()
+                val liveIsValid = live.isFile && runCatching {
+                    val restored = AppDatabase.getInstance(context).writableDatabase
+                    validateOpenDatabase(restored)
+                }.isSuccess
+                if (liveIsValid) {
+                    check(rollback.delete() || !rollback.exists()) {
+                        "تعذر تنظيف نسخة التراجع بعد التحقق من قاعدة البيانات الحالية"
+                    }
+                } else {
+                    AppDatabase.getInstance(context).close()
+                    val rollbackIsValid = runCatching { validateDatabase(rollback) }.isSuccess
+                    check(rollbackIsValid) {
+                        "تعذر التعافي: قاعدة البيانات الحالية ونسخة التراجع غير سليمتين؛ احتفظ بالملفات ولا تحذفها"
+                    }
+                    deleteSidecars(live)
+                    if (live.exists()) check(live.delete()) { "تعذر إزالة قاعدة البيانات غير السليمة" }
+                    check(rollback.renameTo(live)) { "تعذر استعادة قاعدة البيانات السابقة بعد انقطاع التطبيق" }
+                }
+            }
+            val stagePrefix = live.name.removeSuffix(".db") + ".restore-"
+            live.parentFile?.listFiles()?.filter { it.name.startsWith(stagePrefix) && it.extension == "db" }
+                ?.forEach { it.delete() }
         }
     }
 

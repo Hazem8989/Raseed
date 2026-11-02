@@ -3,6 +3,9 @@ package com.hazem.dailystore
 import android.app.Activity
 import android.app.AlertDialog
 import android.os.Bundle
+import android.os.Handler
+import android.os.Looper
+import android.content.pm.ActivityInfo
 import android.graphics.Color
 import android.graphics.Typeface
 import android.graphics.drawable.GradientDrawable
@@ -28,6 +31,7 @@ import android.widget.LinearLayout
 import android.widget.PopupWindow
 import android.widget.ScrollView
 import android.widget.TextView
+import android.widget.ProgressBar
 import android.widget.Toast
 import android.content.ContentValues
 import com.hazem.dailystore.data.AppDatabase
@@ -71,8 +75,16 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 import java.util.UUID
+import java.lang.ref.WeakReference
+import java.util.concurrent.Executors
+import java.util.concurrent.atomic.AtomicBoolean
 import org.json.JSONArray
 import org.json.JSONObject
+
+private object BackupRestoreWorker {
+    val executor = Executors.newSingleThreadExecutor()
+    val running = AtomicBoolean(false)
+}
 
 class MainActivity : Activity() {
 
@@ -99,6 +111,9 @@ class MainActivity : Activity() {
     private var pendingStatementExportBytes: ByteArray? = null
     private var pendingStatementExportName: String? = null
     private var pendingBackupPassword: CharArray? = null
+    private var backupProgressDialog: AlertDialog? = null
+    private var backupProgressText: TextView? = null
+    private var backupPreviousOrientation: Int? = null
     private val sessionPrefs by lazy { getSharedPreferences("the_daily_shop_session", MODE_PRIVATE) }
 
     private lateinit var productGrid: GridLayout
@@ -155,31 +170,13 @@ class MainActivity : Activity() {
                 password?.fill(0.toChar())
                 return
             }
-            try {
-                if (requestCode == backupCreateRequestCode) {
-                    val output = contentResolver.openOutputStream(uri, "w")
-                        ?: error("تعذر فتح ملف النسخة للحفظ")
-                    output.use { BackupRestoreManager(this).createBackup(currentUserId ?: error("جلسة المدير غير موجودة"), password, it) }
-                    Toast.makeText(this, "تم إنشاء نسخة احتياطية مشفّرة بنجاح", Toast.LENGTH_LONG).show()
-                } else {
-                    val input = contentResolver.openInputStream(uri)
-                        ?: error("تعذر فتح ملف النسخة المحدد")
-                    input.use { BackupRestoreManager(this).restoreBackup(currentUserId ?: error("جلسة المدير غير موجودة"), password, it) }
-                    clearSessionState()
-                    currentUserId = null
-                    cart.clear()
-                    showLoginScreen()
-                    Toast.makeText(this, "تمت الاستعادة والتحقق من قاعدة البيانات. سجّل الدخول مجدداً.", Toast.LENGTH_LONG).show()
-                }
-            } catch (e: Exception) {
-                AlertDialog.Builder(this)
-                    .setTitle(if (requestCode == backupCreateRequestCode) "تعذر إنشاء النسخة الاحتياطية" else "لم تتم الاستعادة")
-                    .setMessage(e.message ?: "حدث خطأ غير متوقع. لم يتم اعتماد بيانات غير متحقق منها.")
-                    .setPositiveButton("حسناً", null)
-                    .show()
-            } finally {
+            val actorUserId = currentUserId
+            if (actorUserId.isNullOrBlank()) {
                 password.fill(0.toChar())
+                Toast.makeText(this, "انتهت جلسة المدير؛ سجّل الدخول مجدداً", Toast.LENGTH_LONG).show()
+                return
             }
+            startBackupRestoreInBackground(requestCode, uri, password, actorUserId)
             return
         }
         if (requestCode == productImportFolderRequestCode) {
@@ -284,6 +281,7 @@ class MainActivity : Activity() {
         window.navigationBarColor = green
         window.setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE)
         window.decorView.layoutDirection = View.LAYOUT_DIRECTION_RTL
+        BackupRestoreManager(this).recoverInterruptedRestore()
         StoreRepository(this).ensureBaseSetup()
         AuthRepository(this).ensureInitialAdmin()
         ServiceTransferRepository(this).ensureSystemAccounts()
@@ -291,6 +289,111 @@ class MainActivity : Activity() {
             clearSessionState()
             showLoginScreen()
         }
+    }
+
+    private fun startBackupRestoreInBackground(
+        requestCode: Int, uri: Uri, password: CharArray, actorUserId: String
+    ) {
+        if (!BackupRestoreWorker.running.compareAndSet(false, true)) {
+            password.fill(0.toChar())
+            Toast.makeText(this, "توجد عملية نسخ أو استعادة قيد التنفيذ بالفعل", Toast.LENGTH_LONG).show()
+            return
+        }
+        val isRestore = requestCode == backupRestoreRequestCode
+        val status = TextView(this).apply {
+            text = if (isRestore) "تهيئة الاستعادة..." else "تهيئة النسخ الاحتياطي..."
+            textSize = 14f
+            setTextColor(textColor)
+            gravity = Gravity.CENTER
+            setPadding(dp(12), dp(12), dp(12), dp(8))
+        }
+        val spinner = ProgressBar(this)
+        val panel = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            gravity = Gravity.CENTER
+            setPadding(dp(22), dp(18), dp(22), dp(18))
+            addView(spinner, LinearLayout.LayoutParams(dp(44), dp(44)).apply { gravity = Gravity.CENTER })
+            addView(status, matchWidth())
+        }
+        backupProgressDialog = AlertDialog.Builder(this)
+            .setTitle(if (isRestore) "استعادة قاعدة البيانات" else "إنشاء نسخة احتياطية")
+            .setView(panel)
+            .setCancelable(false)
+            .create()
+        backupProgressText = status
+        backupPreviousOrientation = requestedOrientation
+        requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_LOCKED
+        backupProgressDialog?.show()
+
+        val appContext = applicationContext
+        val resolver = contentResolver
+        val activityRef = WeakReference(this)
+        val mainHandler = Handler(Looper.getMainLooper())
+        val updateProgress: (String) -> Unit = { message ->
+            mainHandler.post {
+                val activity = activityRef.get()
+                if (activity != null && !activity.isFinishing && !activity.isDestroyed) {
+                    activity.backupProgressText?.text = message
+                }
+            }
+        }
+        BackupRestoreWorker.executor.execute {
+            val result = runCatching {
+                val manager = BackupRestoreManager(appContext)
+                if (isRestore) {
+                    val input = resolver.openInputStream(uri) ?: error("تعذر فتح ملف النسخة المحدد")
+                    input.use { manager.restoreBackup(actorUserId, password, it, updateProgress) }
+                    SecureSessionStore.clear(appContext)
+                    check(appContext.getSharedPreferences("the_daily_shop_session", MODE_PRIVATE)
+                        .edit().clear().commit()) { "تعذر إنهاء الجلسة بعد الاستعادة؛ سجّل الدخول مجدداً يدوياً" }
+                } else {
+                    val output = resolver.openOutputStream(uri, "w") ?: error("تعذر فتح ملف النسخة للحفظ")
+                    output.use { manager.createBackup(actorUserId, password, it, updateProgress) }
+                }
+            }
+            password.fill(0.toChar())
+            BackupRestoreWorker.running.set(false)
+            mainHandler.post {
+                val activity = activityRef.get()
+                if (activity == null || activity.isFinishing || activity.isDestroyed) {
+                    val message = if (result.isSuccess) {
+                        if (isRestore) "اكتملت الاستعادة؛ افتح التطبيق وسجّل الدخول مجدداً"
+                        else "اكتمل إنشاء النسخة الاحتياطية"
+                    } else result.exceptionOrNull()?.message ?: "تعذرت عملية النسخ أو الاستعادة"
+                    Toast.makeText(appContext, message, Toast.LENGTH_LONG).show()
+                    return@post
+                }
+                activity.backupProgressDialog?.dismiss()
+                activity.backupProgressDialog = null
+                activity.backupProgressText = null
+                activity.backupPreviousOrientation?.let { activity.requestedOrientation = it }
+                activity.backupPreviousOrientation = null
+                if (result.isSuccess) {
+                    if (isRestore) {
+                        activity.clearSessionState()
+                        activity.currentUserId = null
+                        activity.cart.clear()
+                        activity.showLoginScreen()
+                        Toast.makeText(activity, "تمت الاستعادة والتحقق من قاعدة البيانات. سجّل الدخول مجدداً.", Toast.LENGTH_LONG).show()
+                    } else {
+                        Toast.makeText(activity, "تم إنشاء نسخة احتياطية مشفّرة بنجاح", Toast.LENGTH_LONG).show()
+                    }
+                } else {
+                    AlertDialog.Builder(activity)
+                        .setTitle(if (isRestore) "لم تتم الاستعادة" else "تعذر إنشاء النسخة الاحتياطية")
+                        .setMessage(result.exceptionOrNull()?.message ?: "حدث خطأ غير متوقع. لم يتم اعتماد بيانات غير متحقق منها.")
+                        .setPositiveButton("حسناً", null)
+                        .show()
+                }
+            }
+        }
+    }
+
+    override fun onDestroy() {
+        backupProgressDialog?.dismiss()
+        backupProgressDialog = null
+        backupProgressText = null
+        super.onDestroy()
     }
 
     override fun setContentView(view: View) {

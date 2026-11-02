@@ -135,6 +135,52 @@ class BackupRestoreManagerTest {
     }
 
     @Test
+    fun recoversPreviousDatabaseWhenRestoreWasInterruptedAfterMovingTheLiveFile() {
+        val db = AppDatabase.getInstance(context).writableDatabase
+        db.execSQL("UPDATE app_settings SET setting_value='rollback-marker' WHERE setting_key='base_currency'")
+        AppDatabase.getInstance(context).close()
+        val live = context.getDatabasePath(AppDatabase.DATABASE_NAME)
+        val rollback = java.io.File(live.parentFile, live.name + ".restore-rollback")
+        assertTrue(live.renameTo(rollback))
+        val staleStage = java.io.File(live.parentFile, "the_daily_shop.restore-stale.db")
+        staleStage.writeText("partial restore")
+
+        manager.recoverInterruptedRestore()
+
+        assertTrue(live.isFile)
+        assertTrue(!rollback.exists())
+        assertTrue(!staleStage.exists())
+        AppDatabase.getInstance(context).readableDatabase.rawQuery(
+            "SELECT setting_value FROM app_settings WHERE setting_key='base_currency'", null
+        ).use { cursor ->
+            assertTrue(cursor.moveToFirst())
+            assertEquals("rollback-marker", cursor.getString(0))
+        }
+    }
+
+    @Test
+    fun recoversValidRollbackWhenTheLiveDatabaseIsCorrupted() {
+        val db = AppDatabase.getInstance(context).writableDatabase
+        db.execSQL("UPDATE app_settings SET setting_value='known-good' WHERE setting_key='base_currency'")
+        AppDatabase.getInstance(context).close()
+        val live = context.getDatabasePath(AppDatabase.DATABASE_NAME)
+        val rollback = java.io.File(live.parentFile, live.name + ".restore-rollback")
+        live.copyTo(rollback, overwrite = true)
+        live.writeText("corrupted live database")
+
+        manager.recoverInterruptedRestore()
+
+        assertTrue(live.isFile)
+        assertTrue(!rollback.exists())
+        AppDatabase.getInstance(context).readableDatabase.rawQuery(
+            "SELECT setting_value FROM app_settings WHERE setting_key='base_currency'", null
+        ).use { cursor ->
+            assertTrue(cursor.moveToFirst())
+            assertEquals("known-good", cursor.getString(0))
+        }
+    }
+
+    @Test
     fun rejectsShortPasswordsBeforeCreatingBackup() {
         var failed = false
         try {
