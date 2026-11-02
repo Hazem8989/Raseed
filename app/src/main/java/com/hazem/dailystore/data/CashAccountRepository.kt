@@ -168,11 +168,7 @@ class CashAccountRepository(context: Context) {
         val db = database.writableDatabase
         db.beginTransaction()
         try {
-            val managerExists = db.rawQuery(
-                "SELECT 1 FROM users WHERE id=? AND role_key='ADMIN' AND is_active=1 AND must_change_password=0",
-                arrayOf(actorUserId)
-            ).use { it.moveToFirst() }
-            require(managerExists) { "جلسة المدير غير صالحة" }
+            PermissionPolicy.require(db, actorUserId, PermissionPolicy.DAILY_CASH_MANAGE)
             val accountName = db.rawQuery(
                 "SELECT name FROM cash_accounts WHERE id=? AND account_type='CASH_BOX' AND currency_code='SYP' AND is_active=1",
                 arrayOf(accountId)
