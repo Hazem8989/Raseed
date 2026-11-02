@@ -77,22 +77,7 @@ object PartyStatementExport {
         val left = 36f
         val right = pageWidth - 36f
         val lineHeight = 17f
-        val rows = mutableListOf<String>()
-        rows.add("الاسم: ${statement.partyName}")
-        rows.add(if (statement.partyType == "CUSTOMER")
-            "الرصيد المرجعي: ${money(statement.closingBalanceUsdCents)} USD"
-        else "الرصيد المستحق: ${money(statement.closingBalanceSypMinor)} ل.س")
-        rows.add("التاريخ | النوع | المرجع | البيان | مدين | دائن | الرصيد")
-        statement.entries.forEach { row ->
-            val debit = if (statement.partyType == "CUSTOMER") money(row.debitUsdCents) + " USD"
-                else syp(row.debitSypMinor) + " ل.س"
-            val credit = if (statement.partyType == "CUSTOMER") money(row.creditUsdCents) + " USD"
-                else syp(row.creditSypMinor) + " ل.س"
-            val balance = if (statement.partyType == "CUSTOMER") money(row.balanceUsdCents) + " USD"
-                else syp(row.balanceSypMinor) + " ل.س"
-            rows.add("${row.date} | ${row.type} | ${row.reference} | ${row.description} | $debit | $credit | $balance")
-        }
-        if (statement.unpricedEntryCount > 0) rows.add("تنبيه: ${statement.unpricedEntryCount} حركات بلا سعر صرف موثوق لم تدخل في الرصيد.")
+        val rows = pdfLines(statement)
         val perPage = 29
         val pages = maxOf(1, (rows.size + perPage - 1) / perPage)
         val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
@@ -129,6 +114,31 @@ object PartyStatementExport {
         document.writeTo(out)
         document.close()
         return out.toByteArray()
+    }
+
+    fun pdfLines(statement: PartyStatement): List<String> {
+        val rows = mutableListOf<String>()
+        rows.add("الاسم: ${statement.partyName}")
+        rows.add(if (statement.partyType == "CUSTOMER")
+            "الرصيد المرجعي: ${money(statement.closingBalanceUsdCents)} USD"
+        else "الرصيد المستحق: ${syp(statement.closingBalanceSypMinor)} ل.س")
+        rows.add("التاريخ | النوع | المرجع | البيان | مدين | دائن | الرصيد")
+        statement.entries.forEach { row ->
+            val debit = if (statement.partyType == "CUSTOMER") money(row.debitUsdCents) + " USD"
+                else syp(row.debitSypMinor) + " ل.س"
+            val credit = if (statement.partyType == "CUSTOMER") money(row.creditUsdCents) + " USD"
+                else syp(row.creditSypMinor) + " ل.س"
+            val balance = if (statement.partyType == "CUSTOMER") money(row.balanceUsdCents) + " USD"
+                else syp(row.balanceSypMinor) + " ل.س"
+            val refund = when {
+                row.cashRefundUsdCents > 0L -> " • رد نقدي ${money(row.cashRefundUsdCents)} USD"
+                row.cashRefundSypMinor > 0L -> " • استرداد نقدي ${syp(row.cashRefundSypMinor)} ل.س"
+                else -> ""
+            }
+            rows.add("${row.date} | ${row.type} | ${row.reference} | ${row.description}$refund | $debit | $credit | $balance")
+        }
+        if (statement.unpricedEntryCount > 0) rows.add("تنبيه: ${statement.unpricedEntryCount} حركات بلا سعر صرف موثوق لم تدخل في الرصيد.")
+        return rows
     }
 
     private fun xlsxRow(number: Int, values: List<Any>): String {
