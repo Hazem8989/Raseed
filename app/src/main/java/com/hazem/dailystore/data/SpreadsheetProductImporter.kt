@@ -46,7 +46,7 @@ object SpreadsheetProductImporter {
     }
 
     private fun detectDelimiter(source: String): Char {
-        val candidates = listOf(',', ';', '\\t')
+        val candidates = listOf(',', ';', '\t')
         val firstRecord = source.lineSequence().firstOrNull { it.isNotBlank() }.orEmpty()
         var quoted = false
         val counts = candidates.associateWith { 0 }.toMutableMap()
