@@ -11,6 +11,8 @@ import android.text.InputType
 import android.text.TextWatcher
 import android.view.Gravity
 import android.provider.OpenableColumns
+import android.provider.DocumentsContract
+import android.net.Uri
 import android.view.View
 import android.view.ViewGroup
 import android.view.WindowManager
@@ -83,6 +85,7 @@ class MainActivity : Activity() {
     private var activeScreenKey: String = "POS"
     private var activeScreenArgument: String? = null
     private val productImportRequestCode = 7101
+    private val productImportFolderRequestCode = 7102
     private val backupCreateRequestCode = 7110
     private val backupRestoreRequestCode = 7111
     private var pendingBackupPassword: CharArray? = null
@@ -151,12 +154,66 @@ class MainActivity : Activity() {
             }
             return
         }
+        if (requestCode == productImportFolderRequestCode) {
+            if (resultCode != RESULT_OK) return
+            val treeUri = data?.data ?: return
+            try {
+                val treeDocumentId = DocumentsContract.getTreeDocumentId(treeUri)
+                val childrenUri = DocumentsContract.buildChildDocumentsUriUsingTree(treeUri, treeDocumentId)
+                val selectableFiles = mutableListOf<Pair<Uri, String>>()
+                contentResolver.query(
+                    childrenUri,
+                    arrayOf(
+                        DocumentsContract.Document.COLUMN_DOCUMENT_ID,
+                        DocumentsContract.Document.COLUMN_DISPLAY_NAME
+                    ),
+                    null,
+                    null,
+                    null
+                )?.use { cursor ->
+                    val idColumn = cursor.getColumnIndexOrThrow(DocumentsContract.Document.COLUMN_DOCUMENT_ID)
+                    val nameColumn = cursor.getColumnIndexOrThrow(DocumentsContract.Document.COLUMN_DISPLAY_NAME)
+                    while (cursor.moveToNext()) {
+                        val name = cursor.getString(nameColumn) ?: continue
+                        val lowerName = name.lowercase(Locale.ROOT)
+                        if (lowerName.endsWith(".csv") || lowerName.endsWith(".xlsx")) {
+                            val documentId = cursor.getString(idColumn) ?: continue
+                            val fileUri = DocumentsContract.buildDocumentUriUsingTree(treeUri, documentId)
+                            selectableFiles.add(fileUri to name)
+                        }
+                    }
+                } ?: error("تعذر قراءة محتويات المجلد المحدد")
+                if (selectableFiles.isEmpty()) {
+                    error("لم أجد ملفاً بامتداد CSV أو XLSX داخل هذا المجلد. اختر المجلد الذي يحتوي ملف المنتجات مباشرة.")
+                }
+                val names = selectableFiles.map { it.second }.toTypedArray()
+                AlertDialog.Builder(this)
+                    .setTitle("اختر ملف المنتجات")
+                    .setItems(names) { _, which ->
+                        val selected = selectableFiles[which]
+                        importProductFile(selected.first, selected.second)
+                    }
+                    .setNegativeButton("إلغاء", null)
+                    .show()
+            } catch (e: Exception) {
+                AlertDialog.Builder(this)
+                    .setTitle("تعذر استعراض المجلد")
+                    .setMessage(e.message ?: "لم أتمكن من قراءة الملفات داخل المجلد المحدد.")
+                    .setPositiveButton("حسناً", null)
+                    .show()
+            }
+            return
+        }
         if (requestCode != productImportRequestCode || resultCode != RESULT_OK) return
         val uri = data?.data ?: return
+        val fileName = contentResolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)?.use { cursor ->
+            if (cursor.moveToFirst()) cursor.getString(0) else null
+        } ?: "products.csv"
+        importProductFile(uri, fileName)
+    }
+
+    private fun importProductFile(uri: Uri, fileName: String) {
         try {
-            val fileName = contentResolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)?.use { cursor ->
-                if (cursor.moveToFirst()) cursor.getString(0) else null
-            } ?: "products.csv"
             val rows = contentResolver.openInputStream(uri)?.use {
                 SpreadsheetProductImporter.parse(fileName, it)
             } ?: error("تعذر فتح الملف المحدد")
@@ -185,9 +242,11 @@ class MainActivity : Activity() {
                     }
                 }.show()
         } catch (e: Exception) {
-            AlertDialog.Builder(this).setTitle("تعذر قراءة الملف")
+            AlertDialog.Builder(this)
+                .setTitle("تعذر قراءة الملف")
                 .setMessage(e.message ?: "تأكد من أن الملف بصيغة CSV أو XLSX وأن الأعمدة صحيحة.")
-                .setPositiveButton("حسناً", null).show()
+                .setPositiveButton("حسناً", null)
+                .show()
         }
     }
 
@@ -3511,32 +3570,18 @@ class MainActivity : Activity() {
                     Toast.makeText(this@MainActivity, "استيراد الأصناف متاح للمدير فقط", Toast.LENGTH_LONG).show()
                     return@setOnClickListener
                 }
-                // Ask for the actual spreadsheet MIME types instead of a wildcard.
-                // Some OEM document providers mark text/csv files as unavailable when
-                // the request is "*/*", even though binary backup files remain selectable.
-                // EXTRA_MIME_TYPES lets providers match common CSV and XLSX MIME variants.
-                val intent = android.content.Intent(android.content.Intent.ACTION_OPEN_DOCUMENT).apply {
-                    addCategory(android.content.Intent.CATEGORY_OPENABLE)
-                    type = "text/csv"
-                    putExtra(
-                        android.content.Intent.EXTRA_MIME_TYPES,
-                        arrayOf(
-                            "text/comma-separated-values",
-                            "application/csv",
-                            "application/vnd.ms-excel",
-                            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-                        )
-                    )
-                }
+                // Select a folder first, then enumerate CSV/XLSX documents ourselves.
+                // This avoids OEM document-provider MIME filters that render CSV files disabled.
+                val intent = android.content.Intent(android.content.Intent.ACTION_OPEN_DOCUMENT_TREE)
                 try {
                     startActivityForResult(
-                        android.content.Intent.createChooser(intent, "اختر ملف المنتجات"),
-                        productImportRequestCode
+                        android.content.Intent.createChooser(intent, "اختر المجلد الذي يحتوي ملف المنتجات"),
+                        productImportFolderRequestCode
                     )
                 } catch (e: Exception) {
                     Toast.makeText(
                         this@MainActivity,
-                        "تعذر فتح منتقي الملفات على هذا الجهاز",
+                        "تعذر فتح منتقي المجلدات على هذا الجهاز",
                         Toast.LENGTH_LONG
                     ).show()
                 }
