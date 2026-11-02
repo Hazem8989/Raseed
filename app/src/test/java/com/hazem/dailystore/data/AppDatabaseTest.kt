@@ -77,6 +77,164 @@ class AppDatabaseTest {
     }
 
     @Test
+    fun upgradesEverySupportedHistoricalDatabaseVersionToCurrentSchema() {
+        val context = RuntimeEnvironment.getApplication()
+        for (targetVersion in 1 until AppDatabase.DATABASE_VERSION) {
+            AppDatabase.resetForTests(context)
+            database = AppDatabase.getInstance(context)
+            val db = database.writableDatabase
+            db.insertOrThrow("users", null, ContentValues().apply {
+                put("id", "legacy-user-$targetVersion")
+                put("username", "legacy$targetVersion")
+                put("display_name", "مستخدم قديم")
+                put("password_hash", "preserved-hash")
+                put("password_salt", "preserved-salt")
+                put("role_key", "ADMIN")
+                put("is_active", 1)
+                put("must_change_password", 0)
+                put("created_at", "2026-10-01T08:00:00Z")
+                put("updated_at", "2026-10-01T08:00:00Z")
+            })
+            downgradeSchemaForMigrationTest(db, targetVersion)
+            db.version = targetVersion
+            database.close()
+
+            AppDatabase.resetForTests(context, deleteExisting = false)
+            database = AppDatabase.getInstance(context)
+            val upgraded = database.writableDatabase
+            assertEquals("Upgrade from version $targetVersion", AppDatabase.DATABASE_VERSION, upgraded.version)
+            upgraded.rawQuery(
+                "SELECT username,must_change_password FROM users WHERE id=?",
+                arrayOf("legacy-user-$targetVersion")
+            ).use { cursor ->
+                assertTrue("Legacy user must survive upgrade from $targetVersion", cursor.moveToFirst())
+                assertEquals("legacy$targetVersion", cursor.getString(0))
+                assertEquals(if (targetVersion < 8) 1 else 0, cursor.getInt(1))
+            }
+            listOf(
+                "daily_cash_sessions", "customer_credit_revaluations", "daily_supplier_rollovers",
+                "wallet_daily_openings", "cash_account_transfers", "service_wallets",
+                "service_wallet_transactions", "service_transfers", "service_wallet_account_links",
+                "system_cash_account_roles", "inventory_cost_layers", "sales_item_cost_allocations",
+                "return_cost_allocations", "inventory_adjustments", "supplier_return_refund_allocations",
+                "supplier_return_cost_allocations", "expense_categories", "operating_expenses"
+            ).forEach { table ->
+                upgraded.rawQuery(
+                    "SELECT 1 FROM sqlite_master WHERE type='table' AND name=?",
+                    arrayOf(table)
+                ).use { cursor ->
+                    assertTrue("Migration from $targetVersion must create $table", cursor.moveToFirst())
+                }
+            }
+            assertTrue("Integrity check failed after upgrade from $targetVersion", upgraded.isDatabaseIntegrityOk)
+            upgraded.rawQuery("PRAGMA foreign_key_check", null).use { cursor ->
+                assertTrue("Foreign-key check failed after upgrade from $targetVersion", !cursor.moveToFirst())
+            }
+            database.close()
+        }
+        AppDatabase.resetForTests(context)
+        database = AppDatabase.getInstance(context)
+        database.writableDatabase
+    }
+
+    private fun downgradeSchemaForMigrationTest(db: android.database.sqlite.SQLiteDatabase, targetVersion: Int) {
+        fun dropIndex(name: String) { db.execSQL("DROP INDEX IF EXISTS $name") }
+        fun dropTable(name: String) { db.execSQL("DROP TABLE IF EXISTS $name") }
+        fun dropColumn(table: String, column: String) {
+            val exists = db.rawQuery("PRAGMA table_info($table)", null).use { cursor ->
+                var found = false
+                while (cursor.moveToNext()) if (cursor.getString(1) == column) found = true
+                found
+            }
+            if (exists) db.execSQL("ALTER TABLE $table DROP COLUMN $column")
+        }
+
+        if (targetVersion < 17) {
+            dropIndex("idx_operating_expenses_date")
+            dropIndex("idx_operating_expenses_category")
+            dropTable("operating_expenses")
+            dropTable("expense_categories")
+        }
+        if (targetVersion < 16) {
+            dropIndex("idx_return_items_original_purchase_item")
+            dropIndex("idx_supplier_return_refunds_return")
+            dropIndex("idx_supplier_return_cost_source")
+            dropTable("supplier_return_refund_allocations")
+            dropTable("supplier_return_cost_allocations")
+            dropColumn("return_items", "original_purchase_item_id")
+            dropColumn("returns", "supplier_credit_reduction_syp_minor")
+            dropColumn("returns", "supplier_cash_refund_syp_minor")
+        }
+        if (targetVersion < 15) {
+            dropIndex("idx_inventory_adjustments_product_date")
+            dropTable("inventory_adjustments")
+        }
+        if (targetVersion == 13 || targetVersion < 12) {
+            db.delete("role_permissions", null, null)
+            db.delete("permissions", null, null)
+        }
+        if (targetVersion < 13) {
+            listOf(
+                "idx_returns_operation_id", "idx_returns_original_invoice",
+                "idx_return_items_original_sales_item", "idx_return_refund_operation_id",
+                "idx_return_refund_cash_transaction"
+            ).forEach(::dropIndex)
+            dropTable("return_cost_allocations")
+            listOf(
+                "operation_id", "posted_at", "cash_refund_usd_cents",
+                "credit_reduction_usd_cents", "returned_cogs_usd_cents",
+                "exchange_rate_syp_per_usd_milli"
+            ).forEach { dropColumn("returns", it) }
+            listOf("original_sales_item_id", "returned_cogs_usd_cents")
+                .forEach { dropColumn("return_items", it) }
+            listOf("operation_id", "cash_transaction_id", "refund_equivalent_syp_minor")
+                .forEach { dropColumn("return_refund_allocations", it) }
+        }
+        if (targetVersion < 11) {
+            dropIndex("idx_sales_posted_operating_date")
+            dropColumn("sales_invoices", "posted_operating_date")
+        }
+        if (targetVersion < 10) {
+            dropIndex("idx_sales_posted_at")
+            dropColumn("sales_invoices", "posted_at")
+        }
+        if (targetVersion < 9) {
+            dropIndex("idx_fifo_allocations_invoice")
+            dropIndex("idx_fifo_layers_available")
+            dropTable("sales_item_cost_allocations")
+            dropTable("inventory_cost_layers")
+            dropColumn("sales_items", "cogs_usd_cents")
+        }
+        if (targetVersion < 8) dropColumn("users", "must_change_password")
+        if (targetVersion < 7) dropTable("system_cash_account_roles")
+        if (targetVersion < 6) dropTable("service_wallet_account_links")
+        if (targetVersion < 5) {
+            dropIndex("idx_service_wallet_transactions_key_date")
+            dropIndex("idx_service_transfers_date")
+            dropTable("service_transfers")
+            dropTable("service_wallet_transactions")
+            dropTable("service_wallets")
+        }
+        if (targetVersion < 4) {
+            dropIndex("idx_cash_transactions_operating_date")
+            dropTable("cash_account_transfers")
+            dropTable("daily_supplier_rollovers")
+            dropTable("wallet_daily_openings")
+            dropColumn("cash_transactions", "operating_date")
+        }
+        if (targetVersion < 3) {
+            dropIndex("idx_daily_cash_session_account")
+            dropIndex("idx_customer_credit_revaluation_invoice")
+            dropTable("daily_cash_sessions")
+            dropTable("customer_credit_revaluations")
+        }
+        if (targetVersion < 2) {
+            dropIndex("idx_sales_customer_date")
+            dropColumn("sales_invoices", "sale_type")
+        }
+    }
+
+    @Test
     fun upgradesVersionSevenDatabaseWithoutLosingExistingUserOrSettings() {
         val context = RuntimeEnvironment.getApplication()
         val db = database.writableDatabase

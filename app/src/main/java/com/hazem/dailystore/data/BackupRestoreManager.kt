@@ -114,6 +114,7 @@ class BackupRestoreManager(private val context: Context) {
                 staged.delete()
                 if (rollback.exists() && live.exists()) rollback.delete()
             }
+            onProgress?.invoke("اكتملت الاستعادة والتحقق من قاعدة البيانات.")
         }
     }
 
@@ -125,6 +126,7 @@ class BackupRestoreManager(private val context: Context) {
             if (rollback.exists()) {
                 AppDatabase.getInstance(context).close()
                 val liveIsValid = live.isFile && runCatching {
+                    validateDatabase(live)
                     val restored = AppDatabase.getInstance(context).writableDatabase
                     validateOpenDatabase(restored)
                 }.isSuccess
