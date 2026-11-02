@@ -14,7 +14,8 @@ data class CustomerInvoicePaymentSummary(
     val id: String, val invoiceNumber: String, val date: String, val invoiceStatus: String,
     val paymentStatus: String, val totalUsdCents: Long, val paidUsdCents: Long,
     val outstandingUsdCents: Long, val originalRateMilli: Long,
-    val totalSypMinor: Long, val paidSypMinor: Long, val outstandingSypMinor: Long
+    val totalSypMinor: Long, val paidSypMinor: Long, val outstandingSypMinor: Long,
+    val creditReductionUsdCents: Long = 0L
 )
 data class CustomerFinancialSummary(
     val id: String, val name: String, val phone: String?,
@@ -79,7 +80,8 @@ class CustomerPaymentRepository(context: Context) {
                 val total = c.getLong(4)
                 val originalRate = c.getLong(5)
                 val paid = paidUsdCents(db, id)
-                val outstanding = (total - paid).coerceAtLeast(0L)
+                val creditReduction = creditReductionUsdCents(db, id)
+                val outstanding = (total - paid - creditReduction).coerceAtLeast(0L)
                 val paidSyp = paidSypMinor(db, id, originalRate)
                 val effectiveRate = if (originalRate > 0L) maxOf(current, originalRate) else 0L
                 val totalSyp = if (originalRate > 0L) CurrencyConverter.usdCentsToSyp(total, originalRate) else 0L
@@ -94,7 +96,8 @@ class CustomerPaymentRepository(context: Context) {
                 }
                 result.add(CustomerInvoicePaymentSummary(
                     id, c.getString(1), c.getString(2), c.getString(3), status,
-                    total, paid, outstanding, originalRate, totalSyp, paidSyp, outstandingSyp
+                    total, paid, outstanding, originalRate, totalSyp, paidSyp, outstandingSyp,
+                    creditReduction
                 ))
             }
         }
@@ -332,7 +335,8 @@ class CustomerPaymentRepository(context: Context) {
         originalRate: Long, currentRate: Long, now: String
     ) {
         if (originalRate <= 0L || currentRate <= 0L) return
-        val outstanding = (totalUsdCents - paidUsdCents(db, invoiceId)).coerceAtLeast(0L)
+        val outstanding = (totalUsdCents - paidUsdCents(db, invoiceId) -
+            creditReductionUsdCents(db, invoiceId)).coerceAtLeast(0L)
         if (outstanding == 0L) return
         val appliedRate = maxOf(originalRate, currentRate)
         val newValue = CurrencyConverter.usdCentsToSyp(outstanding, appliedRate)
@@ -363,6 +367,14 @@ class CustomerPaymentRepository(context: Context) {
         }
         db.insertOrThrow("audit_log", null, audit)
     }
+
+    private fun creditReductionUsdCents(db: SQLiteDatabase, invoiceId: String): Long =
+        db.rawQuery(
+            """SELECT COALESCE(SUM(credit_reduction_usd_cents),0)
+               FROM returns WHERE original_invoice_type='SALE'
+                 AND original_invoice_id=? AND status='POSTED'""".trimIndent(),
+            arrayOf(invoiceId)
+        ).use { c -> c.moveToFirst(); c.getLong(0) }
 
     private fun paidSypMinor(db: SQLiteDatabase, invoiceId: String, originalRate: Long): Long {
         var total = 0L
