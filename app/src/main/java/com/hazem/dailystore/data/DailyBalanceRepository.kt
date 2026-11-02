@@ -12,9 +12,9 @@ import java.util.UUID
 
 data class DailyAccountSummary(
     val accountId:String,val accountName:String,val accountType:String,val currencyCode:String,
-    val openingMinor:Long,val salesReceiptsMinor:Long,val debtCollectionsMinor:Long,val serviceTransferReceiptsMinor:Long,val otherInflowsMinor:Long,
+    val openingMinor:Long,val salesReceiptsMinor:Long,val debtCollectionsMinor:Long,val serviceTransferReceiptsMinor:Long,val supplierReturnRefundsMinor:Long,val otherInflowsMinor:Long,
     val supplierPaymentsMinor:Long,val personalWithdrawalsMinor:Long,val transferInMinor:Long,val transferOutMinor:Long,
-    val operatingExpensesMinor:Long,val otherOutflowsMinor:Long,val closingMinor:Long
+    val operatingExpensesMinor:Long,val salesReturnRefundsMinor:Long,val otherOutflowsMinor:Long,val closingMinor:Long
 ) { val electronicReceiptsMinor:Long get()=Math.addExact(Math.addExact(salesReceiptsMinor,debtCollectionsMinor),serviceTransferReceiptsMinor); val liquidatableElectronicReceiptsMinor:Long get()=(electronicReceiptsMinor-transferOutMinor).coerceAtLeast(0L) }
 data class DailyCashReport(val operatingDate:String,val accounts:List<DailyAccountSummary>,val electronicReceiptsByCurrency:Map<String,Long>,val liquidatableElectronicReceiptsByCurrency:Map<String,Long>,val physicalCashReceiptsByCurrency:Map<String,Long>,val supplierRollover:SupplierRolloverSummary?)
 data class SupplierRolloverSummary(
@@ -243,10 +243,10 @@ class DailyBalanceRepository(context:Context) {
                 val id=c.getString(0);val base=c.getLong(4)
                 val opening=db.rawQuery("SELECT opening_minor FROM wallet_daily_openings WHERE operating_date=? AND account_id=?",arrayOf(date,id)).use { if(it.moveToFirst())it.getLong(0)else openingBefore(db,id,base,date) }
                 val s=totals(db,id,date)
-                val totalInflows = Math.addExact(Math.addExact(s[0], s[1]), Math.addExact(s[2], Math.addExact(s[5], s[8])))
-                val totalOutflows = Math.addExact(Math.addExact(s[3], s[4]), Math.addExact(s[6], Math.addExact(s[7], s[9])))
+                val totalInflows = Math.addExact(Math.addExact(s[0], s[1]), Math.addExact(s[2], Math.addExact(s[5], Math.addExact(s[8], s[10]))))
+                val totalOutflows = Math.addExact(Math.addExact(s[3], s[4]), Math.addExact(s[6], Math.addExact(s[7], Math.addExact(s[9], s[11]))))
                 val closing = Math.addExact(opening, Math.subtractExact(totalInflows, totalOutflows))
-                rows.add(DailyAccountSummary(id,c.getString(1),c.getString(2),c.getString(3),opening,s[0],s[1],s[8],s[2],s[3],s[4],s[5],s[6],s[9],s[7],closing))
+                rows.add(DailyAccountSummary(id,c.getString(1),c.getString(2),c.getString(3),opening,s[0],s[1],s[8],s[10],s[2],s[3],s[4],s[5],s[6],s[9],s[11],s[7],closing))
             }
         }
         val walletRows=rows.filter{it.accountType=="WALLET"}
@@ -264,7 +264,7 @@ class DailyBalanceRepository(context:Context) {
     }
 
     private fun totals(db:SQLiteDatabase,id:String,date:String):List<Long>{
-        val s=MutableList(10){0L}
+        val s=MutableList(12){0L}
         db.rawQuery("SELECT transaction_type,direction,SUM(amount_minor) FROM cash_transactions WHERE account_id=? AND COALESCE(operating_date,substr(created_at,1,10))=? AND transaction_type<>'WALLET_DAILY_OPENING_ADJUSTMENT' GROUP BY transaction_type,direction",arrayOf(id,date)).use { c->
             while(c.moveToNext()){val t=c.getString(0);val d=c.getString(1);val n=c.getLong(2)
                 when{t=="SALE_RECEIPT"&&d=="IN"->s[0]+=n;t=="CUSTOMER_CREDIT_COLLECTION"&&d=="IN"->s[1]+=n
@@ -272,6 +272,8 @@ class DailyBalanceRepository(context:Context) {
                     t=="ACCOUNT_TRANSFER_IN"&&d=="IN"->s[5]+=n;t=="PURCHASE_PAYMENT"&&d=="OUT"->s[3]+=n
                     t=="PERSONAL_WITHDRAWAL"&&d=="OUT"->s[4]+=n;t=="ACCOUNT_TRANSFER_OUT"&&d=="OUT"->s[6]+=n
                     t=="OPERATING_EXPENSE"&&d=="OUT"->s[9]+=n
+                    t=="PURCHASE_RETURN_REFUND"&&d=="IN"->s[10]+=n
+                    t=="SALE_RETURN_REFUND"&&d=="OUT"->s[11]+=n
                     d=="IN"->s[2]+=n;d=="OUT"->s[7]+=n}
             }
         };return s
