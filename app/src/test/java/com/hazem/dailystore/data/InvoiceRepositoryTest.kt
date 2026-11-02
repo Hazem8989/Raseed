@@ -336,7 +336,7 @@ class InvoiceRepositoryTest {
 
         val sale = invoices.saveSalesDraft(
             cashierId, "cashier-sale-${UUID.randomUUID()}", null, null,
-            "2026-11-02", 0L, null, listOf(InvoiceLineInput(productId, 1.0, 250L))
+            "2026-11-02", 0L, null, listOf(InvoiceLineInput(productId, BigDecimal.ONE, 250L))
         )
         assertTrue(sale.invoiceId.isNotBlank())
 
@@ -346,7 +346,7 @@ class InvoiceRepositoryTest {
         try {
             invoices.savePurchaseDraft(
                 cashierId, "cashier-purchase-${UUID.randomUUID()}", null, null,
-                "2026-11-02", 0L, null, listOf(InvoiceLineInput(productId, 1.0, 100L))
+                "2026-11-02", 0L, null, listOf(InvoiceLineInput(productId, BigDecimal.ONE, 100L))
             )
             org.junit.Assert.fail("Cashier must not create purchase invoices")
         } catch (_: IllegalArgumentException) { }
