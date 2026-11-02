@@ -236,4 +236,25 @@ class SalesReturnRepositoryTest {
         assertEquals(8.0, stock(), 0.000001)
     }
 
+
+    @Test
+    fun primarySalesReturnIsAddedToOutboxAtomically() {
+        val context = RuntimeEnvironment.getApplication()
+        val sync = SyncProtocolRepository(context)
+        sync.configureAsPrimary(adminId, "الهاتف الرئيسي")
+        val draft = invoices.saveSalesDraft(
+            adminId, "sync-sales-return-draft", null, null, "2026-11-02", 0L, null,
+            listOf(InvoiceLineInput(productId, BigDecimal("2"), 250L))
+        )
+        assertTrue(invoices.postCashSale(adminId, draft.invoiceId, "sync-sales-return-sale", cashAccountId))
+        val itemId = saleItemId(draft.invoiceId)
+        returns.postSalesReturn(
+            adminId, draft.invoiceId, "sync-sales-return-op", "2026-11-02",
+            "مرتجع للمزامنة", listOf(SalesReturnItemInput(itemId, BigDecimal.ONE)),
+            listOf(SalesRefundAllocationInput(cashAccountId, 250L))
+        )
+        assertTrue(sync.pendingOutbox().any { it.entityType == "SALES_RETURN" &&
+            it.operationType == "POST_SALES_RETURN" })
+    }
+
 }
