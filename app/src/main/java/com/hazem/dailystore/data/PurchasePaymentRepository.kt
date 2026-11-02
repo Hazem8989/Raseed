@@ -252,10 +252,7 @@ class PurchasePaymentRepository(context: Context) {
         require(newAmountMinor > 0L) { "مبلغ الدفعة يجب أن يكون أكبر من صفر" }
         val cleanNote = newNote?.trim()?.takeIf { it.isNotEmpty() }
         val db = database.writableDatabase
-        val managerExists = db.rawQuery(
-            "SELECT 1 FROM users WHERE id=? AND role_key='ADMIN' AND is_active=1 AND must_change_password=0", arrayOf(actorUserId)
-        ).use { it.moveToFirst() }
-        require(managerExists) { "يجب تسجيل الدخول بحساب مدير نشط لتعديل دفعات الموردين" }
+        PermissionPolicy.require(db, actorUserId, PermissionPolicy.SUPPLIER_PAYMENTS_CORRECT)
         db.beginTransaction()
         try {
             val old = db.rawQuery(
