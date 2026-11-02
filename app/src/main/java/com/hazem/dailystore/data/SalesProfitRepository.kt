@@ -73,7 +73,7 @@ class SalesProfitRepository(context: Context) {
                 if (lineCount == 0 || missing) uncosted++
             }
         }
-        val returnWhere = StringBuilder(" WHERE status='POSTED'")
+        val returnWhere = StringBuilder(" WHERE status='POSTED' AND original_invoice_type='SALE'")
         val returnArgs = mutableListOf<String>()
         if (fromDate != null) {
             returnWhere.append(" AND return_date>=? AND return_date<=?")
