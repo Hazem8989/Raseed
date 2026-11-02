@@ -205,3 +205,50 @@ Remaining authorization work:
 - Add repository-level negative tests for each remaining mutation path and read-access boundary.
 
 **Gate decision:** the first authorization batch now passes CI, so it is reasonable to begin the next financial-control phase. It is not reasonable to claim that the entire authorization subsystem is complete or that the app is production-ready. Returns/refunds, inventory adjustments, expenses, migration matrix, backup fault injection, device acceptance, and permanent release signing remain open.
+
+
+---
+
+## Corrective audit addendum — verified against current branch HEAD 2026-11-02
+
+**Current source HEAD:** `8133188f790dfcc8d650f98dfe0015b9d8ddc4f1`  
+**Current database schema:** version **15**.  
+**Main branch:** `63b233cd4fb3085d0ade05e3e4c1007efcae30ca`; unchanged.
+
+This addendum supersedes earlier status statements above wherever they conflict with the current source. The original audit snapshot was stale in several areas and understated completed work.
+
+### Corrections verified in source
+
+- The database schema is version 15, not version 11. The migration chain includes versions 12–15 for permission defaults, sales-return schema, permission-default correction, and inventory-adjustment schema.
+- A centralized `PermissionPolicy` is implemented and is used by financial and master-data mutation repositories.
+- An in-app manager screen for CASHIER role permissions is present in `MainActivity`; the earlier statement that there was no permission-editor screen is no longer correct.
+- `SalesReturnRepository` implements customer sales-return posting, including original-invoice/item validation, cumulative return limits, refund versus credit-reduction calculation, FIFO cost provenance, audit/idempotency records, and transaction-scoped posting. Tests cover cash returns, credit returns, repeat posting, later-period reporting, and cashier denial.
+- `InventoryAdjustmentRepository` implements atomic positive/negative stock adjustments, explicit cost for increases, FIFO consumption for decreases, actor permission checks, audit/idempotency records, and inventory valuation integration. Tests cover FIFO costing, retries, negative-stock rejection, missing cost, non-inventory products, and cashier denial.
+- The above two repositories are **not yet integrated into the app's user interface**. The current `MainActivity` contains no calls/imports for either repository and has no return-posting or stock-adjustment screen. Existing opening-stock entry is not a substitute for ongoing stocktake adjustments.
+- Purchase returns are still not implemented. They require a separate supplier-credit/refund ledger and must not reuse customer sales-refund logic.
+- No expense ledger, expense repository, or expense workflow is present. Gross profit remains gross trading profit after sales returns and FIFO COGS, not net profit.
+- Migration tests currently exercise representative upgrade paths from versions 7, 8, 9, and 13. This is useful coverage but not a complete fixture matrix for every supported historical version.
+- The earlier audit's authorization finding is partly remediated: the permission editor exists and core mutation paths use database-backed permissions. Read-access boundaries and every remaining mutation path still require systematic review.
+
+### Current CI and artifact evidence
+
+- Latest source commit: `8133188f790dfcc8d650f98dfe0015b9d8ddc4f1`.
+- GitHub Actions run: [41433643515](https://github.com/Hazem8989/Raseed/actions/runs/41433643515), completed successfully at 2026-11-02 11:06 UTC.
+- `testDebugUnitTest`: passed.
+- Debug APK build, APK signature verification, and artifact upload: passed.
+- Artifact: `the-daily-shop-debug-development-only`, 9,438,451 bytes; SHA-256 `64d408c1ada27736b4069fdb997332c4b6c1877c6ae639abd9c75772c01f1d5b`; expires 2026-11-16.
+- Permanent release signing is still not configured; the release build was skipped. This artifact is debug-only and is not evidence of safe in-place upgrade to a release-signed installation.
+- No physical-device acceptance has been performed.
+
+### Updated execution order
+
+1. Complete end-to-end sales-return UI and connect it to the already-tested repository; test UI validation and financial posting.
+2. Add end-to-end stocktake/adjustment UI and connect it to the already-tested adjustment repository.
+3. Design and implement purchase returns with a supplier-credit/refund ledger as a separate accounting workflow.
+4. Implement operating expenses with actor, account/currency, operating date, references, idempotency, audit, and expense reports; only then add net-profit reporting.
+5. Complete authorization/read-boundary review and add negative tests for all remaining financial operations.
+6. Expand migration fixtures across all supported versions and add backup/restore fault-injection and background-execution tests.
+7. Perform realistic on-device acceptance, then establish permanent release signing and update-continuity verification.
+8. Keep multi-device sync deferred until its security/authority/conflict model is implemented and explicitly approved.
+
+No cloud service, network listener, or sync transport is approved by this addendum.
