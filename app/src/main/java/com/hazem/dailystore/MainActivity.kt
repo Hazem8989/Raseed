@@ -987,7 +987,7 @@ class MainActivity : Activity() {
         )
         lateinit var popup: PopupWindow
         val visibleEntries = if (isManager()) entries else entries.filterNot {
-            it.first == "المنتجات والمخزون" || it.first == "النسخ الاحتياطي والاستعادة"
+            it.first in setOf("المنتجات والمخزون", "المشتريات", "التقارير", "النسخ الاحتياطي والاستعادة")
         }
         visibleEntries.forEach { (title, description) ->
             val item = LinearLayout(this).apply {
@@ -1039,6 +1039,10 @@ class MainActivity : Activity() {
     )
 
     private fun showPurchases() {
+        if (!isManager()) {
+            Toast.makeText(this, "إدارة المشتريات متاحة للمدير فقط", Toast.LENGTH_SHORT).show()
+            return
+        }
         markScreen("PURCHASES")
         val repository = PurchasePaymentRepository(this)
         val page = LinearLayout(this).apply {
@@ -1317,6 +1321,10 @@ class MainActivity : Activity() {
     }
 
     private fun showSuppliers() {
+        if (!isManager()) {
+            Toast.makeText(this, "حسابات الموردين متاحة للمدير فقط", Toast.LENGTH_SHORT).show()
+            return
+        }
         markScreen("SUPPLIERS")
         val repository = PurchasePaymentRepository(this)
         val suppliers = repository.listSupplierSummaries()
@@ -1384,6 +1392,10 @@ class MainActivity : Activity() {
     }
 
     private fun showSupplierDetails(supplierId: String) {
+        if (!isManager()) {
+            Toast.makeText(this, "حسابات الموردين متاحة للمدير فقط", Toast.LENGTH_SHORT).show()
+            return
+        }
         markScreen("SUPPLIER_DETAILS", supplierId)
         val repository = PurchasePaymentRepository(this)
         val supplier = repository.listSupplierSummaries().firstOrNull { it.id == supplierId }
@@ -2244,6 +2256,10 @@ class MainActivity : Activity() {
 
 
     private fun showGeneralReports() {
+        if (!isManager()) {
+            Toast.makeText(this, "التقارير المالية متاحة للمدير فقط", Toast.LENGTH_SHORT).show()
+            return
+        }
         markScreen("GENERAL_REPORTS")
         val capital = InventoryValuationRepository(this).dailyCapital()
         val rate = StoreRepository(this).getCurrentExchangeRateMilli()
