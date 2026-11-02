@@ -1554,6 +1554,14 @@ class MainActivity : Activity() {
         content.addView(label("المبلغ المستحق الثابت: ${formatSypAmount(supplier.outstandingSypMinor)} ل.س",
             16f, green, true, Gravity.RIGHT).apply { setPadding(0, dp(4), 0, dp(12)) })
         val supplierStatement = PartyStatementRepository(this).supplier(supplierId)
+        val supplierExportRow = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
+        supplierExportRow.addView(smallButton("تصدير Excel") {
+            exportPartyStatement(supplierStatement, "xlsx")
+        }, LinearLayout.LayoutParams(0, dp(44), 1f).apply { marginEnd = dp(6) })
+        supplierExportRow.addView(smallButton("تصدير PDF") {
+            exportPartyStatement(supplierStatement, "pdf")
+        }, LinearLayout.LayoutParams(0, dp(44), 1f))
+        content.addView(supplierExportRow, fieldParams(dp(44), dp(6)))
         content.addView(sectionHeading("كشف حركة المورد"))
         content.addView(label("الرصيد حسب الفواتير والدفعات وتخفيضات المرتجعات: ${formatSypAmount(supplierStatement.closingBalanceSypMinor)} ل.س",
             13f, green, true, Gravity.RIGHT).apply { setPadding(0, dp(4), 0, dp(8)) })
@@ -1817,6 +1825,14 @@ class MainActivity : Activity() {
             17f, green, true, Gravity.RIGHT))
         content.addView(summaryCard, fieldParams(-2, dp(16)))
         val customerStatement = PartyStatementRepository(this).customer(customerId)
+        val customerExportRow = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
+        customerExportRow.addView(smallButton("تصدير Excel") {
+            exportPartyStatement(customerStatement, "xlsx")
+        }, LinearLayout.LayoutParams(0, dp(44), 1f).apply { marginEnd = dp(6) })
+        customerExportRow.addView(smallButton("تصدير PDF") {
+            exportPartyStatement(customerStatement, "pdf")
+        }, LinearLayout.LayoutParams(0, dp(44), 1f))
+        content.addView(customerExportRow, fieldParams(dp(44), dp(6)))
         content.addView(sectionHeading("كشف حركة الحساب"))
         content.addView(label("الرصيد المرجعي: ${moneyText(customerStatement.closingBalanceUsdCents)} USD • الرصيد التاريخي المحسوب بالليرة: ${formatSypAmount(customerStatement.closingBalanceSypMinor)} ل.س",
             13f, green, true, Gravity.RIGHT).apply { setPadding(0, dp(4), 0, dp(8)) })
