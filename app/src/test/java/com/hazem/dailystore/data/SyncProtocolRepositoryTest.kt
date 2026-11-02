@@ -8,6 +8,7 @@ import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
+import javax.crypto.spec.SecretKeySpec
 import org.junit.Before
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -18,6 +19,7 @@ import org.robolectric.RuntimeEnvironment
 class SyncProtocolRepositoryTest {
     private lateinit var database: AppDatabase
     private lateinit var repository: SyncProtocolRepository
+    private lateinit var vault: SyncCredentialVault
     private lateinit var adminId: String
 
     @Before fun setUp() {
@@ -29,7 +31,8 @@ class SyncProtocolRepositoryTest {
         val admin = auth.authenticate("admin", "1234")!!
         auth.changePassword(admin.id, "1234", "TestAdmin123")
         adminId = admin.id
-        repository = SyncProtocolRepository(context)
+        vault = SyncCredentialVault(context) { SecretKeySpec(ByteArray(32) { 7 }, "AES") }
+        repository = SyncProtocolRepository(context, vault)
     }
 
     @After fun tearDown() { database.close() }
@@ -65,6 +68,27 @@ class SyncProtocolRepositoryTest {
         try { repository.enrollSecondaryDevice(adminId, invitation.token, UUID.randomUUID().toString(), "جهاز آخر") }
         catch (_: IllegalArgumentException) { rejected = true }
         assertTrue(rejected)
+    }
+
+    @Test fun secondaryEnrollmentStoresCredentialEncryptedAndKeepsAuthorityRemote() {
+        val primaryId = UUID.randomUUID().toString()
+        val secretBytes = ByteArray(32) { (it + 11).toByte() }
+        val credential = android.util.Base64.encodeToString(
+            secretBytes,
+            android.util.Base64.URL_SAFE or android.util.Base64.NO_WRAP or android.util.Base64.NO_PADDING
+        )
+        repository.configureAsSecondary(adminId, "store-remote-01", primaryId, credential, "الهاتف الثاني")
+        assertTrue(repository.isConfiguredSecondary())
+        assertFalse(repository.hasConfiguredPrimary())
+        assertTrue(repository.secondaryCredential()!!.contentEquals(secretBytes))
+        database.readableDatabase.rawQuery(
+            "SELECT state_value FROM sync_protocol_state WHERE state_key='authority_device_id'", null
+        ).use { c -> assertTrue(c.moveToFirst()); assertEquals(primaryId, c.getString(0)) }
+        val storedValues = RuntimeEnvironment.getApplication()
+            .getSharedPreferences("the_daily_shop_sync_credentials", android.content.Context.MODE_PRIVATE)
+            .all.values
+        assertTrue(storedValues.isNotEmpty())
+        assertFalse(storedValues.any { it == credential })
     }
 
     @Test fun cashierCannotConfigurePrimaryOrCreateInvitations() {
