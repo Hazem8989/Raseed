@@ -35,6 +35,7 @@ data class PurchaseReturnResult(
 
 /** Supplier returns reduce the original payable first; any excess is received into a selected account. */
 class PurchaseReturnRepository(context: Context) {
+    private val context = context.applicationContext
     private val database = AppDatabase.getInstance(context)
     private data class Invoice(
         val id: String, val number: String, val supplierId: String, val supplierName: String,
@@ -177,6 +178,14 @@ class PurchaseReturnRepository(context: Context) {
                 put("payload_hash",payloadHash); put("status","COMPLETED"); put("result_reference",returnId)
                 put("created_at",now); put("completed_at",now)
             })
+            SyncProtocolRepository(context).enqueueLocalOperation(
+                db, actorUserId, operationId, "POST_PURCHASE_RETURN", "PURCHASE_RETURN", returnId, "CREATE",
+                org.json.JSONObject().put("original_invoice_id", invoice.id)
+                    .put("return_id", returnId).put("return_number", number).put("return_date", returnDate)
+                    .put("reason", reason.trim()).put("total_usd_cents", preview.totalUsdCents)
+                    .put("supplier_credit_reduction_syp_minor", preview.supplierCreditReductionSypMinor)
+                    .put("supplier_cash_refund_syp_minor", preview.supplierCashRefundSypMinor).toString()
+            )
             db.setTransactionSuccessful()
             return PurchaseReturnResult(returnId,number,preview.totalUsdCents,
                 preview.supplierCreditReductionSypMinor,preview.supplierCashRefundSypMinor,false)
