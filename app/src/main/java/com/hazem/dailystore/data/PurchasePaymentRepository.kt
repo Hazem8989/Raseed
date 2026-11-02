@@ -14,14 +14,15 @@ data class PurchaseInvoicePaymentSummary(
     val id: String, val invoiceNumber: String, val date: String, val invoiceStatus: String,
     val paymentStatus: String, val totalUsdCents: Long, val paidUsdCents: Long,
     val outstandingUsdCents: Long, val supplierId: String?, val supplierName: String?,
-    val totalSypMinor: Long, val paidSypMinor: Long, val outstandingSypMinor: Long, val invoiceRateMilli: Long
+    val totalSypMinor: Long, val paidSypMinor: Long, val outstandingSypMinor: Long, val invoiceRateMilli: Long,
+    val supplierReturnCreditSypMinor: Long = 0L
 )
 data class SupplierFinancialSummary(
     val id: String, val name: String, val phone: String?, val address: String?,
     val totalPurchaseUsdCents: Long, val paidUsdCents: Long,
     val outstandingUsdCents: Long, val unpaidInvoiceCount: Int,
     val totalPurchaseSypMinor: Long, val paidSypMinor: Long, val outstandingSypMinor: Long,
-    val unpricedInvoiceCount: Int
+    val unpricedInvoiceCount: Int, val supplierReturnCreditsSypMinor: Long = 0L
 )
 data class PurchasePaymentRecord(
     val id: String, val amountMinor: Long, val currencyCode: String, val accountName: String,
@@ -57,12 +58,13 @@ class PurchasePaymentRepository(context: Context) {
                 val outstandingSyp=(totalSyp-paidSyp-supplierCreditSyp).coerceAtLeast(0L)
                 val paidUsd=if(rate>0L) CurrencyConverter.sypToUsdCents(paidSyp,rate)
                     else paidUsdCentsLegacy(database.readableDatabase,id)
-                val creditUsd=if(rate>0L) CurrencyConverter.sypToUsdCents(supplierCreditSyp,rate) else 0L
-                val outstandingUsd=(totalUsd-paidUsd-creditUsd).coerceAtLeast(0L)
+                val outstandingUsd=if(rate>0L) CurrencyConverter.sypToUsdCents(outstandingSyp,rate)
+                    else (totalUsd-paidUsd).coerceAtLeast(0L)
                 val paymentStatus=when {
                     invoiceStatus=="CANCELLED" -> "CANCELLED"
                     invoiceStatus=="DRAFT" -> "DRAFT"
                     rate<=0L -> when { paidUsd>=totalUsd -> "PAID"; paidUsd>0L -> "PARTIALLY_PAID"; else -> "UNPAID" }
+                    outstandingSyp==0L && supplierCreditSyp>0L && paidSyp<totalSyp -> "SETTLED_BY_RETURN"
                     outstandingSyp==0L -> "PAID"
                     paidSyp>0L -> "PARTIALLY_PAID"
                     else -> "UNPAID"
@@ -70,7 +72,7 @@ class PurchasePaymentRepository(context: Context) {
                 result.add(PurchaseInvoicePaymentSummary(
                     id,c.getString(1),c.getString(2),invoiceStatus,paymentStatus,totalUsd,paidUsd,outstandingUsd,
                     if(c.isNull(5)) null else c.getString(5),if(c.isNull(6)) null else c.getString(6),
-                    totalSyp,paidSyp,outstandingSyp,rate
+                    totalSyp,paidSyp,outstandingSyp,rate,supplierCreditSyp
                 ))
             }
         }
@@ -90,7 +92,8 @@ class PurchasePaymentRepository(context: Context) {
                     invoices.count { it.paymentStatus=="UNPAID" || it.paymentStatus=="PARTIALLY_PAID" },
                     invoices.sumOf { it.totalSypMinor },invoices.sumOf { it.paidSypMinor },
                     invoices.sumOf { it.outstandingSypMinor },
-                    invoices.count { it.invoiceRateMilli<=0L && it.paymentStatus!="PAID" }
+                    invoices.count { it.invoiceRateMilli<=0L && it.paymentStatus!="PAID" },
+                    invoices.sumOf { it.supplierReturnCreditSypMinor }
                 ))
             }
         }
