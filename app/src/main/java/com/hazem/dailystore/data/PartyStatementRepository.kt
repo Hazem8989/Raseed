@@ -102,14 +102,15 @@ class PartyStatementRepository(context: Context) {
                       exchange_rate_syp_per_usd_milli,created_at
                FROM returns
                WHERE party_type='CUSTOMER' AND party_id=? AND original_invoice_type='SALE'
-                 AND status='POSTED' AND credit_reduction_usd_cents>0
+                 AND status='POSTED'
                ORDER BY return_date,created_at,id""".trimIndent(), arrayOf(customerId)
         ).use { c ->
             while (c.moveToNext()) {
                 val rate = c.getLong(4)
                 val credit = c.getLong(3)
-                if (rate <= 0L) unpriced++
+                if (credit > 0L && rate <= 0L) unpriced++
                 val refunds = refundTotals(c.getString(0))
+                if (credit == 0L && refunds.first == 0L && refunds.second == 0L) continue
                 rows.add(PartyStatementEntry(
                     c.getString(0), c.getString(2), "SALES_RETURN",
                     c.getString(1), "تخفيض دين العميل بمرتجع",
