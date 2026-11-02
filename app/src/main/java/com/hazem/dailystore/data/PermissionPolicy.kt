@@ -148,6 +148,11 @@ object PermissionPolicy {
         }
     }
 
+    fun rolePermissions(db: SQLiteDatabase, roleKey: String): Map<String, Boolean> =
+        listRolePermissions(db, roleKey).associate { it.key to it.allowed }
+
+    fun permissionDescriptions(): Map<String, String> = descriptions.toMap()
+
     fun allPermissionKeys(): Set<String> = descriptions.keys
 
     fun permissionDescriptions(): Map<String, String> = descriptions.toMap()
