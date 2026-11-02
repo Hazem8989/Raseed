@@ -1529,6 +1529,28 @@ class MainActivity : Activity() {
             13f, textColor, false, Gravity.RIGHT).apply { setPadding(0, dp(4), 0, dp(4)) })
         content.addView(label("المبلغ المستحق الثابت: ${formatSypAmount(supplier.outstandingSypMinor)} ل.س",
             16f, green, true, Gravity.RIGHT).apply { setPadding(0, dp(4), 0, dp(12)) })
+        val supplierStatement = PartyStatementRepository(this).supplier(supplierId)
+        content.addView(sectionHeading("كشف حركة المورد"))
+        content.addView(label("الرصيد حسب الفواتير والدفعات وتخفيضات المرتجعات: ${formatSypAmount(supplierStatement.closingBalanceSypMinor)} ل.س",
+            13f, green, true, Gravity.RIGHT).apply { setPadding(0, dp(4), 0, dp(8)) })
+        if (supplierStatement.unpricedEntryCount > 0) content.addView(label(
+            "تنبيه: توجد ${supplierStatement.unpricedEntryCount} حركة بلا سعر صرف موثوق؛ لا تدخل في الرصيد المحسوب.",
+            11f, gold.toInt(), true, Gravity.RIGHT).apply { setPadding(0, 0, 0, dp(8)) })
+        if (supplierStatement.entries.isEmpty()) content.addView(label("لا توجد حركات مالية مسجلة.",
+            12f, mutedColor, false, Gravity.CENTER).apply { setPadding(0, dp(8), 0, dp(8)) })
+        supplierStatement.entries.asReversed().forEach { entry ->
+            val amount = when {
+                entry.debitSypMinor > 0L -> "مدين: ${formatSypAmount(entry.debitSypMinor)} ل.س"
+                entry.creditSypMinor > 0L -> "دائن: ${formatSypAmount(entry.creditSypMinor)} ل.س"
+                else -> "حركة مالية"
+            }
+            val refund = if (entry.cashRefundSypMinor > 0L)
+                " • استرداد نقدي: ${formatSypAmount(entry.cashRefundSypMinor)} ل.س" else ""
+            content.addView(label(
+                "${entry.date} • ${entry.reference} • ${entry.description}\n$amount • الرصيد: ${formatSypAmount(entry.balanceSypMinor)} ل.س$refund",
+                11f, textColor, false, Gravity.RIGHT
+            ).apply { setPadding(dp(8), dp(6), dp(8), dp(6)); background = cardBackground() })
+        }
         var filter = "ALL"
         val filterRow = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
         val list = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
@@ -1739,6 +1761,26 @@ class MainActivity : Activity() {
         summaryCard.addView(label("المطلوب حالياً: " + formatSypAmount(summary?.outstandingSypMinor ?: 0L) + " ل.س",
             17f, green, true, Gravity.RIGHT))
         content.addView(summaryCard, fieldParams(-2, dp(16)))
+        val customerStatement = PartyStatementRepository(this).customer(customerId)
+        content.addView(sectionHeading("كشف حركة الحساب"))
+        content.addView(label("الرصيد المرجعي: ${moneyText(customerStatement.closingBalanceUsdCents)} USD • الرصيد التاريخي المحسوب بالليرة: ${formatSypAmount(customerStatement.closingBalanceSypMinor)} ل.س",
+            13f, green, true, Gravity.RIGHT).apply { setPadding(0, dp(4), 0, dp(8)) })
+        if (customerStatement.unpricedEntryCount > 0) content.addView(label(
+            "تنبيه: توجد ${customerStatement.unpricedEntryCount} حركة بلا سعر صرف موثوق؛ لا تدخل في الرصيد المحسوب.",
+            11f, gold.toInt(), true, Gravity.RIGHT).apply { setPadding(0, 0, 0, dp(8)) })
+        if (customerStatement.entries.isEmpty()) content.addView(label("لا توجد حركات مالية مسجلة.",
+            12f, mutedColor, false, Gravity.CENTER).apply { setPadding(0, dp(8), 0, dp(8)) })
+        customerStatement.entries.asReversed().forEach { entry ->
+            val amount = when {
+                entry.debitUsdCents > 0L -> "مدين: ${moneyText(entry.debitUsdCents)} USD"
+                entry.creditUsdCents > 0L -> "دائن: ${moneyText(entry.creditUsdCents)} USD"
+                else -> "حركة مالية"
+            }
+            content.addView(label(
+                "${entry.date} • ${entry.reference} • ${entry.description}\n$amount • الرصيد: ${moneyText(entry.balanceUsdCents)} USD",
+                11f, textColor, false, Gravity.RIGHT
+            ).apply { setPadding(dp(8), dp(6), dp(8), dp(6)); background = cardBackground() })
+        }
         content.addView(sectionHeading("فواتير البيع الآجل"))
         if (invoices.isEmpty()) {
             content.addView(label("لا توجد فواتير بيع آجل لهذا الزبون حتى الآن.",
