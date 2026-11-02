@@ -212,6 +212,9 @@ class SyncProtocolRepository(private val context: Context, private val credentia
             putState(db, "authority_device_id", primaryDeviceId, now)
             putState(db, "local_device_role", "SECONDARY", now)
             putState(db, "store_id", storeId, now)
+            if (state(db, "secondary_next_sequence") == null) {
+                putState(db, "secondary_next_sequence", "1", now)
+            }
             credentialVault.save(localDeviceId, secret)
             credentialSaved = true
             audit(db, actorUserId, "SYNC_SECONDARY_CONFIGURED", localDeviceId, null,
@@ -236,14 +239,42 @@ class SyncProtocolRepository(private val context: Context, private val credentia
         state(database.readableDatabase, "local_device_role") == "SECONDARY" &&
             !state(database.readableDatabase, "authority_device_id").isNullOrBlank()
 
+    /**
+     * Signs an outbox item with the correct direction-specific credential:
+     * a primary signs with the enrolled recipient's secret; a secondary signs
+     * with its own local secret and may address only its configured primary.
+     */
     fun authenticatedOutbox(operationId: String, recipientDeviceId: String): AuthenticatedSyncEnvelope {
         require(operationId.isNotBlank() && recipientDeviceId.isNotBlank())
-        val secret = credentialVault.load(recipientDeviceId)
-            ?: throw IllegalArgumentException("لا توجد بيانات اعتماد آمنة لهذا الجهاز")
+        val db = database.readableDatabase
+        val localId = SyncDeviceIdentity.getOrCreate(context)
+        val role = state(db, "local_device_role")
+        val origin = db.rawQuery(
+            "SELECT origin_device_id FROM sync_operation_envelopes WHERE operation_id=?",
+            arrayOf(operationId)
+        ).use { c -> require(c.moveToFirst()) { "عملية المزامنة غير موجودة" }; c.getString(0) }
+        val secret = when {
+            role == "SECONDARY" && origin == localId -> {
+                require(recipientDeviceId == state(db, "authority_device_id")) {
+                    "الجهاز الثانوي يرسل أوامره إلى الجهاز الأساسي المعتمد فقط"
+                }
+                credentialVault.load(localId)
+                    ?: throw IllegalArgumentException("بيانات اعتماد الجهاز الثانوي غير متوفرة")
+            }
+            role == "PRIMARY" && origin == localId -> {
+                val enrolled = db.rawQuery(
+                    "SELECT 1 FROM sync_devices WHERE device_id=? AND device_role='SECONDARY' AND status='ACTIVE'",
+                    arrayOf(recipientDeviceId)
+                ).use { it.moveToFirst() }
+                require(enrolled) { "الجهاز المستلم غير مسجل أو غير مفعل" }
+                credentialVault.load(recipientDeviceId)
+                    ?: throw IllegalArgumentException("لا توجد بيانات اعتماد آمنة للجهاز المستلم")
+            }
+            else -> throw IllegalArgumentException("مصدر العملية لا يطابق دور هذا الجهاز")
+        }
         try {
-            val storeId = state(database.readableDatabase, "store_id")
-                ?: error("معرّف المتجر غير مهيأ")
-            val envelope = database.readableDatabase.rawQuery(
+            val storeId = state(db, "store_id") ?: error("معرّف المتجر غير مهيأ")
+            return db.rawQuery(
                 """SELECT operation_id,sequence_number,origin_device_id,actor_user_id,
                           operation_type,entity_type,entity_id,payload_json,created_at
                    FROM sync_operation_envelopes WHERE operation_id=?""".trimIndent(),
@@ -256,8 +287,130 @@ class SyncProtocolRepository(private val context: Context, private val credentia
                     c.getString(7), c.getString(8), secret
                 )
             }
-            return envelope
         } finally { secret.fill(0) }
+    }
+
+    /**
+     * Persists a secondary's business intent as a pending command only.
+     * It deliberately performs no invoice, cash, debt, or inventory posting.
+     * The caller must keep this insert in the same transaction as local command creation.
+     */
+    fun enqueueSecondaryCommand(
+        db: SQLiteDatabase, actorUserId: String, operationId: String,
+        businessOperation: String, entityType: String, entityId: String,
+        payloadJson: String
+    ): Long {
+        require(db.inTransaction()) { "يجب حفظ الأمر ضمن معاملة قاعدة البيانات" }
+        require(state(db, "local_device_role") == "SECONDARY") {
+            "إرسال الأوامر المعلقة متاح للجهاز الثانوي المسجل فقط"
+        }
+        require(state(db, "authority_device_id").isNullOrBlank().not()) { "الجهاز الأساسي غير محدد" }
+        require(operationId.isNotBlank() && businessOperation.isNotBlank() &&
+            entityType.isNotBlank() && entityId.isNotBlank())
+        require(payloadJson.length in 2..MAX_PAYLOAD_CHARS)
+        val actorActive = db.rawQuery(
+            "SELECT 1 FROM users WHERE id=? AND is_active=1 AND must_change_password=0",
+            arrayOf(actorUserId)
+        ).use { it.moveToFirst() }
+        require(actorActive) { "المستخدم غير مفعل أو يجب تغيير كلمة المرور" }
+        val payload = SyncEnvelopeSecurity.canonicalObject(
+            JSONObject(payloadJson).put("business_operation", businessOperation).toString()
+        )
+        val hash = sha256(payload)
+        val prior = db.rawQuery(
+            "SELECT sequence_number,payload_sha256,entity_type,entity_id FROM sync_operation_envelopes WHERE operation_id=?",
+            arrayOf(operationId)
+        ).use { c ->
+            if (!c.moveToFirst()) null else arrayOf(
+                c.getLong(0).toString(), c.getString(1), c.getString(2), c.getString(3)
+            )
+        }
+        if (prior != null) {
+            require(prior[1] == hash && prior[2] == entityType && prior[3] == entityId) {
+                "أعيد استخدام معرّف الأمر ببيانات مختلفة"
+            }
+            return prior[0].toLong()
+        }
+        val localId = SyncDeviceIdentity.getOrCreate(context)
+        val active = db.rawQuery(
+            "SELECT 1 FROM sync_devices WHERE device_id=? AND device_role='SECONDARY' AND status='ACTIVE'",
+            arrayOf(localId)
+        ).use { it.moveToFirst() }
+        check(active) { "الجهاز الثانوي غير مسجل أو تم إيقافه" }
+        val now = timestamp()
+        val sequence = (state(db, "secondary_next_sequence") ?: "1").toLong()
+        check(sequence > 0L && sequence < Long.MAX_VALUE) { "تسلسل أوامر الجهاز الثانوي غير صالح" }
+        putState(db, "secondary_next_sequence", (sequence + 1L).toString(), now)
+        db.insertOrThrow("sync_operation_envelopes", null, ContentValues().apply {
+            put("operation_id", operationId); put("sequence_number", sequence)
+            put("origin_device_id", localId); put("actor_user_id", actorUserId)
+            put("operation_type", "CREATE"); put("entity_type", entityType); put("entity_id", entityId)
+            put("payload_json", payload); put("payload_sha256", hash); put("created_at", now)
+        })
+        db.insertOrThrow("sync_queue", null, ContentValues().apply {
+            put("id", UUID.randomUUID().toString()); put("operation_id", operationId)
+            put("entity_type", entityType); put("entity_id", entityId); put("operation_type", "CREATE")
+            put("payload_json", payload); put("status", "PENDING"); put("retry_count", 0)
+            put("created_at", now); put("updated_at", now)
+        })
+        return sequence
+    }
+
+    /**
+     * Durable authenticated receive on the primary. This only records an inbox
+     * command and advances its per-device receive cursor; domain posting is a
+     * separate, permission-checked, idempotent transaction and is not implied.
+     */
+    fun recordIncomingFromSecondary(encodedEnvelope: String): SyncInboxDisposition {
+        val envelope = verifyIncomingFromSecondary(encodedEnvelope)
+        val db = database.writableDatabase
+        db.beginTransaction()
+        try {
+            val active = db.rawQuery(
+                "SELECT 1 FROM sync_devices WHERE device_id=? AND device_role='SECONDARY' AND status='ACTIVE'",
+                arrayOf(envelope.originDeviceId)
+            ).use { it.moveToFirst() }
+            require(active) { "تم إلغاء تسجيل الجهاز المرسل" }
+            val existing = db.rawQuery(
+                "SELECT payload_sha256 FROM sync_inbox WHERE operation_id=?",
+                arrayOf(envelope.operationId)
+            ).use { c -> if (c.moveToFirst()) c.getString(0) else null }
+            if (existing != null) {
+                if (existing == envelope.payloadSha256) {
+                    db.setTransactionSuccessful()
+                    return SyncInboxDisposition.DUPLICATE
+                }
+                db.insertOrThrow("sync_conflicts", null, ContentValues().apply {
+                    put("id", UUID.randomUUID().toString()); put("operation_id", envelope.operationId)
+                    put("entity_type", envelope.entityType); put("entity_id", envelope.entityId)
+                    put("local_payload_json", "{}"); put("remote_payload_json", envelope.payloadJson)
+                    put("created_at", timestamp())
+                })
+                db.setTransactionSuccessful()
+                return SyncInboxDisposition.CONFLICT
+            }
+            val last = db.rawQuery(
+                "SELECT last_sequence FROM sync_cursors WHERE device_id=?",
+                arrayOf(envelope.originDeviceId)
+            ).use { c -> if (c.moveToFirst()) c.getLong(0) else 0L }
+            require(envelope.sequenceNumber == last + 1L) {
+                if (envelope.sequenceNumber <= last) "تم رفض إعادة تشغيل تسلسل قديم"
+                else "فجوة في تسلسل أوامر الجهاز الثانوي؛ انتظر الأمر السابق"
+            }
+            val now = timestamp()
+            db.insertOrThrow("sync_inbox", null, ContentValues().apply {
+                put("operation_id", envelope.operationId); put("origin_device_id", envelope.originDeviceId)
+                put("sequence_number", envelope.sequenceNumber); put("operation_type", envelope.operationType)
+                put("entity_type", envelope.entityType); put("entity_id", envelope.entityId)
+                put("payload_json", envelope.payloadJson); put("payload_sha256", envelope.payloadSha256)
+                put("status", "RECEIVED"); put("received_at", now)
+            })
+            db.update("sync_cursors", ContentValues().apply {
+                put("last_sequence", envelope.sequenceNumber); put("updated_at", now)
+            }, "device_id=?", arrayOf(envelope.originDeviceId))
+            db.setTransactionSuccessful()
+            return SyncInboxDisposition.RECEIVED
+        } finally { db.endTransaction() }
     }
 
     fun verifyIncomingFromPrimary(encodedEnvelope: String): AuthenticatedSyncEnvelope {
