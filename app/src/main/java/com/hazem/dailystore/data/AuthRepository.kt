@@ -123,14 +123,17 @@ class AuthRepository(context: Context) {
         password: String, roleKey: String
     ): String {
         requireManager(actorRole)
-        require(actorUserId.isNotBlank()) { "جلسة المدير غير صالحة" }
-        requireActiveManager(actorUserId)
+        PermissionPolicy.require(database.writableDatabase, actorUserId, PermissionPolicy.USERS_MANAGE)
         require(roleKey in setOf("ADMIN", "CASHIER")) { "صلاحية المستخدم غير صالحة" }
         return createUserInternal(username, displayName, password, roleKey, actorUserId, true)
     }
 
     fun requireManager(roleKey: String) {
         require(roleKey == "ADMIN") { "هذا الإجراء متاح للمدير فقط" }
+    }
+
+    fun requirePermission(actorUserId: String, permissionKey: String) {
+        PermissionPolicy.require(database.readableDatabase, actorUserId, permissionKey)
     }
 
     private fun requireActiveManager(userId: String) {
