@@ -49,7 +49,7 @@ class AppDatabaseTest {
             "return_refund_allocations", "daily_cash_sessions", "customer_credit_revaluations",
             "daily_supplier_rollovers", "wallet_daily_openings", "cash_account_transfers",
             "service_wallet_account_links", "system_cash_account_roles", "operation_registry", "sync_queue",
-            "sync_conflicts", "audit_log", "inventory_cost_layers", "sales_item_cost_allocations"
+            "sync_conflicts", "audit_log", "inventory_cost_layers", "sales_item_cost_allocations", "inventory_adjustments"
         )
 
         requiredTables.forEach { table ->
@@ -113,7 +113,7 @@ class AppDatabaseTest {
         database = AppDatabase.getInstance(context)
         val upgraded = database.writableDatabase
 
-        assertEquals(14, upgraded.version)
+        assertEquals(15, upgraded.version)
         upgraded.rawQuery(
             """SELECT username,display_name,password_hash,password_salt,role_key,is_active,
                       must_change_password,created_at,updated_at
