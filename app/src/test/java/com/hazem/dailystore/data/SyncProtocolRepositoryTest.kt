@@ -107,7 +107,7 @@ class SyncProtocolRepositoryTest {
         val operationId = UUID.randomUUID().toString()
         db.beginTransaction()
         val first = repository.enqueueLocalOperation(
-            db, adminId, operationId, "SALE_POSTED", "SALE_INVOICE", "sale-1",
+            db, adminId, operationId, "SALE_POSTED", "SALES_INVOICE", "sale-1",
             "CREATE", """{"invoice_id":"sale-1","total_usd_cents":1250}"""
         )
         db.setTransactionSuccessful()
@@ -117,7 +117,7 @@ class SyncProtocolRepositoryTest {
 
         db.beginTransaction()
         val replay = repository.enqueueLocalOperation(
-            db, adminId, operationId, "SALE_POSTED", "SALE_INVOICE", "sale-1",
+            db, adminId, operationId, "SALE_POSTED", "SALES_INVOICE", "sale-1",
             "CREATE", """{"invoice_id":"sale-1","total_usd_cents":1250}"""
         )
         db.setTransactionSuccessful()
@@ -129,7 +129,7 @@ class SyncProtocolRepositoryTest {
         db.beginTransaction()
         try {
             repository.enqueueLocalOperation(
-                db, adminId, operationId, "SALE_POSTED", "SALE_INVOICE", "sale-1",
+                db, adminId, operationId, "SALE_POSTED", "SALES_INVOICE", "sale-1",
                 "CREATE", """{"invoice_id":"sale-1","total_usd_cents":9999}"""
             )
         } catch (_: IllegalArgumentException) { mismatchRejected = true }
@@ -138,11 +138,34 @@ class SyncProtocolRepositoryTest {
         assertEquals(1, repository.pendingOutbox().size)
     }
 
+    @Test fun primarySignsCanonicalOutboxForEnrolledSecondary() {
+        repository.configureAsPrimary(adminId, "الرئيسي")
+        val invitation = repository.createPairingInvitation(adminId)
+        val remoteId = UUID.randomUUID().toString()
+        repository.enrollSecondaryDevice(adminId, invitation.token, remoteId, "الثانوي")
+        val operationId = UUID.randomUUID().toString()
+        val db = database.writableDatabase
+        db.beginTransaction()
+        repository.enqueueLocalOperation(
+            db, adminId, operationId, "SALE_POSTED", "SALES_INVOICE", "sale-verified",
+            "CREATE", """{"invoice_id":"sale-verified","total_usd_cents":1250}"""
+        )
+        db.setTransactionSuccessful()
+        db.endTransaction()
+
+        val envelope = repository.authenticatedOutbox(operationId, remoteId)
+        val recipientSecret = vault.load(remoteId)!!
+        assertTrue(SyncEnvelopeSecurity.verify(envelope, recipientSecret))
+        assertEquals("CREATE", envelope.operationType)
+        assertEquals("SALE_POSTED", org.json.JSONObject(envelope.payloadJson).getString("business_operation"))
+        recipientSecret.fill(0)
+    }
+
     @Test fun noOutboxIsCreatedBeforePrimaryDeviceIsConfigured() {
         val db = database.writableDatabase
         db.beginTransaction()
         val result = repository.enqueueLocalOperation(
-            db, adminId, UUID.randomUUID().toString(), "SALE_POSTED", "SALE_INVOICE", "sale-1",
+            db, adminId, UUID.randomUUID().toString(), "SALE_POSTED", "SALES_INVOICE", "sale-1",
             "CREATE", """{"invoice_id":"sale-1"}"""
         )
         db.setTransactionSuccessful()

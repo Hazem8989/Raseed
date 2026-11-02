@@ -328,6 +328,7 @@ class SyncProtocolRepository(private val context: Context, private val credentia
                 JSONObject().put("status", "REVOKED").toString(), now)
             db.setTransactionSuccessful()
         } finally { db.endTransaction() }
+        credentialVault.remove(remoteDeviceId)
     }
 
     /**
