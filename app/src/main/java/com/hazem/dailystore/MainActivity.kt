@@ -2515,6 +2515,7 @@ class MainActivity : Activity() {
             ))
             card.addView(label("إضافات أخرى: " + formatAccountBalance(a.otherInflowsMinor, a.currencyCode), 12f, textColor, false, Gravity.RIGHT))
             card.addView(label("دفعات الموردين: " + formatAccountBalance(a.supplierPaymentsMinor, a.currencyCode), 12f, textColor, false, Gravity.RIGHT))
+            card.addView(label("المصاريف التشغيلية: " + formatAccountBalance(a.operatingExpensesMinor, a.currencyCode), 12f, textColor, false, Gravity.RIGHT))
             card.addView(label("المسحوبات الشخصية: " + formatAccountBalance(a.personalWithdrawalsMinor, a.currencyCode), 12f, textColor, false, Gravity.RIGHT))
             card.addView(label("تحويلات واردة: " + formatAccountBalance(a.transferInMinor, a.currencyCode) + " • صادرة: " + formatAccountBalance(a.transferOutMinor, a.currencyCode), 12f, textColor, false, Gravity.RIGHT))
             card.addView(label("رصيد آخر اليوم: " + formatAccountBalance(a.closingMinor, a.currencyCode), 15f, green, true, Gravity.RIGHT))
