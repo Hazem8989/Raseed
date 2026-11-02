@@ -134,12 +134,7 @@ class PurchaseReturnRepositoryTest {
     }
 
     @Test fun fullAndPartialReturnsRespectInvoiceDiscountAndCumulativeRounding() {
-        // The fixture invoice is replaced by a discounted invoice with the same source product.
-        db.writableDatabase.delete("inventory_movements",null,null)
-        db.writableDatabase.delete("inventory_cost_layers",null,null)
-        db.writableDatabase.delete("inventory_balances",null,null)
-        db.writableDatabase.delete("purchase_items",null,null)
-        db.writableDatabase.delete("purchase_invoices",null,null)
+        // Use a second invoice so the fixture's original purchase history remains untouched.
         val draft=invoiceRepo.savePurchaseDraft(adminId,"discounted-return-draft-"+UUID.randomUUID(),
             null,supplierId,"2026-11-02",333L,null,
             listOf(InvoiceLineInput(productId,BigDecimal("10"),1000L)))
@@ -155,7 +150,7 @@ class PurchaseReturnRepositoryTest {
         assertEquals(3867L,first.totalUsdCents)
         assertEquals(5800L,second.totalUsdCents)
         assertEquals(9667L,first.totalUsdCents+second.totalUsdCents)
-        assertEquals(0.0,stock(),0.000001)
+        assertEquals(10.0,stock(),0.000001)
     }
 
     @Test fun cashierCannotPostSupplierReturn() {
