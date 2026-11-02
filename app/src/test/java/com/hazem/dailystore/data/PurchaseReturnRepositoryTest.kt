@@ -237,4 +237,15 @@ class PurchaseReturnRepositoryTest {
         } catch (_: IllegalArgumentException) { }
         assertEquals(10.0,stock(),0.000001)
     }
+
+    @Test fun primaryPurchaseReturnIsAddedToOutboxAtomically() {
+        val context=RuntimeEnvironment.getApplication()
+        val sync=SyncProtocolRepository(context)
+        sync.configureAsPrimary(adminId,"الهاتف الرئيسي")
+        returns.postPurchaseReturn(adminId,invoiceId,"sync-purchase-return-"+UUID.randomUUID(),
+            "2026-11-02","مرتجع للمزامنة",item("1"),emptyList())
+        assertTrue(sync.pendingOutbox().any { it.entityType=="PURCHASE_RETURN" &&
+            it.operationType=="POST_PURCHASE_RETURN" })
+    }
+
 }
