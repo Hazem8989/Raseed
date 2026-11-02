@@ -268,4 +268,18 @@ class PurchasePaymentRepositoryTest {
         assertEquals(7000L, supplier.outstandingUsdCents)
         assertEquals(1, supplier.unpaidInvoiceCount)
     }
+
+    @Test
+    fun primarySupplierPaymentIsAddedToOutboxAtomically() {
+        val context = RuntimeEnvironment.getApplication()
+        val sync = SyncProtocolRepository(context)
+        sync.configureAsPrimary(adminId, "الهاتف الرئيسي")
+        payments.addPayment(adminId, invoiceId, "sync-supplier-payment-" + UUID.randomUUID(),
+            accountId, 1000L, "دفعة للمزامنة")
+        val queued = sync.pendingOutbox().single()
+        assertEquals("SUPPLIER_PAYMENT", queued.entityType)
+        assertEquals("PURCHASE_PAYMENT", queued.operationType)
+        assertTrue(queued.payloadJson.contains(invoiceId))
+    }
+
 }
