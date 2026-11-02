@@ -185,6 +185,31 @@ class PurchaseReturnRepositoryTest {
         assertEquals(300000L,payments.listPurchaseInvoices().first { it.id==invoiceId }.supplierReturnCreditSypMinor)
     }
 
+    @Test fun inventoryValuationRemovesTheReturnedPurchaseLayerNotAnOlderUnrelatedLayer() {
+        val secondDraft=invoiceRepo.savePurchaseDraft(adminId,"second-fifo-purchase-"+UUID.randomUUID(),
+            null,supplierId,"2026-11-02",0L,null,
+            listOf(InvoiceLineInput(productId,BigDecimal("10"),2000L)))
+        assertTrue(invoiceRepo.postPurchase(adminId,secondDraft.invoiceId,"second-fifo-post-"+UUID.randomUUID()))
+        val secondItemId=db.readableDatabase.rawQuery(
+            "SELECT id FROM purchase_items WHERE purchase_invoice_id=?",arrayOf(secondDraft.invoiceId)
+        ).use { it.moveToFirst();it.getString(0) }
+        val saleAccount=accounts.create(adminId,"صندوق اختبار FIFO "+UUID.randomUUID(),"CASH_BOX","USD",50000L)
+        val sale=invoiceRepo.saveSalesDraft(adminId,"fifo-audit-sale-"+UUID.randomUUID(),
+            null,null,"2026-11-02",0L,null,
+            listOf(InvoiceLineInput(productId,BigDecimal("5"),2000L)))
+        assertTrue(invoiceRepo.postCashSale(adminId,sale.invoiceId,"fifo-audit-sale-post-"+UUID.randomUUID(),saleAccount.id))
+        assertEquals(15.0,stock(),0.000001)
+
+        returns.postPurchaseReturn(adminId,secondDraft.invoiceId,"fifo-audit-purchase-return-"+UUID.randomUUID(),
+            "2026-11-02","إرجاع من طبقة الشراء الثانية",
+            listOf(PurchaseReturnItemInput(secondItemId,BigDecimal("5"))),emptyList())
+        assertEquals(10.0,stock(),0.000001)
+        val valuation=InventoryValuationRepository(RuntimeEnvironment.getApplication()).dailyCapital().current
+        assertTrue("Inventory valuation should remain fully costed",valuation.isComplete)
+        assertEquals(10.0,valuation.valuedQuantity,0.000001)
+        assertEquals(15000L,valuation.totalCostUsdCents)
+    }
+
     @Test fun cashierCannotPostSupplierReturn() {
         val auth=AuthRepository(RuntimeEnvironment.getApplication())
         val cashier=auth.createUser("ADMIN",adminId,"supplier-return-cashier","Cashier","Cashier12345","CASHIER")
