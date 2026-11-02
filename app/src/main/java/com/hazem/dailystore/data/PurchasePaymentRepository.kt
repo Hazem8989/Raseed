@@ -37,6 +37,7 @@ data class PurchasePaymentResult(
 
 /** Posts supplier payments atomically with their cash-account outflow. */
 class PurchasePaymentRepository(context: Context) {
+    private val context = context.applicationContext
     private val database = AppDatabase.getInstance(context)
 
     fun listPurchaseInvoices(supplierId: String? = null): List<PurchaseInvoicePaymentSummary> {
@@ -236,6 +237,15 @@ class PurchasePaymentRepository(context: Context) {
                 "تعذر تحديث حالة الفاتورة"
             }
             registerOperation(db, operationId, "PURCHASE_PAYMENT", payloadHash, paymentId, now)
+            SyncProtocolRepository(context).enqueueLocalOperation(
+                db, actorUserId, operationId, "PURCHASE_PAYMENT",
+                "SUPPLIER_PAYMENT", paymentId, "CREATE",
+                org.json.JSONObject().put("invoice_id", invoiceId).put("payment_id", paymentId)
+                    .put("cash_transaction_id", cashTransactionId).put("cash_account_id", cashAccountId)
+                    .put("amount_minor", amountMinor).put("currency_code", account.currencyCode)
+                    .put("exchange_rate_syp_per_usd_milli", paymentRate)
+                    .put("amount_syp_equivalent", amountSypEquivalent).put("created_at", now).toString()
+            )
             db.setTransactionSuccessful()
             return PurchasePaymentResult(paymentId,newPaidUsd,newOutstandingUsd,newStatus,false,newPaidSyp,newOutstandingSyp)
         } finally {
