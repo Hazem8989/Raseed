@@ -253,8 +253,8 @@ class SalesReturnRepositoryTest {
             "مرتجع للمزامنة", listOf(SalesReturnItemInput(itemId, BigDecimal.ONE)),
             listOf(SalesRefundAllocationInput(cashAccountId, 250L))
         )
-        assertTrue(sync.pendingOutbox().any { it.entityType == "SALES_RETURN" &&
-            it.operationType == "POST_SALES_RETURN" })
+        assertTrue(sync.pendingOutbox().any { it.entityType == "SALES_RETURN" && it.operationType == "CREATE" &&
+            it.payloadJson.contains("POST_SALES_RETURN") })
     }
 
 }
