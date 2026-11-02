@@ -156,6 +156,35 @@ class PurchaseReturnRepositoryTest {
         assertEquals(10.0,stock(),0.000001)
     }
 
+    @Test fun fullUnpaidReturnIsShownAsSettledBySupplierCreditNotCashPayment() {
+        val result=returns.postPurchaseReturn(adminId,invoiceId,"full-credit-return-"+UUID.randomUUID(),
+            "2026-11-02","إرجاع كامل الفاتورة",item("10"),emptyList())
+        assertEquals(10000L,result.totalUsdCents)
+        val summary=payments.listPurchaseInvoices().first { it.id==invoiceId }
+        assertEquals("SETTLED_BY_RETURN",summary.paymentStatus)
+        assertEquals(1000000L,summary.supplierReturnCreditSypMinor)
+        assertEquals(0L,summary.paidSypMinor)
+        assertEquals(0L,summary.outstandingSypMinor)
+        val supplier=payments.listSupplierSummaries().first { it.id==supplierId }
+        assertEquals(1000000L,supplier.supplierReturnCreditsSypMinor)
+    }
+
+    @Test fun supplierReturnCreditPreventsOverpaymentButAllowsExactRemainingPayment() {
+        returns.postPurchaseReturn(adminId,invoiceId,"partial-credit-before-payment-"+UUID.randomUUID(),
+            "2026-11-02","مرتجع جزئي",item("3"),emptyList())
+        val account=accounts.create(adminId,"صندوق تسديد المتبقي "+UUID.randomUUID(),"CASH_BOX","USD",10000L)
+        try {
+            payments.addPayment(adminId,invoiceId,"overpay-after-return-"+UUID.randomUUID(),account.id,8000L)
+            throw AssertionError("Payment above the reduced payable must be rejected")
+        } catch (_: IllegalArgumentException) { }
+        assertEquals(10000L,accounts.balance(account.id))
+        val payment=payments.addPayment(adminId,invoiceId,"exact-pay-after-return-"+UUID.randomUUID(),account.id,7000L)
+        assertEquals(700000L,payment.paidSypMinor)
+        assertEquals(0L,payment.outstandingSypMinor)
+        assertEquals("SETTLED_BY_RETURN",payments.listPurchaseInvoices().first { it.id==invoiceId }.paymentStatus)
+        assertEquals(300000L,payments.listPurchaseInvoices().first { it.id==invoiceId }.supplierReturnCreditSypMinor)
+    }
+
     @Test fun cashierCannotPostSupplierReturn() {
         val auth=AuthRepository(RuntimeEnvironment.getApplication())
         val cashier=auth.createUser("ADMIN",adminId,"supplier-return-cashier","Cashier","Cashier12345","CASHIER")
