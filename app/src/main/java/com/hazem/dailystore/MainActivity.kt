@@ -62,6 +62,8 @@ import com.hazem.dailystore.data.PurchaseReturnItemInput
 import com.hazem.dailystore.data.SupplierRefundAllocationInput
 import com.hazem.dailystore.data.OperatingExpenseRepository
 import com.hazem.dailystore.data.PartyStatementRepository
+import com.hazem.dailystore.data.PartyStatement
+import com.hazem.dailystore.data.PartyStatementExport
 import java.math.BigDecimal
 import java.math.RoundingMode
 import java.text.DecimalFormat
@@ -93,6 +95,9 @@ class MainActivity : Activity() {
     private val productImportFolderRequestCode = 7102
     private val backupCreateRequestCode = 7110
     private val backupRestoreRequestCode = 7111
+    private val statementExportRequestCode = 7120
+    private var pendingStatementExportBytes: ByteArray? = null
+    private var pendingStatementExportName: String? = null
     private var pendingBackupPassword: CharArray? = null
     private val sessionPrefs by lazy { getSharedPreferences("the_daily_shop_session", MODE_PRIVATE) }
 
@@ -118,6 +123,24 @@ class MainActivity : Activity() {
     @Deprecated("Using the document picker keeps compatibility with the app's current Activity-based navigation.")
     override fun onActivityResult(requestCode: Int, resultCode: Int, data: android.content.Intent?) {
         super.onActivityResult(requestCode, resultCode, data)
+        if (requestCode == statementExportRequestCode) {
+            val bytes = pendingStatementExportBytes
+            val name = pendingStatementExportName
+            pendingStatementExportBytes = null
+            pendingStatementExportName = null
+            val uri = data?.data
+            if (resultCode != RESULT_OK || uri == null || bytes == null || name == null) return
+            try {
+                contentResolver.openOutputStream(uri, "w")?.use { it.write(bytes) }
+                    ?: error("تعذر فتح ملف التصدير للحفظ")
+                Toast.makeText(this, "تم تصدير كشف الحساب بنجاح: $name", Toast.LENGTH_LONG).show()
+            } catch (e: Exception) {
+                AlertDialog.Builder(this).setTitle("تعذر تصدير كشف الحساب")
+                    .setMessage(e.message ?: "حدث خطأ أثناء حفظ الملف")
+                    .setPositiveButton("حسناً", null).show()
+            }
+            return
+        }
         if (requestCode == backupCreateRequestCode || requestCode == backupRestoreRequestCode) {
             if (currentUserRole != "ADMIN") {
                 pendingBackupPassword?.fill(0.toChar())
@@ -1706,6 +1729,37 @@ class MainActivity : Activity() {
         page.addView(header, matchWidth())
         page.addView(body, LinearLayout.LayoutParams(-1, 0, 1f))
         setContentView(page)
+    }
+
+    private fun exportPartyStatement(statement: PartyStatement, format: String) {
+        if (!isManager()) {
+            Toast.makeText(this, "تصدير كشوف الحساب متاح للمدير فقط", Toast.LENGTH_SHORT).show()
+            return
+        }
+        val safeName = statement.partyName.replace(Regex("[^\\p{L}\\p{N}_-]+"), "_").take(40)
+        val extension = when (format) { "xlsx" -> "xlsx"; "pdf" -> "pdf"; else -> error("صيغة غير مدعومة") }
+        val bytes = when (format) {
+            "xlsx" -> PartyStatementExport.xlsx(statement)
+            "pdf" -> PartyStatementExport.pdf(statement)
+            else -> error("صيغة غير مدعومة")
+        }
+        val mime = if (format == "xlsx")
+            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" else "application/pdf"
+        val fileName = "كشف_حساب_${safeName}.$extension"
+        pendingStatementExportBytes = bytes
+        pendingStatementExportName = fileName
+        val intent = android.content.Intent(android.content.Intent.ACTION_CREATE_DOCUMENT).apply {
+            addCategory(android.content.Intent.CATEGORY_OPENABLE)
+            type = mime
+            putExtra(android.content.Intent.EXTRA_TITLE, fileName)
+        }
+        try {
+            startActivityForResult(intent, statementExportRequestCode)
+        } catch (e: Exception) {
+            pendingStatementExportBytes = null
+            pendingStatementExportName = null
+            Toast.makeText(this, "تعذر فتح نافذة حفظ الملف: ${e.message}", Toast.LENGTH_LONG).show()
+        }
     }
 
     private fun showCustomerAccount(customerId: String) {
