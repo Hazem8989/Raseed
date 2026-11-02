@@ -109,7 +109,7 @@ object SyncEnvelopeSecurity {
             json.getString("origin_device_id"), json.getString("actor_user_id"),
             json.getString("operation_type"), json.getString("entity_type"),
             json.getString("entity_id"), json.getLong("base_revision"),
-            canonicalObject(json.getString("payload_json")), json.getString("payload_sha256"),
+            json.getString("payload_json"), json.getString("payload_sha256"),
             json.getString("created_at"), json.getString("authentication_tag")
         )
     }
