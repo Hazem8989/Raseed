@@ -170,3 +170,38 @@ Verification:
 - Main branch remains at `63b233cd4fb3085d0ade05e3e4c1007efcae30ca`.
 
 **Authorization is improved but not complete.** The `permissions`/`role_permissions` tables still do not form a configurable permission matrix. Purchase access, supplier/customer master-data permissions, and broader actor provenance still need an explicit policy and implementation. The return/refund, stock-adjustment, and expense findings above remain open. CI success does not equal device acceptance or production readiness.
+
+
+## Remediation update 2 — 2026-11-02 (permission policy and invoice actor enforcement)
+
+This update supersedes the earlier statement that the permission tables were unused. The development branch now has a centralized database-backed role policy.
+
+Implemented:
+- Added `PermissionPolicy` and seeded the permission catalogue plus ADMIN/CASHIER role defaults in schema migration **12**. Existing data is preserved; defaults use conflict-ignore so a previously customized role grant is not overwritten by the migration.
+- ADMIN receives the full permission catalogue. CASHIER defaults are deliberately limited to sales checkout, customer read/create, and customer debt collection. Purchase management, supplier management/payments, catalog, exchange rate, cash-account administration, daily cash controls, backup, returns, stock adjustment, and expenses are denied by default.
+- Added an audited role-level permission setter. It validates an active manager who completed password rotation, rejects unknown permissions, and prevents removing the ADMIN role's baseline grants. **There is not yet an in-app permission-editor screen**; this API and database policy are implemented, but configuration UX remains open.
+- Invoice draft creation and posting now require the actor's database-backed permission for both sales and purchases. The API requires the authenticated user ID; callers cannot gain authority by passing a role label.
+- Supplier-payment posting and correction require separate database-backed permissions and an actor identity.
+- Customer-debt collection requires the customer-collection permission and actor identity.
+- Customer create/update/deactivation and supplier creation require their respective permissions. Customer and supplier writes include audit records; customer writes and supplier creation are atomic with their audit entry.
+- Catalog management, exchange-rate changes, account administration, daily-cash manager operations, service-transfer manager operations, and user management now use the centralized permission policy or validate the corresponding actor permission.
+- Cashier navigation no longer shows purchases or financial reports. Purchase/supplier/report screens also have manager guards.
+- Added tests for cashier default grants/denials, manager permission grant/revoke with audit history, and cashier sale access versus purchase-invoice denial.
+
+Verification:
+- Latest tested source HEAD: `baadfe794fef57755145ee7b67278526a7ee5309`.
+- GitHub Actions run `41368320646`: [successful unit tests and debug build](https://github.com/Hazem8989/Raseed/actions/runs/41368320646).
+- `testDebugUnitTest`: passed.
+- `assembleDebug`: passed.
+- APK signature verification: v1 and v2 passed.
+- Artifact `the-daily-shop-debug-development-only`, 9,386,861 bytes; SHA-256 `eae088f283891b2b5ebb1d8995e8ceb4a3085d6a26b84cab448c1fd9ac9586ae`; expires 2026-11-16.
+- Permanent release signing remains unconfigured; release build was skipped. **Do not install this debug artifact as an update to a release-signed app, and do not delete app data.**
+- Main remains unchanged at `63b233cd4fb3085d0ade05e3e4c1007efcae30ca`.
+
+Remaining authorization work:
+- Add an in-app manager screen for role permissions and explain that changes apply to all users with that role.
+- Complete actor/permission enforcement for read-only customer, supplier, purchase, account, and report queries where UI gating is currently the primary boundary.
+- Review every financial mutation path not yet migrated, including future return, stock-adjustment, and expense workflows. Those new workflows must require actor identity and permission from their first implementation.
+- Add repository-level negative tests for each remaining mutation path and read-access boundary.
+
+**Gate decision:** the first authorization batch now passes CI, so it is reasonable to begin the next financial-control phase. It is not reasonable to claim that the entire authorization subsystem is complete or that the app is production-ready. Returns/refunds, inventory adjustments, expenses, migration matrix, backup fault injection, device acceptance, and permanent release signing remain open.
