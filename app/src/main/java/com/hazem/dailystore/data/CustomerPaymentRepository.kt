@@ -40,6 +40,7 @@ data class CustomerPaymentResult(
 
 /** SYP-only customer receivable settlement. A collection never posts stock or sales. */
 class CustomerPaymentRepository(context: Context) {
+    private val context = context.applicationContext
     private val database = AppDatabase.getInstance(context)
 
     fun listCustomerSummaries(): List<CustomerFinancialSummary> {
@@ -295,6 +296,15 @@ class CustomerPaymentRepository(context: Context) {
             }
             db.insertOrThrow("audit_log", null, audit)
             registerOperation(db, operationId, "CUSTOMER_CREDIT_COLLECTION", payloadHash, paymentId, now)
+            SyncProtocolRepository(context).enqueueLocalOperation(
+                db, actorUserId, operationId, "CUSTOMER_CREDIT_COLLECTION",
+                "CUSTOMER_PAYMENT", paymentId, "CREATE",
+                org.json.JSONObject().put("invoice_id", invoiceId).put("payment_id", paymentId)
+                    .put("cash_transaction_id", cashTransactionId).put("cash_account_id", cashAccountId)
+                    .put("amount_minor", amountSypMinor).put("currency_code", "SYP")
+                    .put("collection_rate_milli", collectionRate).put("effective_rate_milli", effectiveRate)
+                    .put("usd_reference_reduction_cents", usdReduction).put("created_at", now).toString()
+            )
             val finalState = invoicePaymentState(db, invoiceId, invoice.totalUsdCents, invoice.originalRateMilli)
             db.setTransactionSuccessful()
             return CustomerPaymentResult(paymentId, finalState.paidUsdCents, finalState.outstandingUsdCents,
