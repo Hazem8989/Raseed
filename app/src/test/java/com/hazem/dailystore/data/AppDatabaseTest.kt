@@ -113,7 +113,7 @@ class AppDatabaseTest {
         database = AppDatabase.getInstance(context)
         val upgraded = database.writableDatabase
 
-        assertEquals(15, upgraded.version)
+        assertEquals(16, upgraded.version)
         upgraded.rawQuery(
             """SELECT username,display_name,password_hash,password_salt,role_key,is_active,
                       must_change_password,created_at,updated_at
@@ -158,9 +158,20 @@ class AppDatabaseTest {
             assertTrue("Migration must add the local operating date", hasOperatingDate)
         }
         upgraded.rawQuery(
-            "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name IN ('inventory_cost_layers','sales_item_cost_allocations')",
+            "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name IN ('inventory_cost_layers','sales_item_cost_allocations','supplier_return_refund_allocations','supplier_return_cost_allocations')",
             null
-        ).use { c -> assertTrue(c.moveToFirst()); assertEquals(2, c.getInt(0)) }
+        ).use { c -> assertTrue(c.moveToFirst()); assertEquals(4, c.getInt(0)) }
+        upgraded.rawQuery("PRAGMA table_info(return_items)", null).use { c ->
+            var hasPurchaseSource = false
+            while (c.moveToNext()) if (c.getString(1) == "original_purchase_item_id") hasPurchaseSource = true
+            assertTrue("Supplier return migration must add the purchase-line source link", hasPurchaseSource)
+        }
+        upgraded.rawQuery("PRAGMA table_info(returns)", null).use { c ->
+            val columns = mutableSetOf<String>()
+            while (c.moveToNext()) columns.add(c.getString(1))
+            assertTrue(columns.contains("supplier_credit_reduction_syp_minor"))
+            assertTrue(columns.contains("supplier_cash_refund_syp_minor"))
+        }
         assertTrue("Migrated database must pass SQLite integrity check", upgraded.isDatabaseIntegrityOk)
         upgraded.rawQuery("PRAGMA foreign_key_check", null).use { cursor ->
             assertTrue("Migration must not introduce foreign-key violations", !cursor.moveToFirst())
