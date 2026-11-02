@@ -414,6 +414,7 @@ class SyncProtocolRepository(private val context: Context, private val credentia
                 put("unit_cost_usd_cents", c.getLong(4)); put("line_total_usd_cents", c.getLong(5))
             })
         }
+        header.put("business_operation", "POST_${invoiceType}_INVOICE")
         header.put("items", items)
         header.put("cash_account_id", cashAccountId ?: JSONObject.NULL)
         if (invoiceType == "SALE" && cashAccountId != null) {
@@ -432,8 +433,9 @@ class SyncProtocolRepository(private val context: Context, private val credentia
             header.put("cash_receipts", receipts)
         }
         return enqueueLocalOperation(
-            db, actorUserId, operationId, "POST_${invoiceType}_INVOICE",
-            "${invoiceType}_INVOICE", invoiceId, "CREATE", header.toString()
+            db, actorUserId, operationId, "CREATE",
+            if (invoiceType == "SALE") "SALES_INVOICE" else "PURCHASE_INVOICE",
+            invoiceId, "CREATE", header.toString()
         )
     }
 

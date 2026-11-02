@@ -120,7 +120,8 @@ class InvoiceRepositoryTest {
         assertTrue(invoices.postPurchase(adminId, draft.invoiceId, "sync-purchase-post"))
         val outbox = SyncProtocolRepository(RuntimeEnvironment.getApplication()).pendingOutbox()
         assertEquals(1, outbox.size)
-        assertEquals("POST_PURCHASE_INVOICE", outbox.single().operationType)
+        assertEquals("CREATE", outbox.single().operationType)
+        assertTrue(outbox.single().payloadJson.contains("POST_PURCHASE_INVOICE"))
         assertTrue(outbox.single().payloadJson.contains(draft.invoiceId))
         assertEquals(1L, outbox.single().sequence)
     }
