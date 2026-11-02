@@ -105,11 +105,11 @@ class StoreRepository(context: Context) {
             .setScale(0, RoundingMode.HALF_UP).longValueExact()
         require(milli > 0L) { "سعر الصرف غير صالح" }
         val db = helper.writableDatabase
-        requireManager(db, actorUserId)
+        PermissionPolicy.require(db, actorUserId, PermissionPolicy.EXCHANGE_RATE_MANAGE)
         val now = timestamp()
         db.beginTransaction()
         try {
-            requireManager(db, actorUserId)
+            PermissionPolicy.require(db, actorUserId, PermissionPolicy.EXCHANGE_RATE_MANAGE)
             val old = getCurrentExchangeRateMilli()
             val values = ContentValues().apply {
                 put("id", UUID.randomUUID().toString())
