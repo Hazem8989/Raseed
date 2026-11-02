@@ -51,7 +51,7 @@ class TwoPeerSyncSimulationTest {
 
     @Test fun secondaryQueuesPendingCommandWithoutChangingAuthoritativeLedgerOrStock() {
         val envelope = secondary.queueSale("op-pending", 1L, 3, 1200L)
-        assertEquals("PENDING_PRIMARY", secondary.outboxStatus(envelope.operationId))
+        assertEquals("PENDING_PRIMARY", secondary.commandStatus(envelope.operationId))
         assertEquals(0, secondary.effectCount())
         assertEquals(0, secondary.stock())
         assertEquals(0, primary.effectCount())
@@ -273,6 +273,10 @@ class TwoPeerSyncSimulationTest {
 
         fun outboxStatus(id: String): String? =
             writableDatabase.rawQuery("SELECT status FROM outbox WHERE operation_id=?", arrayOf(id))
+                .use { if (it.moveToFirst()) it.getString(0) else null }
+
+        fun commandStatus(id: String): String? =
+            writableDatabase.rawQuery("SELECT status FROM client_commands WHERE operation_id=?", arrayOf(id))
                 .use { if (it.moveToFirst()) it.getString(0) else null }
 
         fun effectCount(): Int = scalar(writableDatabase, "SELECT COUNT(*) FROM ledger").toInt()
