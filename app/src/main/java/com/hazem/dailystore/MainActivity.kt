@@ -3513,12 +3513,11 @@ class MainActivity : Activity() {
                 }
                 val intent = android.content.Intent(android.content.Intent.ACTION_OPEN_DOCUMENT).apply {
                     addCategory(android.content.Intent.CATEGORY_OPENABLE)
+                    // Do not restrict EXTRA_MIME_TYPES here: Android file providers often
+                    // label valid .csv files as text/plain or application/octet-stream.
+                    // SpreadsheetProductImporter validates the selected file extension
+                    // and content before any database write.
                     type = "*/*"
-                    putExtra(android.content.Intent.EXTRA_MIME_TYPES, arrayOf(
-                        "text/csv",
-                        "text/comma-separated-values",
-                        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-                    ))
                 }
                 startActivityForResult(intent, productImportRequestCode)
             }
