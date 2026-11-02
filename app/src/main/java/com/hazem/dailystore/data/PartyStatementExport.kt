@@ -35,7 +35,7 @@ object PartyStatementExport {
     /** Minimal Office Open XML workbook; no third-party library or macro content. */
     fun xlsx(statement: PartyStatement): ByteArray {
         val bytes = ByteArrayOutputStream()
-        ZipOutputStream(bytes, StandardCharsets.UTF_8).use { zip ->
+        ZipOutputStream(bytes).use { zip ->
             zipEntry(zip, "[Content_Types].xml", """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
 <Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>
