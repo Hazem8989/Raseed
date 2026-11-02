@@ -58,7 +58,12 @@ class CustomerRepository(context: Context) {
             put("opening_balance_minor", 0L); put("opening_balance_currency", "SYP")
             put("is_active", 1); put("created_at", now); put("updated_at", now)
         }
-        db.insertOrThrow("customers", null, values)
+        db.beginTransaction()
+        try {
+            db.insertOrThrow("customers", null, values)
+            insertAudit(db, actorUserId, "CREATE", id, now)
+            db.setTransactionSuccessful()
+        } finally { db.endTransaction() }
         return get(id) ?: error("تعذر قراءة الزبون بعد الحفظ")
     }
 
@@ -74,9 +79,16 @@ class CustomerRepository(context: Context) {
             putNullable("address", address); putNullable("notes", notes)
             put("updated_at", timestamp())
         }
-        require(db.update(
-            "customers", values, "id=? AND is_active=1", arrayOf(customerId)
-        ) == 1) { "الزبون غير موجود أو موقوف" }
+        val now = timestamp()
+        values.put("updated_at", now)
+        db.beginTransaction()
+        try {
+            require(db.update(
+                "customers", values, "id=? AND is_active=1", arrayOf(customerId)
+            ) == 1) { "الزبون غير موجود أو موقوف" }
+            insertAudit(db, actorUserId, "UPDATE", customerId, now)
+            db.setTransactionSuccessful()
+        } finally { db.endTransaction() }
         return get(customerId) ?: error("تعذر قراءة بيانات الزبون")
     }
 
@@ -87,9 +99,28 @@ class CustomerRepository(context: Context) {
         val values = ContentValues().apply {
             put("is_active", if (active) 1 else 0); put("updated_at", timestamp())
         }
-        require(db.update(
-            "customers", values, "id=?", arrayOf(customerId)
-        ) == 1) { "الزبون غير موجود" }
+        val now = timestamp()
+        values.put("updated_at", now)
+        db.beginTransaction()
+        try {
+            require(db.update(
+                "customers", values, "id=?", arrayOf(customerId)
+            ) == 1) { "الزبون غير موجود" }
+            insertAudit(db, actorUserId, if (active) "ACTIVATE" else "DEACTIVATE", customerId, now)
+            db.setTransactionSuccessful()
+        } finally { db.endTransaction() }
+    }
+
+    private fun insertAudit(db: android.database.sqlite.SQLiteDatabase, actor: String,
+                             action: String, customerId: String, now: String) {
+        db.insertOrThrow("audit_log", null, ContentValues().apply {
+            put("id", UUID.randomUUID().toString())
+            put("user_id", actor)
+            put("action", action)
+            put("entity_type", "CUSTOMER")
+            put("entity_id", customerId)
+            put("created_at", now)
+        })
     }
 
     private fun ContentValues.putNullable(key: String, value: String?) {
