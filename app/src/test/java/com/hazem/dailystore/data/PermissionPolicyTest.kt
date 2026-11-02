@@ -110,13 +110,15 @@ class PermissionPolicyTest {
             "Cashier12345", "CASHIER"
         )
         auth.changePassword(cashier, "Cashier12345", "CashierStrong123")
+        database.writableDatabase.delete("role_permissions", "permission_key=?", arrayOf(PermissionPolicy.SERVICE_TRANSFERS_EXECUTE))
+        database.writableDatabase.delete("permissions", "permission_key=?", arrayOf(PermissionPolicy.SERVICE_TRANSFERS_EXECUTE))
         database.writableDatabase.version = 13
         database.close()
         val context = RuntimeEnvironment.getApplication()
         AppDatabase.resetForTests(context, deleteExisting = false)
         database = AppDatabase.getInstance(context)
         assertTrue(allowed(cashier, PermissionPolicy.SERVICE_TRANSFERS_EXECUTE))
-        assertEquals(14, database.readableDatabase.version)
+        assertEquals(15, database.readableDatabase.version)
     }
 
     @Test
