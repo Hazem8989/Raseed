@@ -16,7 +16,8 @@ data class PartyStatementEntry(
     val cashRefundUsdCents: Long = 0L,
     val cashRefundSypMinor: Long = 0L,
     val balanceUsdCents: Long = 0L,
-    val balanceSypMinor: Long = 0L
+    val balanceSypMinor: Long = 0L,
+    val sortAt: String = date
 )
 
 data class PartyStatement(
@@ -47,7 +48,7 @@ class PartyStatementRepository(context: Context) {
         var unpriced = 0
         db.rawQuery(
             """SELECT id,invoice_number,invoice_date,total_usd_cents,
-                      exchange_rate_syp_per_usd_milli,status
+                      exchange_rate_syp_per_usd_milli,status,created_at
                FROM sales_invoices
                WHERE customer_id=? AND sale_type='CREDIT'
                  AND status IN ('POSTED','PARTIALLY_PAID','PAID')
@@ -59,7 +60,8 @@ class PartyStatementRepository(context: Context) {
                 rows.add(PartyStatementEntry(
                     c.getString(0), c.getString(2), "SALE_INVOICE", c.getString(1),
                     "فاتورة بيع آجل", debitUsdCents = c.getLong(3),
-                    debitSypMinor = if (rate > 0L) CurrencyConverter.usdCentsToSyp(c.getLong(3), rate) else 0L
+                    debitSypMinor = if (rate > 0L) CurrencyConverter.usdCentsToSyp(c.getLong(3), rate) else 0L,
+                    sortAt = c.getString(6)
                 ))
             }
         }
@@ -90,13 +92,14 @@ class PartyStatementRepository(context: Context) {
                     c.getString(0), c.getString(5).take(10), "CUSTOMER_COLLECTION",
                     c.getString(6), "تحصيل على فاتورة آجلة",
                     creditUsdCents = usd,
-                    creditSypMinor = if (currency == "SYP") amount else 0L
+                    creditSypMinor = if (currency == "SYP") amount else 0L,
+                    sortAt = c.getString(5)
                 ))
             }
         }
         db.rawQuery(
             """SELECT id,return_number,return_date,credit_reduction_usd_cents,
-                      exchange_rate_syp_per_usd_milli
+                      exchange_rate_syp_per_usd_milli,created_at
                FROM returns
                WHERE party_type='CUSTOMER' AND party_id=? AND original_invoice_type='SALE'
                  AND status='POSTED' AND credit_reduction_usd_cents>0
@@ -113,7 +116,8 @@ class PartyStatementRepository(context: Context) {
                     creditUsdCents = credit,
                     creditSypMinor = if (rate > 0L) CurrencyConverter.usdCentsToSyp(credit, rate) else 0L,
                     cashRefundUsdCents = refunds.first,
-                    cashRefundSypMinor = refunds.second
+                    cashRefundSypMinor = refunds.second,
+                    sortAt = c.getString(5)
                 ))
             }
         }
@@ -129,7 +133,7 @@ class PartyStatementRepository(context: Context) {
         var unpriced = 0
         db.rawQuery(
             """SELECT id,invoice_number,invoice_date,total_usd_cents,
-                      exchange_rate_syp_per_usd_milli
+                      exchange_rate_syp_per_usd_milli,created_at
                FROM purchase_invoices
                WHERE supplier_id=? AND status IN ('POSTED','PARTIALLY_PAID','PAID')
                ORDER BY invoice_date,created_at,id""".trimIndent(), arrayOf(supplierId)
@@ -140,7 +144,8 @@ class PartyStatementRepository(context: Context) {
                 rows.add(PartyStatementEntry(
                     c.getString(0), c.getString(2), "PURCHASE_INVOICE", c.getString(1),
                     "فاتورة شراء", debitUsdCents = c.getLong(3),
-                    debitSypMinor = if (rate > 0L) CurrencyConverter.usdCentsToSyp(c.getLong(3), rate) else 0L
+                    debitSypMinor = if (rate > 0L) CurrencyConverter.usdCentsToSyp(c.getLong(3), rate) else 0L,
+                    sortAt = c.getString(5)
                 ))
             }
         }
@@ -165,13 +170,14 @@ class PartyStatementRepository(context: Context) {
                 rows.add(PartyStatementEntry(
                     c.getString(0), c.getString(4).take(10), "SUPPLIER_PAYMENT",
                     c.getString(5), "دفعة للمورد",
-                    creditSypMinor = syp
+                    creditSypMinor = syp,
+                    sortAt = c.getString(4)
                 ))
             }
         }
         db.rawQuery(
             """SELECT id,return_number,return_date,supplier_credit_reduction_syp_minor,
-                      supplier_cash_refund_syp_minor
+                      supplier_cash_refund_syp_minor,created_at
                FROM returns
                WHERE party_type='SUPPLIER' AND party_id=? AND original_invoice_type='PURCHASE'
                  AND status='POSTED'
@@ -183,7 +189,8 @@ class PartyStatementRepository(context: Context) {
                     c.getString(0), c.getString(2), "PURCHASE_RETURN",
                     c.getString(1), "مرتجع مشتريات وتخفيض مستحق المورد",
                     creditSypMinor = credit,
-                    cashRefundSypMinor = c.getLong(4)
+                    cashRefundSypMinor = c.getLong(4),
+                    sortAt = c.getString(5)
                 ))
             }
         }
@@ -209,7 +216,7 @@ class PartyStatementRepository(context: Context) {
         id: String, name: String, type: String,
         source: List<PartyStatementEntry>, unpriced: Int
     ): PartyStatement {
-        val sorted = source.sortedWith(compareBy<PartyStatementEntry> { it.date }.thenBy { it.id })
+        val sorted = source.sortedWith(compareBy<PartyStatementEntry> { it.sortAt }.thenBy { it.id })
         var usd = 0L
         var syp = 0L
         val entries = sorted.map { row ->
