@@ -512,6 +512,22 @@ class AppDatabase private constructor(context: Context) :
             )
         """.trimIndent())
         db.execSQL("CREATE INDEX IF NOT EXISTS idx_supplier_return_refunds_return ON supplier_return_refund_allocations(return_id)")
+        db.execSQL("""
+            CREATE TABLE IF NOT EXISTS supplier_return_cost_allocations (
+                id TEXT PRIMARY KEY NOT NULL,
+                return_item_id TEXT NOT NULL,
+                source_cost_layer_id TEXT NOT NULL,
+                inventory_movement_id TEXT NOT NULL UNIQUE,
+                quantity REAL NOT NULL CHECK(quantity > 0),
+                unit_cost_usd_cents INTEGER CHECK(unit_cost_usd_cents IS NULL OR unit_cost_usd_cents > 0),
+                cost_usd_cents INTEGER CHECK(cost_usd_cents IS NULL OR cost_usd_cents >= 0),
+                created_at TEXT NOT NULL,
+                FOREIGN KEY(return_item_id) REFERENCES return_items(id) ON UPDATE RESTRICT ON DELETE RESTRICT,
+                FOREIGN KEY(source_cost_layer_id) REFERENCES inventory_cost_layers(id) ON UPDATE RESTRICT ON DELETE RESTRICT,
+                FOREIGN KEY(inventory_movement_id) REFERENCES inventory_movements(id) ON UPDATE RESTRICT ON DELETE RESTRICT
+            )
+        """.trimIndent())
+        db.execSQL("CREATE INDEX IF NOT EXISTS idx_supplier_return_cost_source ON supplier_return_cost_allocations(source_cost_layer_id)")
     }
 
     private fun ensureFifoSchema(db: SQLiteDatabase) {
