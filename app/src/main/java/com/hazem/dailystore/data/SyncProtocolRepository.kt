@@ -234,6 +234,68 @@ class SyncProtocolRepository(private val context: Context) {
         return next
     }
 
+    fun enqueueInvoicePosting(
+        db: SQLiteDatabase, actorUserId: String, operationId: String,
+        invoiceType: String, invoiceId: String, cashAccountId: String? = null
+    ): Long? {
+        require(invoiceType == "SALE" || invoiceType == "PURCHASE")
+        val table = if (invoiceType == "SALE") "sales_invoices" else "purchase_invoices"
+        val itemTable = if (invoiceType == "SALE") "sales_items" else "purchase_items"
+        val fk = if (invoiceType == "SALE") "sales_invoice_id" else "purchase_invoice_id"
+        val header = db.rawQuery(
+            """SELECT id,invoice_number,${if (invoiceType == "SALE") "customer_id,sale_type" else "supplier_id,'PURCHASE'"},
+                      warehouse_id,invoice_date,status,subtotal_usd_cents,discount_usd_cents,
+                      total_usd_cents,exchange_rate_syp_per_usd_milli,notes,created_by,
+                      ${if (invoiceType == "SALE") "posted_at,posted_operating_date" else "updated_at,invoice_date"}
+               FROM $table WHERE id=?""".trimIndent(), arrayOf(invoiceId)
+        ).use { c ->
+            require(c.moveToFirst()) { "الفاتورة غير موجودة عند تجهيز حدث المزامنة" }
+            JSONObject().apply {
+                put("id", c.getString(0)); put("invoice_number", c.getString(1))
+                if (c.isNull(2)) put("party_id", JSONObject.NULL) else put("party_id", c.getString(2))
+                put("sale_type", c.getString(3)); put("warehouse_id", c.getString(4))
+                put("invoice_date", c.getString(5)); put("status", c.getString(6))
+                put("subtotal_usd_cents", c.getLong(7)); put("discount_usd_cents", c.getLong(8))
+                put("total_usd_cents", c.getLong(9)); put("exchange_rate_syp_per_usd_milli", c.getLong(10))
+                if (c.isNull(11)) put("notes", JSONObject.NULL) else put("notes", c.getString(11))
+                if (c.isNull(12)) put("created_by", JSONObject.NULL) else put("created_by", c.getString(12))
+                put("posted_at", c.getString(13)); put("posted_operating_date", c.getString(14))
+            }
+        }
+        val items = org.json.JSONArray()
+        db.rawQuery(
+            """SELECT id,product_id,quantity,${if (invoiceType == "SALE") "unit_price_usd_cents,unit_cost_usd_cents" else "unit_cost_usd_cents,unit_cost_usd_cents"},line_total_usd_cents
+               FROM $itemTable WHERE $fk=? ORDER BY id""".trimIndent(), arrayOf(invoiceId)
+        ).use { c ->
+            while (c.moveToNext()) items.put(JSONObject().apply {
+                put("id", c.getString(0)); put("product_id", c.getString(1))
+                put("quantity", c.getDouble(2)); put("unit_price_or_cost_usd_cents", c.getLong(3))
+                put("unit_cost_usd_cents", c.getLong(4)); put("line_total_usd_cents", c.getLong(5))
+            })
+        }
+        header.put("items", items)
+        header.put("cash_account_id", cashAccountId ?: JSONObject.NULL)
+        if (invoiceType == "SALE" && cashAccountId != null) {
+            val receipts = org.json.JSONArray()
+            db.rawQuery(
+                """SELECT id,amount_minor,currency_code,exchange_rate_syp_per_usd_milli
+                   FROM cash_transactions WHERE source_type='SALES_INVOICE' AND source_id=?
+                     AND transaction_type='SALE_RECEIPT' ORDER BY created_at,id""".trimIndent(),
+                arrayOf(invoiceId)
+            ).use { c -> while (c.moveToNext()) receipts.put(JSONObject().apply {
+                put("cash_transaction_id", c.getString(0)); put("amount_minor", c.getLong(1))
+                put("currency_code", c.getString(2))
+                if (c.isNull(3)) put("exchange_rate_syp_per_usd_milli", JSONObject.NULL)
+                else put("exchange_rate_syp_per_usd_milli", c.getLong(3))
+            }) }
+            header.put("cash_receipts", receipts)
+        }
+        return enqueueLocalOperation(
+            db, actorUserId, operationId, "POST_${invoiceType}_INVOICE",
+            "${invoiceType}_INVOICE", invoiceId, "CREATE", header.toString()
+        )
+    }
+
     fun pendingOutbox(limit: Int = 100): List<SyncOutboxItem> {
         require(limit in 1..500)
         val items = mutableListOf<SyncOutboxItem>()

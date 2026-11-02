@@ -110,6 +110,22 @@ class InvoiceRepositoryTest {
     }
 
     @Test
+    fun primaryDeviceWritesInvoiceAndOutboxEnvelopeInTheSamePostingTransaction() {
+        SyncProtocolRepository(RuntimeEnvironment.getApplication())
+            .configureAsPrimary(adminId, "الهاتف الرئيسي")
+        val draft = invoices.savePurchaseDraft(
+            adminId, "sync-purchase-draft", null, null, "2026-10-31", 0, null,
+            listOf(InvoiceLineInput(productId, BigDecimal("2"), 125))
+        )
+        assertTrue(invoices.postPurchase(adminId, draft.invoiceId, "sync-purchase-post"))
+        val outbox = SyncProtocolRepository(RuntimeEnvironment.getApplication()).pendingOutbox()
+        assertEquals(1, outbox.size)
+        assertEquals("POST_PURCHASE_INVOICE", outbox.single().operationType)
+        assertTrue(outbox.single().payloadJson.contains(draft.invoiceId))
+        assertEquals(1L, outbox.single().sequence)
+    }
+
+    @Test
     fun salePostingDeductsStockAndPreventsDuplicatePosting() {
         val draft = invoices.saveSalesDraft(adminId, 
             "sale-draft-op-1", null, null, "2026-10-31",

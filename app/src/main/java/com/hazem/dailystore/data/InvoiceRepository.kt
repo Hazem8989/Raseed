@@ -2,6 +2,7 @@ package com.hazem.dailystore.data
 
 import android.content.ContentValues
 import android.content.Context
+import org.json.JSONObject
 import android.database.sqlite.SQLiteDatabase
 import java.math.BigDecimal
 import java.math.RoundingMode
@@ -388,6 +389,9 @@ class InvoiceRepository(context: Context) {
                 put("device_id", SyncDeviceIdentity.getOrCreate(context))
                 put("created_at", now)
             })
+            SyncProtocolRepository(context).enqueueInvoicePosting(
+                db, actorUserId, operationId, type, invoiceId, cashAccountId
+            )
             registerOperation(db, operationId, operationType, payloadHash, invoiceId, now)
             db.setTransactionSuccessful()
             return true
