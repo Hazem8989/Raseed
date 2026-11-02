@@ -175,7 +175,7 @@ class ServiceTransferRepository(context:Context) {
         val charge=Math.addExact(Math.addExact(deliveredMinor,profit),providerFeeMinor)
         val db=database.writableDatabase;db.beginTransaction()
         try {
-            requireActiveUser(db,actor);ensureSystemAccounts(db)
+            PermissionPolicy.require(db,actor,PermissionPolicy.SERVICE_TRANSFERS_EXECUTE);ensureSystemAccounts(db)
             val payload=hash("$serviceType|$deliveredMinor|$providerFeeMinor|$receiptAccountId|$reference|$note")
             val old=db.rawQuery("SELECT id,service_type,amount_delivered_minor,profit_minor,provider_fee_minor,customer_charge_minor,payload_hash FROM service_transfers WHERE operation_id=?",arrayOf(operationId)).use{
                 if(it.moveToFirst()) arrayOf(it.getString(0),it.getString(1),it.getLong(2).toString(),it.getLong(3).toString(),it.getLong(4).toString(),it.getLong(5).toString(),it.getString(6)) else null
