@@ -51,6 +51,19 @@ class AuthRepositoryTest {
         } catch (_: IllegalArgumentException) { }
     }
 
+    @Test fun listingUsersRequiresTheUsersManagePermission() {
+        val admin = auth.authenticate("admin", "1234")!!
+        auth.changePassword(admin.id, "1234", "ManagerPass2026")
+        val cashierId = auth.createUser(admin.roleKey, admin.id,
+            "cashierlist", "موظف قائمة", "Cashier5678", "CASHIER")
+        auth.changePassword(cashierId, "Cashier5678", "CashierPass2026")
+        assertEquals(2, auth.listUsers(admin.id).size)
+        try {
+            auth.listUsers(cashierId)
+            fail("Cashier must not read user-management records")
+        } catch (_: IllegalArgumentException) { }
+    }
+
     @Test fun temporaryAdminPasswordMustBeChangedBeforeSessionCanBeRestored() {
         val admin = auth.authenticate("admin", "1234")!!
         assertTrue(admin.mustChangePassword)

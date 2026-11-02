@@ -16,12 +16,18 @@ import org.robolectric.RuntimeEnvironment
 class BackupRestoreManagerTest {
     private val context = RuntimeEnvironment.getApplication()
     private lateinit var manager: BackupRestoreManager
+    private lateinit var adminId: String
     private val password = "ShopBackup#2026".toCharArray()
 
     @Before
     fun setUp() {
         AppDatabase.resetForTests(context)
         AppDatabase.getInstance(context).writableDatabase
+        val auth = AuthRepository(context)
+        auth.ensureInitialAdmin()
+        val admin = auth.authenticate("admin", "1234")!!
+        auth.changePassword(admin.id, "1234", "ManagerPass2026")
+        adminId = admin.id
         manager = BackupRestoreManager(context)
     }
 
@@ -37,13 +43,13 @@ class BackupRestoreManagerTest {
         db.execSQL("UPDATE app_settings SET setting_value='backup-marker' WHERE setting_key='base_currency'")
 
         val bytes = ByteArrayOutputStream()
-        manager.createBackup(password, bytes)
+        manager.createBackup(adminId, password, bytes)
         assertTrue(bytes.size() > 100)
 
         AppDatabase.getInstance(context).writableDatabase.execSQL(
             "UPDATE app_settings SET setting_value='changed-after-backup' WHERE setting_key='base_currency'"
         )
-        manager.restoreBackup(password, ByteArrayInputStream(bytes.toByteArray()))
+        manager.restoreBackup(adminId, password, ByteArrayInputStream(bytes.toByteArray()))
 
         val restored = AppDatabase.getInstance(context).readableDatabase
         restored.rawQuery(
@@ -64,11 +70,11 @@ class BackupRestoreManagerTest {
         val db = AppDatabase.getInstance(context).writableDatabase
         db.execSQL("UPDATE app_settings SET setting_value='current-value' WHERE setting_key='base_currency'")
         val bytes = ByteArrayOutputStream()
-        manager.createBackup(password, bytes)
+        manager.createBackup(adminId, password, bytes)
 
         var failed = false
         try {
-            manager.restoreBackup("WrongPassword#1".toCharArray(), ByteArrayInputStream(bytes.toByteArray()))
+            manager.restoreBackup(adminId, "WrongPassword#1".toCharArray(), ByteArrayInputStream(bytes.toByteArray()))
         } catch (_: Exception) {
             failed = true
         }
@@ -88,13 +94,13 @@ class BackupRestoreManagerTest {
         val db = AppDatabase.getInstance(context).writableDatabase
         db.execSQL("UPDATE app_settings SET setting_value='safe-current' WHERE setting_key='base_currency'")
         val bytes = ByteArrayOutputStream()
-        manager.createBackup(password, bytes)
+        manager.createBackup(adminId, password, bytes)
         val damaged = bytes.toByteArray()
         damaged[damaged.lastIndex] = (damaged.last().toInt() xor 0x40).toByte()
 
         var failed = false
         try {
-            manager.restoreBackup(password, ByteArrayInputStream(damaged))
+            manager.restoreBackup(adminId, password, ByteArrayInputStream(damaged))
         } catch (_: Exception) {
             failed = true
         }
@@ -110,10 +116,29 @@ class BackupRestoreManagerTest {
     }
 
     @Test
+    fun cashierCannotCreateOrRestoreBackupsEvenIfItCallsTheRepositoryDirectly() {
+        val auth = AuthRepository(context)
+        val cashierId = auth.createUser("ADMIN", adminId,
+            "cashierbackup", "موظف نسخ", "Cashier5678", "CASHIER")
+        auth.changePassword(cashierId, "Cashier5678", "CashierPass2026")
+        val bytes = ByteArrayOutputStream()
+        try {
+            manager.createBackup(cashierId, password, bytes)
+            throw AssertionError("Cashier backup must be denied")
+        } catch (_: IllegalArgumentException) { }
+        val validBackup = ByteArrayOutputStream()
+        manager.createBackup(adminId, password, validBackup)
+        try {
+            manager.restoreBackup(cashierId, password, ByteArrayInputStream(validBackup.toByteArray()))
+            throw AssertionError("Cashier restore must be denied")
+        } catch (_: IllegalArgumentException) { }
+    }
+
+    @Test
     fun rejectsShortPasswordsBeforeCreatingBackup() {
         var failed = false
         try {
-            manager.createBackup("short".toCharArray(), ByteArrayOutputStream())
+            manager.createBackup(adminId, "short".toCharArray(), ByteArrayOutputStream())
         } catch (_: IllegalArgumentException) {
             failed = true
         }

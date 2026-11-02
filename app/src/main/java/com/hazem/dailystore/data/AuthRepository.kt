@@ -123,9 +123,11 @@ class AuthRepository(context: Context) {
             password.any(Char::isLetter) &&
             password.any(Char::isDigit)
 
-    fun listUsers(): List<ManagedUserSummary> {
+    fun listUsers(actorUserId: String): List<ManagedUserSummary> {
+        val db = database.readableDatabase
+        PermissionPolicy.require(db, actorUserId, PermissionPolicy.USERS_MANAGE)
         val result = mutableListOf<ManagedUserSummary>()
-        database.readableDatabase.rawQuery(
+        db.rawQuery(
             "SELECT id,username,display_name,role_key,is_active,must_change_password FROM users ORDER BY created_at,id",
             null
         ).use { c ->

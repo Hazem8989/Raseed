@@ -31,7 +31,8 @@ import javax.crypto.spec.SecretKeySpec
  * the restored database has opened and passed integrity checks.
  */
 class BackupRestoreManager(private val context: Context) {
-    fun createBackup(password: CharArray, destination: OutputStream) {
+    fun createBackup(actorUserId: String, password: CharArray, destination: OutputStream) {
+        requireBackupPermission(actorUserId)
         validatePassword(password)
         synchronized(LOCK) {
             val snapshot = File(context.cacheDir, "tds-backup-snapshot-${System.nanoTime()}.db")
@@ -52,7 +53,8 @@ class BackupRestoreManager(private val context: Context) {
         }
     }
 
-    fun restoreBackup(password: CharArray, source: InputStream) {
+    fun restoreBackup(actorUserId: String, password: CharArray, source: InputStream) {
+        requireBackupPermission(actorUserId)
         validatePassword(password)
         synchronized(LOCK) {
             val staged = File(context.getDatabasePath(AppDatabase.DATABASE_NAME).parentFile,
@@ -103,6 +105,14 @@ class BackupRestoreManager(private val context: Context) {
                 if (rollback.exists() && live.exists()) rollback.delete()
             }
         }
+    }
+
+    private fun requireBackupPermission(actorUserId: String) {
+        PermissionPolicy.require(
+            AppDatabase.getInstance(context).readableDatabase,
+            actorUserId,
+            PermissionPolicy.BACKUP_MANAGE
+        )
     }
 
     private fun encryptSnapshot(snapshot: File, target: File, password: CharArray) {

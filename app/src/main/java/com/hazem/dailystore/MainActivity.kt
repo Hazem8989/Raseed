@@ -159,12 +159,12 @@ class MainActivity : Activity() {
                 if (requestCode == backupCreateRequestCode) {
                     val output = contentResolver.openOutputStream(uri, "w")
                         ?: error("تعذر فتح ملف النسخة للحفظ")
-                    output.use { BackupRestoreManager(this).createBackup(password, it) }
+                    output.use { BackupRestoreManager(this).createBackup(currentUserId ?: error("جلسة المدير غير موجودة"), password, it) }
                     Toast.makeText(this, "تم إنشاء نسخة احتياطية مشفّرة بنجاح", Toast.LENGTH_LONG).show()
                 } else {
                     val input = contentResolver.openInputStream(uri)
                         ?: error("تعذر فتح ملف النسخة المحدد")
-                    input.use { BackupRestoreManager(this).restoreBackup(password, it) }
+                    input.use { BackupRestoreManager(this).restoreBackup(currentUserId ?: error("جلسة المدير غير موجودة"), password, it) }
                     clearSessionState()
                     currentUserId = null
                     cart.clear()
@@ -2152,7 +2152,7 @@ class MainActivity : Activity() {
         ).apply { setPadding(0, dp(5), 0, dp(12)) })
         content.addView(smallButton("+ إضافة مستخدم جديد") { showCreateUserDialog { showUserManagement() } },
             fieldParams(dp(48), dp(10)))
-        auth.listUsers().forEach { user ->
+        auth.listUsers(actor).forEach { user ->
             val card = LinearLayout(this).apply {
                 orientation = LinearLayout.VERTICAL
                 setPadding(dp(13), dp(11), dp(13), dp(11))
