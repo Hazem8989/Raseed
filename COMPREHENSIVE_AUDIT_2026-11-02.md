@@ -252,3 +252,13 @@ This addendum supersedes earlier status statements above wherever they conflict 
 8. Keep multi-device sync deferred until its security/authority/conflict model is implemented and explicitly approved.
 
 No cloud service, network listener, or sync transport is approved by this addendum.
+
+## تحديث التنفيذ — 2026-11-02
+
+أُضيفت إلى واجهة التطبيق على فرع `the-daily-shop-development`:
+- شاشة مرتجعات المبيعات: اختيار الفاتورة، إدخال كميات مرتجعة متعددة البنود، معاينة قيمة المرتجع وتخفيض الدين والمبلغ النقدي، وتوزيع الرد على أكثر من حساب بعملته الأصلية.
+- شاشة تسويات المخزون: الزيادة بتكلفة وحدة شراء بالدولار، والنقص بتكلفة FIFO المحسوبة من طبقات المخزون، مع عرض سجل التسويات.
+- إظهار الشاشتين وفق صلاحيات `RETURNS_PROCESS` و`INVENTORY_ADJUST`، مع بقاء التحقق النهائي داخل المستودعات.
+- أُضيف اختبار تكاملي يغطي توزيع رد نقدي واحد بين حساب USD وحساب SYP، والتحقق من أرصدة الحسابين بعد العملية.
+
+**حالة التحقق:** التعديلات محفوظة على فرع التطوير فقط. لم يتوفر في هذه الجلسة تشغيل Gradle أو Workflow جديد على GitHub، لذلك لا يُعد هذا التحديث اجتيازاً للاختبارات بعد. يجب تشغيل `testDebugUnitTest` قبل اعتماد المرحلة، ومراجعة أي فشل وإصلاحه قبل طلب اختبار جهاز فعلي. لم يُطلب تثبيت APK.
