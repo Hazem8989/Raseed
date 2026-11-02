@@ -48,6 +48,8 @@ class PermissionPolicyTest {
         assertTrue(allowed(cashierId, PermissionPolicy.CUSTOMERS_READ))
         assertTrue(allowed(cashierId, PermissionPolicy.CUSTOMERS_CREATE))
         assertTrue(allowed(cashierId, PermissionPolicy.CUSTOMERS_COLLECT))
+        assertTrue(allowed(cashierId, PermissionPolicy.SERVICE_TRANSFERS_EXECUTE))
+        assertFalse(allowed(cashierId, PermissionPolicy.SERVICE_TRANSFERS_MANAGE))
         assertFalse(allowed(cashierId, PermissionPolicy.PURCHASES_MANAGE))
         assertFalse(allowed(cashierId, PermissionPolicy.CATALOG_MANAGE))
         assertFalse(allowed(cashierId, PermissionPolicy.ACCOUNTS_MANAGE))
