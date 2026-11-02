@@ -320,6 +320,7 @@ class MainActivity : Activity() {
             "GENERAL_REPORTS" -> showGeneralReports()
             "SERVICE_TRANSFERS" -> showServiceTransfers()
             "PURCHASE_EDITOR" -> showPurchaseInvoiceEditor()
+            "USER_MANAGEMENT" -> showUserManagement()
             else -> showPointOfSale(preserveCart = true)
         }
     }
@@ -1043,7 +1044,8 @@ class MainActivity : Activity() {
             "تحويل رصيد" to "سيرياتيل العادي وكاش وشام كاش",
             "التقارير" to "المبيعات والأرباح والمخزون",
             "صلاحيات الموظفين" to "تحديد ما يستطيع موظفو الصندوق تنفيذه",
-            "النسخ الاحتياطي والاستعادة" to "حفظ بيانات المتجر واستعادتها بأمان"
+            "النسخ الاحتياطي والاستعادة" to "حفظ بيانات المتجر واستعادتها بأمان",
+            "المستخدمون والصلاحيات" to "إضافة الموظفين والتحكم بصلاحياتهم"
         )
         lateinit var popup: PopupWindow
         val visibleEntries = if (isManager()) entries else entries.filterNot {
@@ -1067,6 +1069,7 @@ class MainActivity : Activity() {
                         "التقارير" -> showGeneralReports()
                         "صلاحيات الموظفين" -> showCashierPermissions()
                         "النسخ الاحتياطي والاستعادة" -> showBackupRestoreOptions()
+                        "المستخدمون والصلاحيات" -> showUserManagement()
                         else -> Toast.makeText(this@MainActivity, "قسم $title سيُفعّل في مرحلته", Toast.LENGTH_SHORT).show()
                     }
                 }
@@ -1945,6 +1948,183 @@ class MainActivity : Activity() {
     }
 
     private fun isManager(): Boolean = currentUserRole == "ADMIN" && !currentUserId.isNullOrBlank()
+
+    private fun showUserManagement() {
+        if (!isManager()) {
+            Toast.makeText(this, "إدارة المستخدمين والصلاحيات متاحة للمدير فقط", Toast.LENGTH_SHORT).show()
+            return
+        }
+        val actor = currentUserId ?: return
+        markScreen("USER_MANAGEMENT")
+        val auth = AuthRepository(this)
+        val page = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setBackgroundColor(backgroundColor)
+        }
+        val header = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(dp(14), dp(10), dp(14), dp(10))
+            setBackgroundColor(Color.WHITE)
+        }
+        val back = Button(this).apply {
+            text = "‹"; textSize = 25f; isAllCaps = false
+            setTextColor(green); setBackgroundColor(Color.TRANSPARENT)
+            setOnClickListener { showPointOfSale() }
+        }
+        header.addView(back, LinearLayout.LayoutParams(dp(48), dp(48)))
+        header.addView(label("المستخدمون والصلاحيات", 19f, green, true, Gravity.CENTER),
+            LinearLayout.LayoutParams(0, -2, 1f))
+        val body = ScrollView(this).apply { isFillViewport = true }
+        val content = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(16), dp(14), dp(16), dp(24))
+        }
+        content.addView(label("إدارة حسابات المتجر", 21f, green, true, Gravity.RIGHT))
+        content.addView(label(
+            "كل موظف يستخدم حساباً مستقلاً. كلمة المرور المؤقتة يجب تغييرها عند أول دخول، وإيقاف الحساب يمنع تسجيل الدخول والعمليات الجديدة.",
+            12f, mutedColor, false, Gravity.RIGHT
+        ).apply { setPadding(0, dp(5), 0, dp(12)) })
+        content.addView(smallButton("+ إضافة مستخدم جديد") { showCreateUserDialog { showUserManagement() } },
+            fieldParams(dp(48), dp(10)))
+        auth.listUsers().forEach { user ->
+            val card = LinearLayout(this).apply {
+                orientation = LinearLayout.VERTICAL
+                setPadding(dp(13), dp(11), dp(13), dp(11))
+                background = cardBackground()
+            }
+            card.addView(label(user.displayName, 16f, green, true, Gravity.RIGHT))
+            card.addView(label(
+                "@${user.username} • ${if (user.roleKey == "ADMIN") "مدير" else "موظف"}",
+                12f, mutedColor, false, Gravity.RIGHT
+            ).apply { setPadding(0, dp(3), 0, dp(3)) })
+            val state = when {
+                !user.isActive -> "الحساب موقوف"
+                user.mustChangePassword -> "بانتظار تغيير كلمة المرور"
+                else -> "الحساب نشط"
+            }
+            card.addView(label(state, 12f, if (user.isActive) green else mutedColor, true, Gravity.RIGHT))
+            if (user.id != actor) {
+                card.addView(smallButton(if (user.isActive) "إيقاف الحساب" else "إعادة تفعيل الحساب") {
+                    val action = if (user.isActive) "إيقاف" else "إعادة تفعيل"
+                    AlertDialog.Builder(this)
+                        .setTitle("$action حساب المستخدم")
+                        .setMessage("هل تريد $action حساب ${user.displayName}؟")
+                        .setNegativeButton("إلغاء", null)
+                        .setPositiveButton("تأكيد") { _, _ ->
+                            try {
+                                auth.setUserActive(actor, user.id, !user.isActive)
+                                Toast.makeText(this, "تم تحديث حالة الحساب", Toast.LENGTH_SHORT).show()
+                                showUserManagement()
+                            } catch (e: Exception) {
+                                Toast.makeText(this, e.message ?: "تعذر تحديث الحساب", Toast.LENGTH_LONG).show()
+                            }
+                        }.show()
+                }, fieldParams(dp(42), dp(7)))
+            }
+            content.addView(card, fieldParams(-2, dp(8)))
+        }
+        content.addView(sectionHeading("صلاحيات دور الموظف"))
+        content.addView(label(
+            "تُطبق التغييرات على جميع الحسابات ذات دور «موظف». اترك الصلاحيات الإدارية مغلقة، وامنح فقط ما يحتاجه الموظف فعلياً.",
+            12f, mutedColor, false, Gravity.RIGHT
+        ).apply { setPadding(0, dp(4), 0, dp(8)) })
+        PermissionPolicy.listRolePermissions(AppDatabase.getInstance(this).readableDatabase, "CASHIER")
+            .forEach { permission ->
+                val check = CheckBox(this).apply {
+                    text = permission.description
+                    textSize = 14f
+                    setTextColor(textColor)
+                    isChecked = permission.allowed
+                    setOnCheckedChangeListener { button, checked ->
+                        try {
+                            PermissionPolicy.setRolePermission(
+                                AppDatabase.getInstance(this@MainActivity).writableDatabase,
+                                actor, "CASHIER", permission.key, checked
+                            )
+                            Toast.makeText(this@MainActivity, "تم تحديث صلاحية الموظف", Toast.LENGTH_SHORT).show()
+                        } catch (e: Exception) {
+                            button.setOnCheckedChangeListener(null)
+                            button.isChecked = permission.allowed
+                            button.setOnCheckedChangeListener { view, value ->
+                                runCatching {
+                                    PermissionPolicy.setRolePermission(
+                                        AppDatabase.getInstance(this@MainActivity).writableDatabase,
+                                        actor, "CASHIER", permission.key, value
+                                    )
+                                }.onFailure {
+                                    view.setOnCheckedChangeListener(null)
+                                    view.isChecked = !value
+                                    view.setOnCheckedChangeListener(null)
+                                    Toast.makeText(this@MainActivity, it.message ?: "تعذر تغيير الصلاحية", Toast.LENGTH_LONG).show()
+                                }
+                            }
+                            Toast.makeText(this@MainActivity, e.message ?: "تعذر تغيير الصلاحية", Toast.LENGTH_LONG).show()
+                        }
+                    }
+                }
+                content.addView(check, fieldParams(-2, dp(2)))
+            }
+        body.addView(content)
+        page.addView(header, matchWidth())
+        page.addView(body, LinearLayout.LayoutParams(-1, 0, 1f))
+        setContentView(page)
+    }
+
+    private fun showCreateUserDialog(onSaved: () -> Unit) {
+        if (!isManager()) return
+        val content = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(18), dp(8), dp(18), dp(4))
+        }
+        val username = EditText(this).apply {
+            hint = "اسم المستخدم (3 أحرف على الأقل)"
+            setSingleLine(true); textSize = 15f; background = inputBackground()
+        }
+        val displayName = EditText(this).apply {
+            hint = "الاسم الظاهر للموظف"
+            setSingleLine(true); textSize = 15f; background = inputBackground()
+        }
+        val password = EditText(this).apply {
+            hint = "كلمة مرور مؤقتة قوية"
+            setSingleLine(true); textSize = 15f
+            inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_PASSWORD
+            background = inputBackground()
+        }
+        val role = Spinner(this).apply {
+            adapter = ArrayAdapter(this@MainActivity, android.R.layout.simple_spinner_dropdown_item,
+                listOf("موظف", "مدير"))
+        }
+        content.addView(username, fieldParams(dp(50), dp(7)))
+        content.addView(displayName, fieldParams(dp(50), dp(7)))
+        content.addView(password, fieldParams(dp(50), dp(7)))
+        content.addView(label("نوع الحساب", 12f, mutedColor, false, Gravity.RIGHT))
+        content.addView(role, fieldParams(dp(48), dp(4)))
+        val dialog = AlertDialog.Builder(this)
+            .setTitle("إضافة مستخدم")
+            .setMessage("سيُطلب من المستخدم تغيير كلمة المرور المؤقتة عند أول تسجيل دخول.")
+            .setView(content)
+            .setNegativeButton("إلغاء", null)
+            .setPositiveButton("إنشاء", null)
+            .create()
+        dialog.setOnShowListener {
+            dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener {
+                try {
+                    val actor = currentUserId ?: error("جلسة المدير غير صالحة")
+                    AuthRepository(this).createUser(
+                        currentUserRole, actor, username.text.toString(), displayName.text.toString(),
+                        password.text.toString(), if (role.selectedItemPosition == 1) "ADMIN" else "CASHIER"
+                    )
+                    dialog.dismiss()
+                    Toast.makeText(this, "تم إنشاء المستخدم. يجب عليه تغيير كلمة المرور عند أول دخول.", Toast.LENGTH_LONG).show()
+                    onSaved()
+                } catch (e: Exception) {
+                    Toast.makeText(this, e.message ?: "تعذر إنشاء المستخدم", Toast.LENGTH_LONG).show()
+                }
+            }
+        }
+        dialog.show()
+    }
 
     private fun showCashAccounts() {
         markScreen("CASH_ACCOUNTS")
