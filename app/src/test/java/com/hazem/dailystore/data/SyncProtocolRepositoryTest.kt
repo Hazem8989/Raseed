@@ -194,22 +194,23 @@ class SyncProtocolRepositoryTest {
         val invitation = repository.createPairingInvitation(adminId)
         val secondaryId = UUID.randomUUID().toString()
         repository.enrollSecondaryDevice(adminId, invitation.token, secondaryId, "الثانوي")
+        repository.mapSecondaryActor(adminId, secondaryId, "remote-admin", adminId)
         val secret = vault.load(secondaryId)!!
         val operationId = UUID.randomUUID().toString()
         val envelope = SyncEnvelopeSecurity.create(
             database.readableDatabase.rawQuery(
                 "SELECT state_value FROM sync_protocol_state WHERE state_key='store_id'", null
             ).use { c -> assertTrue(c.moveToFirst()); c.getString(0) },
-            operationId, 1L, secondaryId, adminId, "CREATE", "SALES_INVOICE",
-            "sale-incoming-1", 0L, """{"invoice_id":"sale-incoming-1","total_usd_cents":2500}""",
+            operationId, 1L, secondaryId, "remote-admin", "CREATE", "SALES_INVOICE",
+            "sale-incoming-1", 0L, """{"business_operation":"POST_SALES_INVOICE","invoice_id":"sale-incoming-1","total_usd_cents":2500}""",
             "2026-11-03T12:00:00Z", secret
         )
         val encoded = SyncEnvelopeSecurity.encode(envelope)
         assertEquals(SyncInboxDisposition.RECEIVED, repository.recordIncomingFromSecondary(encoded))
         assertEquals(SyncInboxDisposition.DUPLICATE, repository.recordIncomingFromSecondary(encoded))
         val changed = SyncEnvelopeSecurity.create(
-            envelope.storeId, operationId, 1L, secondaryId, adminId, "CREATE", "SALES_INVOICE",
-            "sale-incoming-1", 0L, """{"invoice_id":"sale-incoming-1","total_usd_cents":9900}""",
+            envelope.storeId, operationId, 1L, secondaryId, "remote-admin", "CREATE", "SALES_INVOICE",
+            "sale-incoming-1", 0L, """{"business_operation":"POST_SALES_INVOICE","invoice_id":"sale-incoming-1","total_usd_cents":9900}""",
             "2026-11-03T12:00:01Z", secret
         )
         assertEquals(SyncInboxDisposition.CONFLICT,
@@ -228,13 +229,14 @@ class SyncProtocolRepositoryTest {
         val invitation = repository.createPairingInvitation(adminId)
         val secondaryId = UUID.randomUUID().toString()
         repository.enrollSecondaryDevice(adminId, invitation.token, secondaryId, "الثانوي")
+        repository.mapSecondaryActor(adminId, secondaryId, "remote-admin", adminId)
         val secret = vault.load(secondaryId)!!
         val storeId = database.readableDatabase.rawQuery(
             "SELECT state_value FROM sync_protocol_state WHERE state_key='store_id'", null
         ).use { c -> assertTrue(c.moveToFirst()); c.getString(0) }
         val gap = SyncEnvelopeSecurity.create(
-            storeId, UUID.randomUUID().toString(), 2L, secondaryId, adminId, "CREATE",
-            "SALES_INVOICE", "sale-gap", 0L, """{"invoice_id":"sale-gap"}""",
+            storeId, UUID.randomUUID().toString(), 2L, secondaryId, "remote-admin", "CREATE",
+            "SALES_INVOICE", "sale-gap", 0L, """{"business_operation":"POST_SALES_INVOICE","invoice_id":"sale-gap"}""",
             "2026-11-03T12:00:00Z", secret
         )
         var rejected = false
