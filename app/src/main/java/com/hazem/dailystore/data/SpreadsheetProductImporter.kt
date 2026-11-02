@@ -45,7 +45,29 @@ object SpreadsheetProductImporter {
         return mapRows(rows)
     }
 
+    private fun detectDelimiter(source: String): Char {
+        val candidates = listOf(',', ';', '\\t')
+        val firstRecord = source.lineSequence().firstOrNull { it.isNotBlank() }.orEmpty()
+        var quoted = false
+        val counts = candidates.associateWith { 0 }.toMutableMap()
+        var i = 0
+        while (i < firstRecord.length) {
+            val ch = firstRecord[i]
+            when {
+                ch == '"' && quoted && i + 1 < firstRecord.length && firstRecord[i + 1] == '"' -> i++
+                ch == '"' -> quoted = !quoted
+                !quoted && ch in candidates -> counts[ch] = (counts[ch] ?: 0) + 1
+            }
+            i++
+        }
+        return candidates.maxByOrNull { counts[it] ?: 0 } ?: ','
+    }
+
     private fun parseCsv(source: String): List<List<String>> {
+        // CSV files exported by spreadsheet apps may use comma, semicolon, or tab.
+        // Detect the separator from the first non-empty record while respecting quotes.
+        val delimiter = detectDelimiter(source)
+
         val result = mutableListOf<List<String>>()
         var row = mutableListOf<String>()
         val cell = StringBuilder()
@@ -58,7 +80,7 @@ object SpreadsheetProductImporter {
                     cell.append('"'); i++
                 }
                 ch == '"' -> quoted = !quoted
-                ch == ',' && !quoted -> {
+                ch == delimiter && !quoted -> {
                     row.add(cell.toString()); cell.setLength(0)
                 }
                 (ch == '\n' || ch == '\r') && !quoted -> {
