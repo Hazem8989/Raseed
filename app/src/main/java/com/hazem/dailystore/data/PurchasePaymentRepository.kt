@@ -53,7 +53,8 @@ class PurchasePaymentRepository(context: Context) {
                 val rate=c.getLong(7)
                 val totalSyp=if(rate>0L) CurrencyConverter.usdCentsToSyp(totalUsd,rate) else 0L
                 val paidSyp=if(rate>0L) paidSypMinor(database.readableDatabase,id,rate) else 0L
-                val outstandingSyp=(totalSyp-paidSyp).coerceAtLeast(0L)
+                val supplierCreditSyp=if(rate>0L) supplierReturnCreditSyp(database.readableDatabase,id) else 0L
+                val outstandingSyp=(totalSyp-paidSyp-supplierCreditSyp).coerceAtLeast(0L)
                 val paidUsd=if(rate>0L) CurrencyConverter.sypToUsdCents(paidSyp,rate)
                     else paidUsdCentsLegacy(database.readableDatabase,id)
                 val outstandingUsd=(totalUsd-paidUsd).coerceAtLeast(0L)
@@ -219,8 +220,7 @@ class PurchasePaymentRepository(context: Context) {
             db.insertOrThrow("invoice_payments", null, payment)
 
             val newPaidSyp=Math.addExact(currentState.first,amountSypEquivalent)
-            val totalSyp=CurrencyConverter.usdCentsToSyp(invoice.totalUsdCents,invoiceRate)
-            val newOutstandingSyp=(totalSyp-newPaidSyp).coerceAtLeast(0L)
+            val newOutstandingSyp=(currentState.second-amountSypEquivalent).coerceAtLeast(0L)
             val newPaidUsd=CurrencyConverter.sypToUsdCents(newPaidSyp,invoiceRate)
             val newOutstandingUsd=CurrencyConverter.sypToUsdCents(newOutstandingSyp,invoiceRate)
             val newStatus=if(newOutstandingSyp==0L) "PAID" else "PARTIALLY_PAID"
@@ -320,7 +320,8 @@ class PurchasePaymentRepository(context: Context) {
             val paidBeforeSyp=paidSypMinor(db,old.invoiceId,invoiceRate)
             val paidWithoutThisSyp=(paidBeforeSyp-oldSypEquivalent).coerceAtLeast(0L)
             val invoiceTotalSyp=CurrencyConverter.usdCentsToSyp(old.invoiceTotalUsdCents,invoiceRate)
-            require(newSypEquivalent<=(invoiceTotalSyp-paidWithoutThisSyp).coerceAtLeast(0L)) {
+            val supplierCreditSyp=supplierReturnCreditSyp(db,old.invoiceId)
+            require(newSypEquivalent<=(invoiceTotalSyp-supplierCreditSyp-paidWithoutThisSyp).coerceAtLeast(0L)) {
                 "المبلغ المعدل يتجاوز المتبقي السوري الثابت بعد احتساب الدفعات الأخرى"
             }
 
@@ -353,7 +354,7 @@ class PurchasePaymentRepository(context: Context) {
                 "تعذر تعديل سجل دفعة الفاتورة"
             }
             val paidAfterSyp=Math.addExact(paidWithoutThisSyp,newSypEquivalent)
-            val outstandingSyp=(invoiceTotalSyp-paidAfterSyp).coerceAtLeast(0L)
+            val outstandingSyp=(invoiceTotalSyp-supplierCreditSyp-paidAfterSyp).coerceAtLeast(0L)
             val paidAfterUsd=CurrencyConverter.sypToUsdCents(paidAfterSyp,invoiceRate)
             val outstandingUsd=CurrencyConverter.sypToUsdCents(outstandingSyp,invoiceRate)
             val status=if(outstandingSyp==0L) "PAID" else if(paidAfterSyp>0L) "PARTIALLY_PAID" else "POSTED"
@@ -413,6 +414,14 @@ class PurchasePaymentRepository(context: Context) {
         return total
     }
 
+    private fun supplierReturnCreditSyp(db: SQLiteDatabase, invoiceId: String): Long =
+        db.rawQuery(
+            """SELECT COALESCE(SUM(supplier_credit_reduction_syp_minor),0)
+               FROM returns WHERE original_invoice_type='PURCHASE'
+                 AND original_invoice_id=? AND status='POSTED'""".trimIndent(),
+            arrayOf(invoiceId)
+        ).use { c -> if (c.moveToFirst()) c.getLong(0) else 0L }
+
     private fun paidUsdCentsLegacy(db: SQLiteDatabase, invoiceId: String): Long {
         var total=0L
         db.rawQuery("""SELECT amount_minor,currency_code,exchange_rate_syp_per_usd_milli
@@ -433,7 +442,8 @@ class PurchasePaymentRepository(context: Context) {
     private fun invoicePaymentStateSyp(db: SQLiteDatabase, invoiceId: String, totalUsdCents: Long, rate: Long): SypPaymentState {
         val totalSyp=CurrencyConverter.usdCentsToSyp(totalUsdCents,rate)
         val paid=paidSypMinor(db,invoiceId,rate)
-        val outstanding=(totalSyp-paid).coerceAtLeast(0L)
+        val credit=supplierReturnCreditSyp(db,invoiceId)
+        val outstanding=(totalSyp-paid-credit).coerceAtLeast(0L)
         val status=when { outstanding==0L -> "PAID"; paid>0L -> "PARTIALLY_PAID"; else -> "UNPAID" }
         return SypPaymentState(paid,outstanding,status)
     }
