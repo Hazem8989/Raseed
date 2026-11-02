@@ -50,7 +50,7 @@ class CustomerRepositoryTest {
         assertEquals("0999000000", customer.phone)
         val updated = customers.update(adminId, customer.id, "اسم معدل", "0999111111")
         assertEquals("اسم معدل", updated.name)
-        customers.setActive(customer.id, false)
+        customers.setActive(adminId, customer.id, false)
         assertNull(customers.listActive().firstOrNull { it.id == customer.id })
         assertTrue(customers.get(customer.id) != null)
     }
