@@ -84,6 +84,32 @@ class InvoiceRepositoryTest {
     }
 
     @Test
+    fun invoicePostingWritesActorAndBeforeAfterAuditEvidenceAtomically() {
+        val draft = invoices.savePurchaseDraft(
+            adminId, "purchase-audit-draft", null, null, "2026-10-31",
+            0, null, listOf(InvoiceLineInput(productId, BigDecimal("2"), 125))
+        )
+        assertTrue(invoices.postPurchase(adminId, draft.invoiceId, "purchase-audit-post"))
+
+        database.readableDatabase.rawQuery(
+            """SELECT user_id,action,entity_type,entity_id,before_json,after_json,device_id
+               FROM audit_log WHERE entity_id=? AND action='POST_PURCHASE_INVOICE'""".trimIndent(),
+            arrayOf(draft.invoiceId)
+        ).use { cursor ->
+            assertTrue(cursor.moveToFirst())
+            assertEquals(adminId, cursor.getString(0))
+            assertEquals("POST_PURCHASE_INVOICE", cursor.getString(1))
+            assertEquals("PURCHASE_INVOICE", cursor.getString(2))
+            assertEquals(draft.invoiceId, cursor.getString(3))
+            assertTrue(cursor.getString(4).contains("\"status\":\"DRAFT\""))
+            assertTrue(cursor.getString(5).contains("\"status\":\"POSTED\""))
+            assertTrue(cursor.getString(5).contains("\"total_usd_cents\":250"))
+            assertTrue(!cursor.isNull(6) && cursor.getString(6).isNotBlank())
+            assertFalse(cursor.moveToNext())
+        }
+    }
+
+    @Test
     fun salePostingDeductsStockAndPreventsDuplicatePosting() {
         val draft = invoices.saveSalesDraft(adminId, 
             "sale-draft-op-1", null, null, "2026-10-31",

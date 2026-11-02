@@ -36,6 +36,7 @@ data class InvoiceSummary(
  * as an idempotency fence so retries cannot apply stock movements twice.
  */
 class InvoiceRepository(context: Context) {
+    private val context = context.applicationContext
     private val database = AppDatabase.getInstance(context)
 
     fun savePurchaseDraft(
@@ -372,6 +373,21 @@ class InvoiceRepository(context: Context) {
                 db.execSQL("UPDATE purchase_invoices SET status=?,updated_at=? WHERE id=? AND status='DRAFT'",
                     arrayOf(finalStatus, now, invoiceId))
             }
+            val invoiceTotal = db.rawQuery(
+                "SELECT total_usd_cents FROM $table WHERE id=?", arrayOf(invoiceId)
+            ).use { cursor -> require(cursor.moveToFirst()); cursor.getLong(0) }
+            val cashAccountJson = cashAccountId?.let { "\"$it\"" } ?: "null"
+            db.insertOrThrow("audit_log", null, ContentValues().apply {
+                put("id", UUID.randomUUID().toString())
+                put("user_id", actorUserId)
+                put("action", "POST_\${type}_INVOICE")
+                put("entity_type", "\${type}_INVOICE")
+                put("entity_id", invoiceId)
+                put("before_json", """{"status":"DRAFT"}""")
+                put("after_json", """{"status":"$finalStatus","total_usd_cents":$invoiceTotal,"operation_id":"$operationId","cash_account_id":$cashAccountJson}""")
+                put("device_id", SyncDeviceIdentity.getOrCreate(context))
+                put("created_at", now)
+            })
             registerOperation(db, operationId, operationType, payloadHash, invoiceId, now)
             db.setTransactionSuccessful()
             return true
