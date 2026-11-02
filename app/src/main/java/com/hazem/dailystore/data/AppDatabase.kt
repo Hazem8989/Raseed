@@ -50,6 +50,7 @@ class AppDatabase private constructor(context: Context) :
             ensureSupplierReturnSchema(db)
             ensureOperatingExpenseSchema(db)
             ensureSyncProtocolSchema(db)
+            ensureSyncActorMappingSchema(db)
             db.execSQL(
                 """INSERT INTO app_settings(setting_key, setting_value, updated_at)
                    VALUES('base_currency', 'USD', strftime('%Y-%m-%dT%H:%M:%fZ','now'))"""
@@ -425,9 +426,40 @@ class AppDatabase private constructor(context: Context) :
                 db.endTransaction()
             }
         }
+        if (version < 19) {
+            db.beginTransaction()
+            try {
+                ensureSyncActorMappingSchema(db)
+                db.setTransactionSuccessful()
+                version = 19
+            } finally {
+                db.endTransaction()
+            }
+        }
         if (version != newVersion) {
             throw IllegalStateException("Missing database migration from version $version to $newVersion")
         }
+    }
+
+    private fun ensureSyncActorMappingSchema(db: SQLiteDatabase) {
+        db.execSQL("""
+            CREATE TABLE IF NOT EXISTS sync_actor_mappings (
+                device_id TEXT NOT NULL,
+                remote_actor_user_id TEXT NOT NULL,
+                primary_user_id TEXT NOT NULL,
+                is_active INTEGER NOT NULL DEFAULT 1 CHECK(is_active IN (0,1)),
+                mapped_by TEXT NOT NULL,
+                mapped_at TEXT NOT NULL,
+                PRIMARY KEY(device_id, remote_actor_user_id),
+                FOREIGN KEY(device_id) REFERENCES sync_devices(device_id)
+                    ON UPDATE RESTRICT ON DELETE RESTRICT,
+                FOREIGN KEY(primary_user_id) REFERENCES users(id)
+                    ON UPDATE RESTRICT ON DELETE RESTRICT,
+                FOREIGN KEY(mapped_by) REFERENCES users(id)
+                    ON UPDATE RESTRICT ON DELETE RESTRICT
+            )
+        """.trimIndent())
+        db.execSQL("CREATE INDEX IF NOT EXISTS idx_sync_actor_mappings_primary_user ON sync_actor_mappings(primary_user_id,is_active)")
     }
 
     private fun ensureSalesReturnSchema(db: SQLiteDatabase) {
@@ -798,7 +830,7 @@ class AppDatabase private constructor(context: Context) :
 
     companion object {
         const val DATABASE_NAME = "the_daily_shop.db"
-        const val DATABASE_VERSION = 18
+        const val DATABASE_VERSION = 19
 
         @Volatile
         private var INSTANCE: AppDatabase? = null
