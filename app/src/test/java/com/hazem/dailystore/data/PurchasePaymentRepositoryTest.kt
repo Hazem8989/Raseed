@@ -49,7 +49,7 @@ class PurchasePaymentRepositoryTest {
         }
         database.writableDatabase.insertOrThrow("exchange_rates", null, invoiceFx)
 
-        supplierId = SupplierRepository(context).create("مورد دفع ${UUID.randomUUID()}").id
+        supplierId = SupplierRepository(context).create(adminId, "مورد دفع ${UUID.randomUUID()}").id
         val unit = store.getUnits().first()
         val category = store.getCategories().first()
         val productId = store.saveProduct(
