@@ -3511,15 +3511,26 @@ class MainActivity : Activity() {
                     Toast.makeText(this@MainActivity, "استيراد الأصناف متاح للمدير فقط", Toast.LENGTH_LONG).show()
                     return@setOnClickListener
                 }
-                val intent = android.content.Intent(android.content.Intent.ACTION_OPEN_DOCUMENT).apply {
+                // Use the system content picker rather than the document-tree picker.
+                // Some Android/OEM file managers display ACTION_OPEN_DOCUMENT results
+                // as disabled even with the wildcard MIME type. GET_CONTENT returns a
+                // readable content:// URI and remains compatible with onActivityResult.
+                val intent = android.content.Intent(android.content.Intent.ACTION_GET_CONTENT).apply {
                     addCategory(android.content.Intent.CATEGORY_OPENABLE)
-                    // Do not restrict EXTRA_MIME_TYPES here: Android file providers often
-                    // label valid .csv files as text/plain or application/octet-stream.
-                    // SpreadsheetProductImporter validates the selected file extension
-                    // and content before any database write.
                     type = "*/*"
                 }
-                startActivityForResult(intent, productImportRequestCode)
+                try {
+                    startActivityForResult(
+                        android.content.Intent.createChooser(intent, "اختر ملف المنتجات"),
+                        productImportRequestCode
+                    )
+                } catch (e: Exception) {
+                    Toast.makeText(
+                        this@MainActivity,
+                        "تعذر فتح منتقي الملفات على هذا الجهاز",
+                        Toast.LENGTH_LONG
+                    ).show()
+                }
             }
         }
         content.addView(importProducts, fieldParams(dp(48), dp(5)))
