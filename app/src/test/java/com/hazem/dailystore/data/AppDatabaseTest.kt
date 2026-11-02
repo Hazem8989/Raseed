@@ -94,7 +94,7 @@ class AppDatabaseTest {
         }
         db.insertOrThrow("users", null, originalUser)
         // Recreate the actual v7 users schema before lowering user_version.
-        // The current onCreate schema is v8, so changing only user_version would
+        // The current onCreate schema includes later security/FIFO columns, so changing only user_version would
         // incorrectly leave the v8 column in place and make ALTER TABLE fail.
         db.execSQL("ALTER TABLE users DROP COLUMN must_change_password")
         db.execSQL("DROP INDEX idx_sales_posted_operating_date")
@@ -113,7 +113,7 @@ class AppDatabaseTest {
         database = AppDatabase.getInstance(context)
         val upgraded = database.writableDatabase
 
-        assertEquals(13, upgraded.version)
+        assertEquals(14, upgraded.version)
         upgraded.rawQuery(
             """SELECT username,display_name,password_hash,password_salt,role_key,is_active,
                       must_change_password,created_at,updated_at
