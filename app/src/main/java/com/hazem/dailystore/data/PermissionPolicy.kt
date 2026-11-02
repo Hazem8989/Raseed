@@ -154,18 +154,4 @@ object PermissionPolicy {
     fun permissionDescriptions(): Map<String, String> = descriptions.toMap()
 
     fun allPermissionKeys(): Set<String> = descriptions.keys
-
-    fun permissionDescriptions(): Map<String, String> = descriptions.toMap()
-
-    fun rolePermissions(db: SQLiteDatabase, roleKey: String): Map<String, Boolean> {
-        require(roleKey in setOf("ADMIN", "CASHIER")) { "الدور غير صالح" }
-        val result = descriptions.keys.associateWith { false }.toMutableMap()
-        db.rawQuery(
-            "SELECT permission_key,allowed FROM role_permissions WHERE role_key=?",
-            arrayOf(roleKey)
-        ).use { c ->
-            while (c.moveToNext()) result[c.getString(0)] = c.getInt(1) == 1
-        }
-        return result
-    }
 }
