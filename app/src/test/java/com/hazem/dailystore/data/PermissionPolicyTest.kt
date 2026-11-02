@@ -118,7 +118,7 @@ class PermissionPolicyTest {
         AppDatabase.resetForTests(context, deleteExisting = false)
         database = AppDatabase.getInstance(context)
         assertTrue(allowed(cashier, PermissionPolicy.SERVICE_TRANSFERS_EXECUTE))
-        assertEquals(15, database.readableDatabase.version)
+        assertEquals(16, database.readableDatabase.version)
     }
 
     @Test
