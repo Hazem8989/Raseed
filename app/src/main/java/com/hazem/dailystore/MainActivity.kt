@@ -3511,13 +3511,22 @@ class MainActivity : Activity() {
                     Toast.makeText(this@MainActivity, "استيراد الأصناف متاح للمدير فقط", Toast.LENGTH_LONG).show()
                     return@setOnClickListener
                 }
-                // Use the system content picker rather than the document-tree picker.
-                // Some Android/OEM file managers display ACTION_OPEN_DOCUMENT results
-                // as disabled even with the wildcard MIME type. GET_CONTENT returns a
-                // readable content:// URI and remains compatible with onActivityResult.
-                val intent = android.content.Intent(android.content.Intent.ACTION_GET_CONTENT).apply {
+                // Ask for the actual spreadsheet MIME types instead of a wildcard.
+                // Some OEM document providers mark text/csv files as unavailable when
+                // the request is "*/*", even though binary backup files remain selectable.
+                // EXTRA_MIME_TYPES lets providers match common CSV and XLSX MIME variants.
+                val intent = android.content.Intent(android.content.Intent.ACTION_OPEN_DOCUMENT).apply {
                     addCategory(android.content.Intent.CATEGORY_OPENABLE)
-                    type = "*/*"
+                    type = "text/csv"
+                    putExtra(
+                        android.content.Intent.EXTRA_MIME_TYPES,
+                        arrayOf(
+                            "text/comma-separated-values",
+                            "application/csv",
+                            "application/vnd.ms-excel",
+                            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                        )
+                    )
                 }
                 try {
                     startActivityForResult(
