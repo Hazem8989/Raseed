@@ -677,16 +677,16 @@ class MainActivity : Activity() {
                     val lines = cart.values.map { line ->
                         InvoiceLineInput(line.product.id, BigDecimal.valueOf(line.quantity), line.product.priceUsdCents)
                     }
-                    val saved = InvoiceRepository(this).saveSalesDraft(
+                    val saved = InvoiceRepository(this).saveSalesDraft(currentUserId ?: error("جلسة المستخدم غير صالحة"), 
                         UUID.randomUUID().toString(), pendingCheckoutDraftId, customerId,
                         date, 0L, null, lines, saleType
                     )
                     pendingCheckoutDraftId = saved.invoiceId
                     sessionPrefs.edit().putString(SESSION_CHECKOUT_DRAFT, pendingCheckoutDraftId).apply()
                     val posted = if (isCredit) {
-                        InvoiceRepository(this).postSale(saved.invoiceId, UUID.randomUUID().toString())
+                        InvoiceRepository(this).postSale(currentUserId ?: error("جلسة المستخدم غير صالحة"), saved.invoiceId, UUID.randomUUID().toString())
                     } else {
-                        InvoiceRepository(this).postCashSale(saved.invoiceId, UUID.randomUUID().toString(), account!!.id)
+                        InvoiceRepository(this).postCashSale(currentUserId ?: error("جلسة المستخدم غير صالحة"), saved.invoiceId, UUID.randomUUID().toString(), account!!.id)
                     }
                     require(posted) { "الفاتورة مسجلة مسبقاً؛ حدّث الشاشة لمراجعة حالتها" }
                     val invoiceNumber = saved.invoiceNumber
@@ -2786,7 +2786,7 @@ class MainActivity : Activity() {
                     processing = true
                     val supplierId = if (supplierSpinner.selectedItemPosition > 0)
                         suppliers.getOrNull(supplierSpinner.selectedItemPosition - 1)?.id else null
-                    val saved = invoiceRepository.savePurchaseDraft(
+                    val saved = invoiceRepository.savePurchaseDraft(currentUserId ?: error("جلسة المستخدم غير صالحة"), 
                         UUID.randomUUID().toString(), draftId, supplierId, date.text.toString().trim(),
                         parseUsdCents(discount.text.toString()), notes.text.toString().trim().ifEmpty { null },
                         lines.map { InvoiceLineInput(it.product.id, it.quantity, it.unitCostUsdCents) }
@@ -2807,13 +2807,13 @@ class MainActivity : Activity() {
                     processing = true
                     val supplierId = if (supplierSpinner.selectedItemPosition > 0)
                         suppliers.getOrNull(supplierSpinner.selectedItemPosition - 1)?.id else null
-                    val saved = invoiceRepository.savePurchaseDraft(
+                    val saved = invoiceRepository.savePurchaseDraft(currentUserId ?: error("جلسة المستخدم غير صالحة"), 
                         UUID.randomUUID().toString(), draftId, supplierId, date.text.toString().trim(),
                         parseUsdCents(discount.text.toString()), notes.text.toString().trim().ifEmpty { null },
                         lines.map { InvoiceLineInput(it.product.id, it.quantity, it.unitCostUsdCents) }
                     )
                     draftId = saved.invoiceId
-                    invoiceRepository.postPurchase(saved.invoiceId, UUID.randomUUID().toString())
+                    invoiceRepository.postPurchase(currentUserId ?: error("جلسة المستخدم غير صالحة"), saved.invoiceId, UUID.randomUUID().toString())
                     Toast.makeText(this@MainActivity, "تم اعتماد الفاتورة وتحديث المخزون", Toast.LENGTH_LONG).show()
                     showPurchases()
                 } catch (e: Exception) {
