@@ -107,6 +107,10 @@ class PurchaseReturnRepositoryTest {
         assertEquals(0L,result.supplierCreditReductionSypMinor)
         assertEquals(200000L,result.supplierCashRefundSypMinor)
         assertEquals(200000L,accounts.balance(syp.id))
+        val daily=DailyBalanceRepository(RuntimeEnvironment.getApplication()).dailyReport("2026-11-02")
+        val dailyRefund=daily.accounts.first { it.accountId==syp.id }
+        assertEquals(200000L,dailyRefund.supplierReturnRefundsMinor)
+        assertEquals(200000L,dailyRefund.closingMinor)
         assertEquals(8.0,stock(),0.000001)
         db.readableDatabase.rawQuery(
             "SELECT direction,transaction_type FROM cash_transactions WHERE source_id=?",
