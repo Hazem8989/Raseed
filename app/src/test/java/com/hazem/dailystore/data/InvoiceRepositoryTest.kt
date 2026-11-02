@@ -62,7 +62,7 @@ class InvoiceRepositoryTest {
 
     @Test
     fun purchasePostingAddsStockAndRetryDoesNotDuplicateIt() {
-        val draft = invoices.savePurchaseDraft(
+        val draft = invoices.savePurchaseDraft(adminId, 
             "purchase-draft-op-1", null, null, "2026-10-31",
             0, null,
             listOf(
@@ -71,8 +71,8 @@ class InvoiceRepositoryTest {
             )
         )
         assertEquals(375L, invoices.listPurchaseInvoices().single().totalUsdCents)
-        assertTrue(invoices.postPurchase(draft.invoiceId, "purchase-post-op-1"))
-        assertFalse(invoices.postPurchase(draft.invoiceId, "purchase-post-op-1"))
+        assertTrue(invoices.postPurchase(adminId, draft.invoiceId, "purchase-post-op-1"))
+        assertFalse(invoices.postPurchase(adminId, draft.invoiceId, "purchase-post-op-1"))
         assertEquals(13.0, stock(), 0.000001)
         database.readableDatabase.rawQuery(
             "SELECT COUNT(*) FROM inventory_movements WHERE source_id=? AND movement_type='PURCHASE'",
@@ -85,12 +85,12 @@ class InvoiceRepositoryTest {
 
     @Test
     fun salePostingDeductsStockAndPreventsDuplicatePosting() {
-        val draft = invoices.saveSalesDraft(
+        val draft = invoices.saveSalesDraft(adminId, 
             "sale-draft-op-1", null, null, "2026-10-31",
             0, null, listOf(InvoiceLineInput(productId, BigDecimal("4"), 250))
         )
-        assertTrue(invoices.postCashSale(draft.invoiceId, "sale-post-op-1", cashAccountId))
-        assertFalse(invoices.postCashSale(draft.invoiceId, "sale-post-op-1", cashAccountId))
+        assertTrue(invoices.postCashSale(adminId, draft.invoiceId, "sale-post-op-1", cashAccountId))
+        assertFalse(invoices.postCashSale(adminId, draft.invoiceId, "sale-post-op-1", cashAccountId))
         assertEquals(6.0, stock(), 0.000001)
         assertEquals("PAID", invoices.listSalesInvoices().first { it.id == draft.invoiceId }.status)
         assertEquals(1000L, CashAccountRepository(RuntimeEnvironment.getApplication()).balance(cashAccountId))
@@ -102,17 +102,17 @@ class InvoiceRepositoryTest {
 
     @Test
     fun saleConsumesOldestFifoLayersAndPersistsExactCogsAllocations() {
-        val purchase = invoices.savePurchaseDraft(
+        val purchase = invoices.savePurchaseDraft(adminId, 
             "fifo-purchase-draft", null, null, "2026-10-31", 0, null,
             listOf(InvoiceLineInput(productId, BigDecimal("5"), 200))
         )
-        assertTrue(invoices.postPurchase(purchase.invoiceId, "fifo-purchase-post"))
+        assertTrue(invoices.postPurchase(adminId, purchase.invoiceId, "fifo-purchase-post"))
 
-        val sale = invoices.saveSalesDraft(
+        val sale = invoices.saveSalesDraft(adminId, 
             "fifo-sale-draft", null, null, "2026-10-31", 0, null,
             listOf(InvoiceLineInput(productId, BigDecimal("12"), 250))
         )
-        assertTrue(invoices.postCashSale(sale.invoiceId, "fifo-sale-post", cashAccountId))
+        assertTrue(invoices.postCashSale(adminId, sale.invoiceId, "fifo-sale-post", cashAccountId))
         // The product starts with 10 units at 100 cents, then receives 5 at 200 cents.
         // Selling 12 therefore consumes 10*100 + 2*200 = 1,400 cents.
         database.readableDatabase.rawQuery(
@@ -133,7 +133,7 @@ class InvoiceRepositoryTest {
             arrayOf(purchase.invoiceId)
         ).use { c -> assertTrue(c.moveToFirst()); assertEquals(3.0, c.getDouble(0), 0.000001) }
         // A retry must not consume the same FIFO layers a second time.
-        assertFalse(invoices.postCashSale(sale.invoiceId, "fifo-sale-post", cashAccountId))
+        assertFalse(invoices.postCashSale(adminId, sale.invoiceId, "fifo-sale-post", cashAccountId))
         database.readableDatabase.rawQuery(
             "SELECT SUM(remaining_quantity) FROM inventory_cost_layers WHERE product_id=?",
             arrayOf(productId)
@@ -142,11 +142,11 @@ class InvoiceRepositoryTest {
 
     @Test
     fun versionNineMigrationRestoresImmutableSalePostingDateFromOperationLedger() {
-        val sale = invoices.saveSalesDraft(
+        val sale = invoices.saveSalesDraft(adminId, 
             "posted-date-migration-draft", null, null, "2026-10-31", 0, null,
             listOf(InvoiceLineInput(productId, BigDecimal.ONE, 250L))
         )
-        assertTrue(invoices.postCashSale(sale.invoiceId, "posted-date-migration-op", cashAccountId))
+        assertTrue(invoices.postCashSale(adminId, sale.invoiceId, "posted-date-migration-op", cashAccountId))
         val originalPostedAt = database.readableDatabase.rawQuery(
             "SELECT created_at FROM operation_registry WHERE operation_id='posted-date-migration-op'",
             null
@@ -185,19 +185,19 @@ class InvoiceRepositoryTest {
             null, "منتج كسري FIFO", null, null, store.getCategories().first().id,
             kgUnit.id, 1L, 250L, true, 0.0, adminId
         )
-        val purchase = invoices.savePurchaseDraft(
+        val purchase = invoices.savePurchaseDraft(adminId, 
             "fractional-fifo-purchase", null, null, "2026-10-31", 0, null,
             listOf(
                 InvoiceLineInput(fractionalProduct, BigDecimal("0.5"), 1L),
                 InvoiceLineInput(fractionalProduct, BigDecimal("0.5"), 1L)
             )
         )
-        assertTrue(invoices.postPurchase(purchase.invoiceId, "fractional-fifo-purchase-post"))
-        val sale = invoices.saveSalesDraft(
+        assertTrue(invoices.postPurchase(adminId, purchase.invoiceId, "fractional-fifo-purchase-post"))
+        val sale = invoices.saveSalesDraft(adminId, 
             "fractional-fifo-sale", null, null, "2026-10-31", 0, null,
             listOf(InvoiceLineInput(fractionalProduct, BigDecimal("1.0"), 250L))
         )
-        assertTrue(invoices.postCashSale(sale.invoiceId, "fractional-fifo-sale-post", cashAccountId))
+        assertTrue(invoices.postCashSale(adminId, sale.invoiceId, "fractional-fifo-sale-post", cashAccountId))
         database.readableDatabase.rawQuery(
             "SELECT cogs_usd_cents FROM sales_items WHERE sales_invoice_id=?",
             arrayOf(sale.invoiceId)
@@ -210,11 +210,11 @@ class InvoiceRepositoryTest {
 
     @Test
     fun versionEightMigrationRebuildsFifoLayersAndHistoricalSaleCogs() {
-        val sale = invoices.saveSalesDraft(
+        val sale = invoices.saveSalesDraft(adminId, 
             "legacy-fifo-sale-draft", null, null, "2026-10-31", 0, null,
             listOf(InvoiceLineInput(productId, BigDecimal("4"), 250))
         )
-        assertTrue(invoices.postCashSale(sale.invoiceId, "legacy-fifo-sale-post", cashAccountId))
+        assertTrue(invoices.postCashSale(adminId, sale.invoiceId, "legacy-fifo-sale-post", cashAccountId))
         // Recreate the v8 on-disk schema while preserving the old inventory ledger and invoice.
         database.writableDatabase.execSQL("DROP TABLE sales_item_cost_allocations")
         database.writableDatabase.execSQL("DROP TABLE inventory_cost_layers")
@@ -247,16 +247,16 @@ class InvoiceRepositoryTest {
 
     @Test
     fun fifoProfitReportUsesPostedRevenueAndCogsWithoutDoubleCountingCollections() {
-        val purchase = invoices.savePurchaseDraft(
+        val purchase = invoices.savePurchaseDraft(adminId, 
             "profit-fifo-purchase", null, null, "2026-10-31", 0, null,
             listOf(InvoiceLineInput(productId, BigDecimal("5"), 200))
         )
-        assertTrue(invoices.postPurchase(purchase.invoiceId, "profit-fifo-purchase-post"))
-        val sale = invoices.saveSalesDraft(
+        assertTrue(invoices.postPurchase(adminId, purchase.invoiceId, "profit-fifo-purchase-post"))
+        val sale = invoices.saveSalesDraft(adminId, 
             "profit-fifo-sale", null, null, "2026-10-31", 0, null,
             listOf(InvoiceLineInput(productId, BigDecimal("12"), 250))
         )
-        assertTrue(invoices.postCashSale(sale.invoiceId, "profit-fifo-sale-post", cashAccountId))
+        assertTrue(invoices.postCashSale(adminId, sale.invoiceId, "profit-fifo-sale-post", cashAccountId))
         val report = SalesProfitRepository(RuntimeEnvironment.getApplication()).allTime()
         assertTrue(report.isComplete)
         assertEquals(1, report.invoiceCount)
@@ -268,12 +268,12 @@ class InvoiceRepositoryTest {
 
     @Test
     fun insufficientStockLeavesSaleDraftAndInventoryUnchanged() {
-        val draft = invoices.saveSalesDraft(
+        val draft = invoices.saveSalesDraft(adminId, 
             "sale-draft-op-2", null, null, "2026-10-31",
             0, null, listOf(InvoiceLineInput(productId, BigDecimal("11"), 250))
         )
         try {
-            invoices.postCashSale(draft.invoiceId, "sale-post-op-2", cashAccountId)
+            invoices.postCashSale(adminId, draft.invoiceId, "sale-post-op-2", cashAccountId)
             throw AssertionError("Posting should reject a sale above available stock")
         } catch (_: IllegalArgumentException) {
             // Expected validation failure.
@@ -285,18 +285,18 @@ class InvoiceRepositoryTest {
     @Test
     fun draftSaveIsIdempotentAndRejectsOperationIdReuseWithDifferentPayload() {
         val invoiceCountBefore = invoices.listSalesInvoices().size
-        val first = invoices.saveSalesDraft(
+        val first = invoices.saveSalesDraft(adminId, 
             "sale-draft-retry", null, null, "2026-10-31",
             0, null, listOf(InvoiceLineInput(productId, BigDecimal("1"), 250))
         )
-        val replay = invoices.saveSalesDraft(
+        val replay = invoices.saveSalesDraft(adminId, 
             "sale-draft-retry", null, null, "2026-10-31",
             0, null, listOf(InvoiceLineInput(productId, BigDecimal("1"), 250))
         )
         assertTrue(replay.replayed)
         assertEquals(first.invoiceId, replay.invoiceId)
         try {
-            invoices.saveSalesDraft(
+            invoices.saveSalesDraft(adminId, 
                 "sale-draft-retry", null, null, "2026-10-31",
                 0, null, listOf(InvoiceLineInput(productId, BigDecimal("2"), 250))
             )
@@ -310,7 +310,7 @@ class InvoiceRepositoryTest {
     @Test
     fun rejectsFractionalQuantityForWholePieceUnit() {
         try {
-            invoices.savePurchaseDraft(
+            invoices.savePurchaseDraft(adminId, 
                 "purchase-fractional-op", null, null, "2026-10-31",
                 0, null, listOf(InvoiceLineInput(productId, BigDecimal("0.5"), 125))
             )
