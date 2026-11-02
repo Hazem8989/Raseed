@@ -89,6 +89,10 @@ class SalesReturnRepositoryTest {
         assertEquals(100L, first.returnedCogsUsdCents)
         assertEquals(8.0, stock(), 0.000001)
         assertEquals(500L, CashAccountRepository(RuntimeEnvironment.getApplication()).balance(cashAccountId))
+        val dailyCash=DailyBalanceRepository(RuntimeEnvironment.getApplication()).dailyReport("2026-11-02")
+        val dailyAccount=dailyCash.accounts.first { it.accountId==cashAccountId }
+        assertEquals(250L,dailyAccount.salesReturnRefundsMinor)
+        assertEquals(500L,dailyAccount.closingMinor)
         val replay = returns.postSalesReturn(
             adminId, draft.invoiceId, "cash-return-op", "2026-11-02",
             "إرجاع قطعة سليمة", input, allocation
