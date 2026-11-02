@@ -59,6 +59,37 @@ class PermissionPolicyTest {
     }
 
     @Test
+    fun secondaryDeviceFailsClosedForAllAuthoritativeWritePermissions() {
+        database.writableDatabase.execSQL(
+            "INSERT INTO sync_protocol_state(state_key,state_value,updated_at) VALUES('local_device_role','SECONDARY','2026-11-03T00:00:00Z')"
+        )
+        val protectedPermissions = listOf(
+            PermissionPolicy.CATALOG_MANAGE,
+            PermissionPolicy.EXCHANGE_RATE_MANAGE,
+            PermissionPolicy.ACCOUNTS_MANAGE,
+            PermissionPolicy.PURCHASES_MANAGE,
+            PermissionPolicy.SUPPLIER_PAYMENTS_MANAGE,
+            PermissionPolicy.CUSTOMERS_COLLECT,
+            PermissionPolicy.SALES_CHECKOUT,
+            PermissionPolicy.DAILY_CASH_MANAGE,
+            PermissionPolicy.SERVICE_TRANSFERS_EXECUTE,
+            PermissionPolicy.INVENTORY_ADJUST,
+            PermissionPolicy.RETURNS_PROCESS,
+            PermissionPolicy.EXPENSES_MANAGE
+        )
+        protectedPermissions.forEach { permission ->
+            try {
+                PermissionPolicy.require(database.readableDatabase, adminId, permission)
+                fail("Secondary must not authorize $permission")
+            } catch (error: IllegalArgumentException) {
+                assertTrue(error.message.orEmpty().contains("الجهاز ثانوي"))
+            }
+        }
+        assertTrue(allowed(adminId, PermissionPolicy.REPORTS_READ))
+        assertTrue(allowed(adminId, PermissionPolicy.SYNC_MANAGE))
+    }
+
+    @Test
     fun managerCanGrantAndRevokeCashierPermissionWithAuditTrail() {
         PermissionPolicy.setRolePermission(
             database.writableDatabase, adminId, "CASHIER",
