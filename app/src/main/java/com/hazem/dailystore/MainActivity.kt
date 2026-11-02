@@ -1799,8 +1799,9 @@ class MainActivity : Activity() {
                     val amountMinor = parseSypAmount(amount.text.toString())
                     require(amountMinor > 0L) { "أدخل مبلغ تحصيل أكبر من صفر" }
                     val result = CustomerPaymentRepository(this).addPayment(
+                        currentUserId ?: error("جلسة المستخدم غير صالحة"),
                         invoice.id, UUID.randomUUID().toString(), accountId, amountMinor,
-                        note.text.toString().trim().ifEmpty { null }, currentUserId
+                        note.text.toString().trim().ifEmpty { null }
                     )
                     dialog.dismiss()
                     Toast.makeText(
