@@ -94,7 +94,7 @@ class SyncDomainApplier(context: Context) {
         }
         val sourceOperatingDate = payload.optString("posted_operating_date")
             .takeIf { it.matches(Regex("\\d{4}-\\d{2}-\\d{2}")) }
-            ?: sourceEventAt.substring(0, 10)
+            ?: operatingDateForTimestamp(sourceEventAt)
 
         var mappedCashAccountId: String? = null
         if (invoiceType == "SALE" && saleType == "CASH") {
@@ -334,8 +334,7 @@ class SyncDomainApplier(context: Context) {
             val occurredAt = payload.getString("occurred_at")
             val operatingDate = payload.getString("operating_date")
             require(occurredAt.matches(Regex("\\d{4}-\\d{2}-\\d{2}T.*")) &&
-                operatingDate.matches(Regex("\\d{4}-\\d{2}-\\d{2}")) &&
-                occurredAt.substring(0,10) == operatingDate) {
+                operatingDate.matches(Regex("\\d{4}-\\d{2}-\\d{2}"))) {
                 "تاريخ أو وقت حركة التحصيل الأصلي غير صالح"
             }
             val amount = payload.getLong("amount_minor")
@@ -460,6 +459,21 @@ class SyncDomainApplier(context: Context) {
         val primaryUserId: String,
         val originCreatedAt: String
     )
+
+    private fun operatingDateForTimestamp(value: String): String {
+        val formats = listOf("yyyy-MM-dd'T'HH:mm:ss.SSSX", "yyyy-MM-dd'T'HH:mm:ssX")
+        val instant = formats.firstNotNullOfOrNull { pattern ->
+            runCatching {
+                java.text.SimpleDateFormat(pattern, java.util.Locale.US).apply {
+                    isLenient = false
+                    timeZone = java.util.TimeZone.getTimeZone("UTC")
+                }.parse(value)
+            }.getOrNull()
+        } ?: throw IllegalArgumentException("وقت الحركة الوارد غير صالح")
+        return java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.US).apply {
+            timeZone = java.util.TimeZone.getTimeZone("Asia/Damascus")
+        }.format(instant)
+    }
 
     private fun timestamp(): String =
         java.text.SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss.SSS'Z'", java.util.Locale.US).apply {
