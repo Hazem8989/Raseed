@@ -286,6 +286,190 @@ class SyncDomainApplier(context: Context) {
      * Applies a customer-debt collection as a financial-only event on the primary.
      * Ledger rows and the inbox APPLIED marker commit atomically; no outbox echo is created.
      */
+    /** Applies a secondary operating expense and its cash outflow atomically on the primary. */
+    fun applyReceivedOperatingExpense(operationId: String): ApplyResult = synchronized(APPLY_LOCK) {
+        require(operationId.isNotBlank()) { "معرّف الأمر مطلوب" }
+        val db = database.writableDatabase
+        val localDeviceId = SyncDeviceIdentity.getOrCreate(appContext)
+        val role = db.rawQuery(
+            "SELECT state_value FROM sync_protocol_state WHERE state_key='local_device_role'", null
+        ).use { c -> if (c.moveToFirst()) c.getString(0) else null }
+        val authority = db.rawQuery(
+            "SELECT state_value FROM sync_protocol_state WHERE state_key='authority_device_id'", null
+        ).use { c -> if (c.moveToFirst()) c.getString(0) else null }
+        require(role == "PRIMARY" && authority == localDeviceId) {
+            "اعتماد المصروفات الواردة مسموح على الجهاز الأساسي المعتمد فقط"
+        }
+
+        db.beginTransaction()
+        try {
+            val command = db.rawQuery(
+                """SELECT i.origin_device_id,i.entity_type,i.entity_id,i.payload_json,i.status,
+                          m.primary_user_id,i.payload_sha256,i.origin_created_at
+                   FROM sync_inbox i
+                   JOIN sync_actor_mappings m ON m.device_id=i.origin_device_id AND m.is_active=1
+                   JOIN users u ON u.id=m.primary_user_id
+                   JOIN sync_devices d ON d.device_id=i.origin_device_id
+                   WHERE i.operation_id=? AND d.device_role='SECONDARY'
+                     AND d.status='ACTIVE' AND u.is_active=1 AND u.must_change_password=0
+                   ORDER BY m.mapped_at DESC LIMIT 1""".trimIndent(),
+                arrayOf(operationId)
+            ).use { c ->
+                require(c.moveToFirst()) { "أمر المصروف غير موجود أو الجهاز/المستخدم غير مفعل أو غير مربوط" }
+                arrayOf(c.getString(0),c.getString(1),c.getString(2),c.getString(3),
+                    c.getString(4),c.getString(5),c.getString(6),c.getString(7))
+            }
+            if (command[4] == "APPLIED") {
+                db.setTransactionSuccessful()
+                return@synchronized ApplyResult(operationId, true)
+            }
+            require(command[4] == "RECEIVED") { "حالة أمر المصروف لا تسمح بالتطبيق" }
+            require(command[1] == "OPERATING_EXPENSE") { "نوع كيان المصروف الوارد غير صالح" }
+            val payload = JSONObject(command[3])
+            require(payload.optString("business_operation") == "POST_OPERATING_EXPENSE") {
+                "نوع العملية الواردة ليس مصروفاً تشغيلياً"
+            }
+            val actorUserId = command[5]
+            PermissionPolicy.require(db, actorUserId, PermissionPolicy.EXPENSES_MANAGE)
+
+            val expenseId = payload.getString("expense_id")
+            require(expenseId.isNotBlank() && command[2] == expenseId) {
+                "معرّف المصروف لا يطابق كيان الظرف"
+            }
+            val existing = db.rawQuery(
+                "SELECT operation_type,payload_hash,result_reference FROM operation_registry WHERE operation_id=?",
+                arrayOf(operationId)
+            ).use { c ->
+                if (c.moveToFirst()) arrayOf(c.getString(0),c.getString(1),
+                    if (c.isNull(2)) "" else c.getString(2)) else null
+            }
+            if (existing != null) {
+                require(existing[0] == "POST_OPERATING_EXPENSE" &&
+                    existing[1] == command[6] && existing[2].isNotBlank()) {
+                    "تعارض في سجل المصروف أو إعادة استخدام معرّف العملية"
+                }
+                db.update("sync_inbox", ContentValues().apply {
+                    put("status","APPLIED"); put("applied_at",timestamp()); putNull("rejection_reason")
+                }, "operation_id=? AND status='RECEIVED'", arrayOf(operationId))
+                db.setTransactionSuccessful()
+                return@synchronized ApplyResult(operationId, true)
+            }
+
+            val categoryId = payload.getString("category_id")
+            require(db.rawQuery(
+                "SELECT 1 FROM expense_categories WHERE id=? AND is_active=1",
+                arrayOf(categoryId)
+            ).use { it.moveToFirst() }) { "تصنيف المصروف غير موجود أو موقوف على الجهاز الأساسي" }
+
+            val remoteAccountId = payload.getString("cash_account_id")
+            val remoteType = payload.getString("cash_account_type")
+            val remoteCurrency = payload.getString("cash_account_currency_code")
+            val currency = payload.getString("currency_code")
+            require(remoteType in setOf("CASH_BOX","WALLET") &&
+                remoteCurrency in setOf("USD","SYP") && currency == remoteCurrency) {
+                "نوع أو عملة حساب المصروف الوارد غير مدعومين"
+            }
+            val mappedAccount = db.rawQuery(
+                """SELECT m.primary_cash_account_id,a.account_type,a.currency_code,a.opening_balance_minor
+                   FROM sync_cash_account_mappings m JOIN cash_accounts a
+                     ON a.id=m.primary_cash_account_id
+                   WHERE m.device_id=? AND m.remote_cash_account_id=? AND m.is_active=1
+                     AND a.is_active=1""".trimIndent(),
+                arrayOf(command[0],remoteAccountId)
+            ).use { c ->
+                require(c.moveToFirst()) { "حساب المصروف على الجهاز الثانوي غير مربوط أو موقوف" }
+                require(c.getString(1)==remoteType && c.getString(2)==remoteCurrency) {
+                    "نوع أو عملة حساب المصروف المرتبط لا يطابق الحساب الأصلي"
+                }
+                c.getString(0) to c.getLong(3)
+            }
+            require(!db.rawQuery(
+                "SELECT 1 FROM system_cash_account_roles WHERE role_key='SUPPLIER_ROLLOVER' AND account_id=?",
+                arrayOf(mappedAccount.first)
+            ).use { it.moveToFirst() }) { "لا يمكن تسجيل مصروف من مخصص دفعات الموردين اليومي" }
+
+            val amount = payload.getLong("amount_minor")
+            val rate = payload.optLong("exchange_rate_syp_per_usd_milli",0L)
+            val amountUsd = payload.getLong("amount_usd_cents")
+            require(amount>0L && rate>=0L && amountUsd>=0L) { "مبلغ أو سعر صرف المصروف غير صالح" }
+            if (currency=="SYP") require(rate>0L) { "مصروف الليرة لا يحتوي سعر صرف محفوظاً صالحاً" }
+            val calculatedUsd = if(currency=="USD") amount else CurrencyConverter.sypToUsdCents(amount,rate)
+            require(calculatedUsd==amountUsd) { "القيمة الدولارية للمصروف لا تطابق سعر الصرف المسجل" }
+
+            val expenseDate = payload.getString("expense_date")
+            val operatingDate = payload.getString("operating_date")
+            val occurredAt = payload.optString("occurred_at").ifBlank { command[7] }
+            require(expenseDate.matches(Regex("\\d{4}-\\d{2}-\\d{2}")) &&
+                operatingDate==expenseDate &&
+                occurredAt.matches(Regex("\\d{4}-\\d{2}-\\d{2}T.*"))) {
+                "تاريخ أو وقت المصروف الأصلي غير صالح"
+            }
+            val reference = if(payload.isNull("reference")) null else payload.getString("reference").take(200)
+            val notes = if(payload.isNull("notes")) null else payload.getString("notes").take(1000)
+            val opening = mappedAccount.second
+            val movements = db.rawQuery(
+                """SELECT COALESCE(SUM(CASE WHEN direction='IN' THEN amount_minor
+                           WHEN direction='OUT' THEN -amount_minor ELSE 0 END),0)
+                   FROM cash_transactions WHERE account_id=?""".trimIndent(),
+                arrayOf(mappedAccount.first)
+            ).use { c -> c.moveToFirst(); c.getLong(0) }
+            require(Math.addExact(opening,movements)>=amount) {
+                "رصيد الحساب الأساسي غير كافٍ لاعتماد المصروف الوارد"
+            }
+
+            val primaryExpenseId = "sync-expense-$operationId"
+            val primaryCashId = "sync-cash-$operationId"
+            val description = "مصروف تشغيلي: " + (reference ?: notes ?: categoryId)
+            db.insertOrThrow("cash_transactions",null,ContentValues().apply {
+                put("id",primaryCashId); put("account_id",mappedAccount.first); put("direction","OUT")
+                put("amount_minor",amount); put("currency_code",currency)
+                if(rate>0L) put("exchange_rate_syp_per_usd_milli",rate)
+                else putNull("exchange_rate_syp_per_usd_milli")
+                put("transaction_type","OPERATING_EXPENSE"); put("source_type","OPERATING_EXPENSE")
+                put("source_id",primaryExpenseId); put("operation_id",operationId+":CASH")
+                put("description",description); put("created_by",actorUserId)
+                put("created_at",occurredAt); put("operating_date",operatingDate)
+            })
+            db.insertOrThrow("operating_expenses",null,ContentValues().apply {
+                put("id",primaryExpenseId); put("category_id",categoryId)
+                put("cash_account_id",mappedAccount.first); put("cash_transaction_id",primaryCashId)
+                put("amount_minor",amount); put("currency_code",currency)
+                if(rate>0L) put("exchange_rate_syp_per_usd_milli",rate)
+                else putNull("exchange_rate_syp_per_usd_milli")
+                put("amount_usd_cents",amountUsd); put("expense_date",expenseDate)
+                if(reference==null) putNull("reference") else put("reference",reference)
+                if(notes==null) putNull("notes") else put("notes",notes)
+                put("created_by",actorUserId); put("operation_id",operationId)
+                put("created_at",occurredAt)
+            })
+            db.insertOrThrow("operation_registry",null,ContentValues().apply {
+                put("operation_id",operationId); put("operation_type","POST_OPERATING_EXPENSE")
+                put("payload_hash",command[6]); put("status","COMPLETED")
+                put("result_reference",primaryExpenseId); put("created_at",timestamp())
+                put("completed_at",timestamp())
+            })
+            db.insertOrThrow("audit_log",null,ContentValues().apply {
+                put("id",UUID.randomUUID().toString()); put("user_id",actorUserId)
+                put("action","OPERATING_EXPENSE_POSTED"); put("entity_type","OPERATING_EXPENSE")
+                put("entity_id",primaryExpenseId)
+                put("after_json",JSONObject().put("category_id",categoryId)
+                    .put("cash_account_id",mappedAccount.first).put("amount_minor",amount)
+                    .put("currency_code",currency).put("amount_usd_cents",amountUsd)
+                    .put("expense_date",expenseDate).put("reference",reference).put("notes",notes).toString())
+                put("created_at",timestamp())
+            })
+            db.update("sync_inbox",ContentValues().apply {
+                put("status","APPLIED"); put("applied_at",timestamp()); putNull("rejection_reason")
+            },"operation_id=? AND status='RECEIVED'",arrayOf(operationId)).also {
+                require(it==1) { "تعذر تثبيت حالة اعتماد المصروف الوارد" }
+            }
+            db.setTransactionSuccessful()
+            ApplyResult(operationId,true)
+        } finally {
+            db.endTransaction()
+        }
+    }
+
     /** Applies a supplier-payment command from an enrolled secondary on the primary only. */
     fun applyReceivedSupplierPayment(operationId: String): ApplyResult = synchronized(APPLY_LOCK) {
         require(operationId.isNotBlank()) { "معرّف الأمر مطلوب" }
