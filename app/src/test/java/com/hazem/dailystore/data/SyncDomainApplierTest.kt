@@ -559,9 +559,6 @@ class SyncDomainApplierTest {
             .put("items",JSONArray().put(JSONObject().put("original_sales_item_id",itemId).put("quantity","1")))
             .put("refund_allocations",JSONArray())
         val operationId=receiveRaw("POST_SALES_RETURN","pending-return-"+UUID.randomUUID(),payload)
-        // The inbox entity ID is operation-scoped and must match the command contract.
-        database.writableDatabase.execSQL("UPDATE sync_inbox SET entity_id=? WHERE operation_id=?",
-            arrayOf("pending-return-$operationId",operationId))
         val applier=SyncDomainApplier(context)
         assertTrue(applier.applyReceivedOperation(operationId).applied)
         assertEquals("APPLIED",inboxStatus(operationId))
@@ -598,8 +595,6 @@ class SyncDomainApplierTest {
             .put("items",JSONArray().put(JSONObject().put("original_purchase_item_id",itemId).put("quantity","1")))
             .put("refund_allocations",JSONArray())
         val operationId=receiveRaw("POST_PURCHASE_RETURN","unused",payload)
-        database.writableDatabase.execSQL("UPDATE sync_inbox SET entity_id=? WHERE operation_id=?",
-            arrayOf("pending-return-$operationId",operationId))
         val applier=SyncDomainApplier(context)
         assertTrue(applier.applyReceivedOperation(operationId).applied)
         assertEquals("APPLIED",inboxStatus(operationId))
@@ -627,8 +622,6 @@ class SyncDomainApplierTest {
             .put("quantity_delta","1").put("unit_cost_usd_cents",200L).put("reason","تسوية واردة")
             .put("occurred_at","2026-11-03T14:00:00Z").put("operating_date","2026-11-03")
         val operationId=receiveRaw("POST_INVENTORY_ADJUSTMENT","unused",payload)
-        database.writableDatabase.execSQL("UPDATE sync_inbox SET entity_id=? WHERE operation_id=?",
-            arrayOf("pending-adjustment-$operationId",operationId))
         val applier=SyncDomainApplier(context)
         assertTrue(applier.applyReceivedOperation(operationId).applied)
         assertEquals("APPLIED",inboxStatus(operationId))
@@ -655,6 +648,11 @@ class SyncDomainApplierTest {
             "SELECT state_value FROM sync_protocol_state WHERE state_key='store_id'", null
         ).use { c -> assertTrue(c.moveToFirst()); c.getString(0) }
         val operationId = UUID.randomUUID().toString()
+        val resolvedEntityId = when(operation) {
+            "POST_SALES_RETURN", "POST_PURCHASE_RETURN" -> "pending-return-$operationId"
+            "POST_INVENTORY_ADJUSTMENT" -> "pending-adjustment-$operationId"
+            else -> entityId
+        }
         val entityType = when(operation) {
             "POST_PURCHASE_INVOICE" -> "PURCHASE_INVOICE"
             "COLLECT_CUSTOMER_PAYMENT" -> "CUSTOMER_PAYMENT"
@@ -665,7 +663,7 @@ class SyncDomainApplierTest {
         }
         val envelope = SyncEnvelopeSecurity.create(
             storeId, operationId, nextSequence(), secondaryId, "remote-admin",
-            "CREATE", entityType, entityId, 0L, payload.toString(), "2026-11-03T12:00:00Z", secondarySecret
+            "CREATE", entityType, resolvedEntityId, 0L, payload.toString(), "2026-11-03T12:00:00Z", secondarySecret
         )
         assertEquals(SyncInboxDisposition.RECEIVED,
             protocol.recordIncomingFromSecondary(SyncEnvelopeSecurity.encode(envelope)))
