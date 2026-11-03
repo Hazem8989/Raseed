@@ -99,3 +99,25 @@ Therefore:
 - Database v23 adds `operating_date` to `service_transfers` and `service_wallet_transactions`, backfills legacy rows using the configured store zone, and indexes those report fields for upgraded databases.
 - Service transfer daily summaries now filter by the stored operating date. Daily cash movement list timestamps are formatted using the store zone.
 - A future store-zone change must not rewrite already-recorded operating dates; historical rows retain the business date assigned when the movement occurred.
+
+## 8. Owner-approved mobile-data relay amendment (2026-11-04)
+
+The owner explicitly approved a Cloudflare-hosted relay as a transport-only exception to the no-cloud rule. This supersedes the earlier prohibition on adding a relay, but does not change the authoritative-data model:
+
+- Cloudflare Workers + a SQLite-backed Durable Object may be used as a live message relay between enrolled devices over cellular data or Wi-Fi.
+- The relay is not an application server and must not become the canonical store database, financial ledger, inventory database, or reporting store.
+- The relay must not persist business payloads. It forwards end-to-end encrypted frames only to an online recipient. If the recipient is offline, the sender retains the command in its existing durable local outbox and retries later.
+- The primary phone remains the sole authority for posting financial and inventory operations. A relay delivery is never an acknowledgement of business acceptance.
+- Device-level HMAC authentication and end-to-end encryption must be verified by the receiving app. The relay must not need device secrets or plaintext payloads.
+- Use the Cloudflare Free plan initially. The currently published Workers Free quota is 100,000 requests/day; Durable Objects have separate request, duration, and SQLite storage quotas. The implementation must expose quota/unavailable errors without deleting local queued operations.
+- Do not create a paid subscription, deploy to the owner's account, or request/store account credentials without the owner's explicit participation.
+- Production transport must remain disabled until the Android encryption wrapper, receiver authentication, replay protection, connection lifecycle, and transport tests pass.
+
+### Approved delivery semantics
+
+1. A secondary keeps every unacknowledged command in its local outbox.
+2. The relay forwards only to a currently connected peer; it does not act as durable message storage.
+3. The primary records the authenticated envelope in its durable inbox, validates permissions and mappings, and applies it idempotently.
+4. The primary sends an authenticated application acknowledgement only after the domain transaction commits or is durably rejected.
+5. The secondary removes/marks its outbox item only after validating that acknowledgement.
+6. Primary-to-secondary authoritative updates follow the same durable sender/outbox and receiver/inbox rules.
