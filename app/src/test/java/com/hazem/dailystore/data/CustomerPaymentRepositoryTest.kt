@@ -5,6 +5,7 @@ import java.math.BigDecimal
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
+import java.util.TimeZone
 import java.util.UUID
 import org.junit.After
 import org.junit.Assert.assertEquals
@@ -56,7 +57,7 @@ class CustomerPaymentRepositoryTest {
         walletId = insertAccount("محفظة اختبار", "WALLET", "SYP")
         usdAccountId = insertAccount("حساب دولار قديم", "CASH_BOX", "USD")
         val session = ContentValues().apply {
-            put("operating_date", SimpleDateFormat("yyyy-MM-dd", Locale.US).format(Date()))
+            put("operating_date", SimpleDateFormat("yyyy-MM-dd", Locale.US).apply { timeZone = TimeZone.getTimeZone("Asia/Damascus") }.format(Date()))
             put("primary_cash_account_id", cashDrawerId)
             putNull("created_by")
             put("created_at", "2026-10-31T00:00:00.000Z")
@@ -135,7 +136,7 @@ class CustomerPaymentRepositoryTest {
 
         // Debt collection belongs to the collection day, is reported separately from sales,
         // increases only the selected cash account, and never posts a second stock movement.
-        val collectionDate = SimpleDateFormat("yyyy-MM-dd", Locale.US).format(Date())
+        val collectionDate = SimpleDateFormat("yyyy-MM-dd", Locale.US).apply { timeZone = TimeZone.getTimeZone("Asia/Damascus") }.format(Date())
         val dailyReport = DailyBalanceRepository(RuntimeEnvironment.getApplication()).dailyReport(collectionDate)
         val drawerSummary = dailyReport.accounts.single { it.accountId == cashDrawerId }
         assertEquals(0L, drawerSummary.salesReceiptsMinor)
