@@ -27,7 +27,10 @@ data class OperatingExpenseResult(
  * Immutable operating-expense postings. Each expense and its cash outflow are
  * committed atomically, with the exchange rate captured at posting time.
  */
-class OperatingExpenseRepository(context: Context) {
+class OperatingExpenseRepository(
+    context: Context,
+    private val credentialVault: SyncCredentialVault = SyncCredentialVault(context)
+) {
     private val context = context.applicationContext
     private val database = AppDatabase.getInstance(context)
 
@@ -127,7 +130,7 @@ class OperatingExpenseRepository(context: Context) {
                     "يجب تحديد سعر الصرف قبل تسجيل مصروف بالليرة السورية"
                 }
                 val amountUsd = if (account.second == "USD") amountMinor else CurrencyConverter.sypToUsdCents(amountMinor, rate)
-                val sync = SyncProtocolRepository(context)
+                val sync = SyncProtocolRepository(context, credentialVault)
                 val priorPayload = db.rawQuery(
                     "SELECT payload_json FROM sync_operation_envelopes WHERE operation_id=?",
                     arrayOf(operationId)
