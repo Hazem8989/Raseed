@@ -557,6 +557,136 @@ class SyncProtocolRepository(private val context: Context, private val credentia
         } finally { secret.fill(0) }
     }
 
+    /**
+     * Returns only durable store-setting changes not yet acknowledged by this enrolled device.
+     * The settings stream is deliberately separate from business-event delivery until the
+     * corresponding domain appliers are implemented.
+     */
+    fun pendingStoreSettingsForDevice(deviceId: String, limit: Int = 100): List<SyncOutboxItem> {
+        require(limit in 1..500)
+        val db = database.readableDatabase
+        require(state(db, "local_device_role") == "PRIMARY" &&
+            state(db, "authority_device_id") == SyncDeviceIdentity.getOrCreate(context)) {
+            "توزيع إعدادات المتجر متاح من الجهاز الأساسي فقط"
+        }
+        val active = db.rawQuery(
+            "SELECT 1 FROM sync_devices WHERE device_id=? AND device_role='SECONDARY' AND status='ACTIVE'",
+            arrayOf(deviceId)
+        ).use { it.moveToFirst() }
+        require(active) { "الجهاز المستلم غير مسجل أو غير مفعل" }
+        val result = mutableListOf<SyncOutboxItem>()
+        db.rawQuery(
+            """SELECT e.operation_id,e.sequence_number,e.operation_type,e.entity_type,e.entity_id,
+                      e.payload_json,e.payload_sha256,e.created_at,q.retry_count
+               FROM sync_operation_envelopes e
+               JOIN sync_queue q ON q.operation_id=e.operation_id
+               WHERE e.entity_type='STORE_SETTINGS'
+                 AND NOT EXISTS (
+                   SELECT 1 FROM sync_acknowledgements a
+                   WHERE a.operation_id=e.operation_id AND a.device_id=? AND a.status='APPLIED'
+                 )
+               ORDER BY e.sequence_number LIMIT ?""".trimIndent(),
+            arrayOf(deviceId, limit.toString())
+        ).use { c ->
+            while (c.moveToNext()) result.add(SyncOutboxItem(
+                c.getString(0), c.getLong(1), c.getString(2), c.getString(3), c.getString(4),
+                c.getString(5), c.getString(6), c.getString(7), c.getInt(8)
+            ))
+        }
+        return result
+    }
+
+    /** Authenticated primary-to-secondary receipt with a durable settings-only cursor. */
+    fun recordIncomingStoreSettingsFromPrimary(encodedEnvelope: String): SyncInboxDisposition {
+        val envelope = verifyIncomingFromPrimary(encodedEnvelope)
+        require(envelope.operationType == "UPDATE" && envelope.entityType == "STORE_SETTINGS" &&
+            envelope.entityId == "store_time_zone") {
+            "نوع إعداد المتجر الوارد غير مدعوم"
+        }
+        val payload = JSONObject(envelope.payloadJson)
+        require(payload.optString("business_operation") == "UPDATE_STORE_TIME_ZONE" &&
+            StoreTime.isValidZoneId(payload.optString("time_zone"))) {
+            "تحديث المنطقة الزمنية الوارد غير صالح"
+        }
+        val db = database.writableDatabase
+        db.beginTransaction()
+        try {
+            val existing = db.rawQuery(
+                "SELECT payload_sha256 FROM sync_inbox WHERE operation_id=?",
+                arrayOf(envelope.operationId)
+            ).use { c -> if (c.moveToFirst()) c.getString(0) else null }
+            if (existing != null) {
+                if (existing == envelope.payloadSha256) {
+                    db.setTransactionSuccessful()
+                    return SyncInboxDisposition.DUPLICATE
+                }
+                db.insertOrThrow("sync_conflicts", null, ContentValues().apply {
+                    put("id", UUID.randomUUID().toString())
+                    put("operation_id", envelope.operationId)
+                    put("entity_type", envelope.entityType)
+                    put("entity_id", envelope.entityId)
+                    put("local_payload_json", "{}")
+                    put("remote_payload_json", envelope.payloadJson)
+                    put("created_at", timestamp())
+                })
+                db.setTransactionSuccessful()
+                return SyncInboxDisposition.CONFLICT
+            }
+            val lastSequence = state(db, "primary_store_settings_cursor")?.toLongOrNull() ?: 0L
+            require(envelope.sequenceNumber > lastSequence) {
+                "تم رفض تحديث إعداد متجر أقدم أو معاد التشغيل"
+            }
+            val now = timestamp()
+            db.insertOrThrow("sync_inbox", null, ContentValues().apply {
+                put("operation_id", envelope.operationId)
+                put("origin_device_id", envelope.originDeviceId)
+                put("sequence_number", envelope.sequenceNumber)
+                put("operation_type", envelope.operationType)
+                put("entity_type", envelope.entityType)
+                put("entity_id", envelope.entityId)
+                put("payload_json", envelope.payloadJson)
+                put("payload_sha256", envelope.payloadSha256)
+                put("status", "RECEIVED")
+                put("received_at", now)
+                put("origin_created_at", envelope.createdAt)
+            })
+            putState(db, "primary_store_settings_cursor", envelope.sequenceNumber.toString(), now)
+            db.setTransactionSuccessful()
+            return SyncInboxDisposition.RECEIVED
+        } finally { db.endTransaction() }
+    }
+
+    /** Durable per-device acknowledgement; delivery is complete only after APPLIED. */
+    fun acknowledgeStoreSettingsApplied(deviceId: String, operationId: String) {
+        val db = database.writableDatabase
+        db.beginTransaction()
+        try {
+            require(state(db, "local_device_role") == "PRIMARY" &&
+                state(db, "authority_device_id") == SyncDeviceIdentity.getOrCreate(context)) {
+                "تثبيت إقرار إعداد المتجر متاح على الجهاز الأساسي فقط"
+            }
+            val valid = db.rawQuery(
+                """SELECT 1 FROM sync_devices d
+                   JOIN sync_operation_envelopes e ON e.operation_id=?
+                   WHERE d.device_id=? AND d.device_role='SECONDARY' AND d.status='ACTIVE'
+                     AND e.origin_device_id=? AND e.entity_type='STORE_SETTINGS'""".trimIndent(),
+                arrayOf(operationId, deviceId, SyncDeviceIdentity.getOrCreate(context))
+            ).use { it.moveToFirst() }
+            require(valid) { "إقرار إعداد المتجر لا يطابق جهازاً أو عملية مسجلة" }
+            db.insertWithOnConflict("sync_acknowledgements", null, ContentValues().apply {
+                put("operation_id", operationId)
+                put("device_id", deviceId)
+                put("sequence_number", db.rawQuery(
+                    "SELECT sequence_number FROM sync_operation_envelopes WHERE operation_id=?",
+                    arrayOf(operationId)
+                ).use { c -> require(c.moveToFirst()); c.getLong(0) })
+                put("status", "APPLIED")
+                put("acknowledged_at", timestamp())
+            }, SQLiteDatabase.CONFLICT_REPLACE)
+            db.setTransactionSuccessful()
+        } finally { db.endTransaction() }
+    }
+
     fun authenticateDevice(deviceId: String, credential: String): Boolean {
         if (deviceId.isBlank() || credential.isBlank()) return false
         val stored = database.readableDatabase.rawQuery(
