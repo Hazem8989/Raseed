@@ -460,20 +460,8 @@ class SyncDomainApplier(context: Context) {
         val originCreatedAt: String
     )
 
-    private fun operatingDateForTimestamp(value: String): String {
-        val formats = listOf("yyyy-MM-dd'T'HH:mm:ss.SSSX", "yyyy-MM-dd'T'HH:mm:ssX")
-        val instant = formats.firstNotNullOfOrNull { pattern ->
-            runCatching {
-                java.text.SimpleDateFormat(pattern, java.util.Locale.US).apply {
-                    isLenient = false
-                    timeZone = java.util.TimeZone.getTimeZone("UTC")
-                }.parse(value)
-            }.getOrNull()
-        } ?: throw IllegalArgumentException("وقت الحركة الوارد غير صالح")
-        return java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.US).apply {
-            timeZone = java.util.SimpleTimeZone(3 * 60 * 60 * 1000, "UTC+03:00")
-        }.format(instant)
-    }
+    private fun operatingDateForTimestamp(value: String): String =
+        StoreTime.operatingDate(database.readableDatabase, value)
 
     private fun timestamp(): String =
         java.text.SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss.SSS'Z'", java.util.Locale.US).apply {
