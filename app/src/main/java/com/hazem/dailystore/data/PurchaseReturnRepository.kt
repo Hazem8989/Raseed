@@ -97,7 +97,8 @@ class PurchaseReturnRepository(context: Context) {
     fun postPurchaseReturn(
         actorUserId: String, invoiceId: String, operationId: String, returnDate: String,
         reason: String, items: List<PurchaseReturnItemInput>,
-        refundAllocations: List<SupplierRefundAllocationInput>
+        refundAllocations: List<SupplierRefundAllocationInput>,
+        occurredAt: String? = null, syncOrigin: Boolean = false
     ): PurchaseReturnResult {
         require(actorUserId.isNotBlank() && invoiceId.isNotBlank() && operationId.isNotBlank())
         require(returnDate.matches(Regex("\\d{4}-\\d{2}-\\d{2}"))) { "تاريخ المرتجع غير صالح" }
@@ -120,6 +121,27 @@ class PurchaseReturnRepository(context: Context) {
         val db=database.writableDatabase
         db.beginTransaction()
         try {
+            val localRole=db.rawQuery("SELECT state_value FROM sync_protocol_state WHERE state_key='local_device_role'",null)
+                .use { c -> if(c.moveToFirst()) c.getString(0) else null }
+            if(localRole=="SECONDARY") {
+                PermissionPolicy.requireAssigned(db,actorUserId,PermissionPolicy.RETURNS_PROCESS)
+                val preview=previewPurchaseReturn(invoiceId,items)
+                val eventTime=occurredAt ?: timestamp()
+                val payload=org.json.JSONObject().put("original_invoice_id",invoiceId)
+                    .put("return_date",returnDate).put("reason",reason.trim())
+                    .put("occurred_at",eventTime).put("operating_date",StoreTime.operatingDate(db,eventTime))
+                    .put("items",org.json.JSONArray().apply { items.forEach { put(org.json.JSONObject()
+                        .put("original_purchase_item_id",it.originalPurchaseItemId)
+                        .put("quantity",it.quantity.stripTrailingZeros().toPlainString())) } })
+                    .put("refund_allocations",org.json.JSONArray().apply { refundAllocations.forEach { put(org.json.JSONObject()
+                        .put("cash_account_id",it.cashAccountId).put("amount_minor",it.amountMinor)) } })
+                SyncProtocolRepository(context).enqueueSecondaryCommand(
+                    db,actorUserId,operationId,"POST_PURCHASE_RETURN","PURCHASE_RETURN",
+                    "pending-return-$operationId",payload.toString())
+                db.setTransactionSuccessful()
+                return PurchaseReturnResult("pending-return-$operationId","معلق",preview.totalUsdCents,
+                    preview.supplierCreditReductionSypMinor,preview.supplierCashRefundSypMinor,false)
+            }
             PermissionPolicy.require(db,actorUserId,PermissionPolicy.RETURNS_PROCESS)
             findOperation(db,operationId)?.let { old ->
                 require(old.first=="POST_PURCHASE_RETURN" && old.second==payloadHash) { "معرّف العملية مستخدم ببيانات مختلفة" }
@@ -138,7 +160,7 @@ class PurchaseReturnRepository(context: Context) {
             }
             val preview=calculate(db,invoice,plans)
             validateRefunds(db,invoice,preview.supplierCashRefundSypMinor,refundAllocations)
-            val now=timestamp()
+            val now=occurredAt ?: timestamp()
             val returnId=UUID.randomUUID().toString()
             val number=nextNumber(db,returnDate)
             db.insertOrThrow("returns",null,ContentValues().apply {
@@ -178,14 +200,16 @@ class PurchaseReturnRepository(context: Context) {
                 put("payload_hash",payloadHash); put("status","COMPLETED"); put("result_reference",returnId)
                 put("created_at",now); put("completed_at",now)
             })
-            SyncProtocolRepository(context).enqueueLocalOperation(
-                db, actorUserId, operationId, "POST_PURCHASE_RETURN", "PURCHASE_RETURN", returnId, "CREATE",
-                org.json.JSONObject().put("original_invoice_id", invoice.id)
-                    .put("return_id", returnId).put("return_number", number).put("return_date", returnDate)
-                    .put("reason", reason.trim()).put("total_usd_cents", preview.totalUsdCents)
-                    .put("supplier_credit_reduction_syp_minor", preview.supplierCreditReductionSypMinor)
-                    .put("supplier_cash_refund_syp_minor", preview.supplierCashRefundSypMinor).toString()
-            )
+            if(!syncOrigin) {
+                SyncProtocolRepository(context).enqueueLocalOperation(
+                    db, actorUserId, operationId, "POST_PURCHASE_RETURN", "PURCHASE_RETURN", returnId, "CREATE",
+                    org.json.JSONObject().put("original_invoice_id", invoice.id)
+                        .put("return_id", returnId).put("return_number", number).put("return_date", returnDate)
+                        .put("reason", reason.trim()).put("total_usd_cents", preview.totalUsdCents)
+                        .put("supplier_credit_reduction_syp_minor", preview.supplierCreditReductionSypMinor)
+                        .put("supplier_cash_refund_syp_minor", preview.supplierCashRefundSypMinor).toString()
+                )
+            }
             db.setTransactionSuccessful()
             return PurchaseReturnResult(returnId,number,preview.totalUsdCents,
                 preview.supplierCreditReductionSypMinor,preview.supplierCashRefundSypMinor,false)
