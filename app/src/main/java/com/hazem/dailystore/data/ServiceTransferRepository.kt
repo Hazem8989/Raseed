@@ -111,10 +111,11 @@ class ServiceTransferRepository(context:Context) {
     fun rechargeAccountId():String? = database.readableDatabase.rawQuery("SELECT setting_value FROM app_settings WHERE setting_key='service_recharge_cash_account_id'",null).use { if(it.moveToFirst())it.getString(0) else null }
 
     fun setRechargeAccount(actor:String,accountId:String) {
-        CashAccountRepository(appContext).ensureSystemCashAccounts()
         val db=database.writableDatabase;db.beginTransaction()
         try {
+            // Fail closed before any helper can create or repair local financial accounts on a secondary.
             requireManager(db,actor)
+            CashAccountRepository(appContext).ensureSystemCashAccounts()
             val row=receiptAccount(db,accountId)
             require(row.first=="CASH_BOX"&&row.second=="SYP"&&row.third){"اختر صندوقاً نقدياً نشطاً بالليرة السورية"}
             val primary=db.rawQuery("SELECT primary_cash_account_id FROM daily_cash_sessions WHERE operating_date=?",arrayOf(today())).use{if(it.moveToFirst())it.getString(0)else null}
