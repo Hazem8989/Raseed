@@ -395,7 +395,16 @@ class ServiceTransferRepository(context:Context) {
         val moves=db.rawQuery("SELECT COALESCE(SUM(CASE WHEN direction='IN' THEN amount_minor ELSE -amount_minor END),0) FROM cash_transactions WHERE account_id=?",arrayOf(id)).use{it.moveToFirst();it.getLong(0)}
         return Math.addExact(opening,moves)
     }
-    private fun requireManager(db:SQLiteDatabase,actor:String){PermissionPolicy.require(db,actor,PermissionPolicy.SERVICE_TRANSFERS_MANAGE)}
+    private fun requireManager(db:SQLiteDatabase,actor:String){
+        PermissionPolicy.require(db,actor,PermissionPolicy.SERVICE_TRANSFERS_MANAGE)
+        val role=db.rawQuery(
+            "SELECT state_value FROM sync_protocol_state WHERE state_key='local_device_role'",null
+        ).use { if(it.moveToFirst()) it.getString(0) else null }
+        require(role!="SECONDARY") {
+            "إدارة أرصدة الخدمات وتعبئتها لم يكتمل مسار مزامنتها بعد؛ نفّذها من الجهاز الأساسي"
+        }
+        require(role==null || role=="PRIMARY") { "دور الجهاز غير صالح لإدارة أرصدة الخدمات" }
+    }
     private fun requireActiveUser(db:SQLiteDatabase,actor:String){require(actor.isNotBlank()){"جلسة المستخدم غير صالحة"};require(db.rawQuery("SELECT 1 FROM users WHERE id=? AND is_active=1",arrayOf(actor)).use{it.moveToFirst()}){"المستخدم غير نشط أو انتهت الجلسة"}}
     private fun audit(db:SQLiteDatabase,actor:String,action:String,id:String,before:String?,after:String,now:String){
         val v=ContentValues().apply{put("id",UUID.randomUUID().toString());put("user_id",actor);put("action",action);put("entity_type","SERVICE_TRANSFER");put("entity_id",id);if(before==null)putNull("before_json")else put("before_json",before);put("after_json",after);put("created_at",now)}
