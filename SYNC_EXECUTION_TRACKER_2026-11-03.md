@@ -65,3 +65,18 @@ Status: **blocked by gates 1–5**
 - `ServiceTransferRepositoryTest.kt`: service posting date persistence and daily summary coverage.
 
 CI run `41640124214` passed unit tests, signed release APK build, and artifact upload on code snapshot `18bb17353fb81f045fea28434adf4591a879be28`. Follow-up exact-event-timestamp changes have a newer CI run pending and must pass before those changes are accepted.
+
+## Store time-zone feature — implementation recheck (2026-11-03)
+
+The store-specific, internationally configurable time-zone feature is implemented on the development branch:
+
+- Manager-only UI in `MainActivity.showStoreTimeZoneSettings()` accepts a valid IANA zone ID from the available-zone list; it is not hard-coded to Syria or UTC+03:00.
+- Current-store default remains `Asia/Damascus`; a future shop can select its own zone, such as `America/New_York`, `America/Los_Angeles`, or `Asia/Dubai`.
+- `StoreRepository.saveStoreTimeZoneId()` validates the zone, rejects local changes on a secondary, writes the setting and audit record atomically, and enqueues a primary `STORE_SETTINGS/UPDATE` event in the same transaction.
+- New secondary enrollment receives the current store zone in its bootstrap result.
+- Existing protocol methods sign the setting for each enrolled secondary, validate and persist an incoming primary setting, apply it idempotently on the secondary, and allow the primary to record an APPLIED acknowledgement.
+- Tests cover global zone IDs, DST rules, primary enqueue/signing, bootstrap, secondary receive/apply idempotency, and rejection of secondary-authoritative changes.
+
+**Important delivery boundary:** the feature's configuration and authenticated replication protocol are implemented and unit-tested, but no live transport currently invokes these methods. Therefore a later zone change is durably queued for linked devices, not yet delivered to them in real time. It becomes effective on a secondary only after the future authenticated transport delivers the event and the secondary applies it. Do not describe this as live multi-device synchronization until the transport and end-to-end two-database test gates pass.
+
+Latest verification: GitHub Actions run `41686212136`, commit `ff1ad90f51a237ab942d4f8cb7831e5357e948ba`, passed unit tests, permanently signed release APK build, and artifact upload. This validates the current build snapshot, not live delivery.
