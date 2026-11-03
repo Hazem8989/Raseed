@@ -184,6 +184,8 @@ class SyncProtocolRepositoryTest {
         assertEquals("America/New_York",
             org.json.JSONObject(envelope.payloadJson).getString("time_zone"))
         secret.fill(0)
+        repository.acknowledgeStoreSettingsApplied(secondaryId, pending.single().operationId)
+        assertTrue(repository.pendingStoreSettingsForDevice(secondaryId).isEmpty())
     }
 
     @Test fun secondaryReceivesAndAppliesPrimaryTimeZoneUpdateIdempotently() {
