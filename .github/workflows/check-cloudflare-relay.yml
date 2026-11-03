@@ -1,0 +1,38 @@
+name: Validate Cloudflare Sync Relay
+
+on:
+  push:
+    branches:
+      - the-daily-shop-development
+    paths:
+      - 'cloudflare-relay/**'
+      - '.github/workflows/check-cloudflare-relay.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: daily-shop-relay-check
+  cancel-in-progress: true
+
+jobs:
+  typecheck:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: cloudflare-relay
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: the-daily-shop-development
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: cloudflare-relay/package.json
+      - name: Install dependencies
+        run: npm install --no-audit --no-fund
+      - name: Type-check relay
+        run: npm run check
