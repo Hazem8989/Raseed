@@ -307,7 +307,7 @@ class DailyBalanceRepository(context:Context) {
         return Math.addExact(b,m)
     }
     private fun movement(db:SQLiteDatabase,id:String,direction:String,amount:Long,currency:String,type:String,sourceType:String,sourceId:String,op:String,actor:String,description:String,now:String){
-        val v=ContentValues().apply{put("id",UUID.randomUUID().toString());put("account_id",id);put("direction",direction);put("amount_minor",amount);put("currency_code",currency);put("transaction_type",type);put("source_type",sourceType);put("source_id",sourceId);put("operation_id",op);put("description",description);put("created_by",actor);put("operating_date",today());put("created_at",now)}
+        val v=ContentValues().apply{put("id",UUID.randomUUID().toString());put("account_id",id);put("direction",direction);put("amount_minor",amount);put("currency_code",currency);put("transaction_type",type);put("source_type",sourceType);put("source_id",sourceId);put("operation_id",op);put("description",description);put("created_by",actor);put("operating_date",StoreTime.operatingDate(db,now));put("created_at",now)}
         db.insertOrThrow("cash_transactions",null,v)
     }
     private fun audit(db:SQLiteDatabase,user:String,action:String,kind:String,id:String,before:String?,after:String,now:String){
