@@ -244,7 +244,7 @@ class CustomerPaymentRepository(context: Context) {
                     "مبلغ التحصيل لا يقابل رصيداً مرجعياً صالحاً"
                 }
                 val occurredAt = timestamp()
-                val movementDate = operatingDate()
+                val movementDate = StoreTime.operatingDate(db, occurredAt)
                 val paymentId = "pending-payment-$operationId"
                 val remoteCashTransactionId = "pending-cash-$operationId"
                 val payload = org.json.JSONObject()
@@ -303,7 +303,7 @@ class CustomerPaymentRepository(context: Context) {
                 put("operation_id", operationId)
                 put("description", cleanNote ?: "تحصيل دين " + invoice.customerId +
                     " عن الفاتورة " + invoice.invoiceNumber + " • " + channel)
-                put("operating_date", operatingDate())
+                put("operating_date", StoreTime.operatingDate(db, now))
                 put("created_at", now)
             }
             db.insertOrThrow("cash_transactions", null, cash)
