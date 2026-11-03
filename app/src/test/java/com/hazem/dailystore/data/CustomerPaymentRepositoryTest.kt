@@ -318,6 +318,8 @@ class CustomerPaymentRepositoryTest {
         val context = RuntimeEnvironment.getApplication()
         val invoiceId = createCreditInvoice()
         val sync = SyncProtocolRepository(context)
+        // Establish the primary store identity before provisioning the secondary test peer.
+        sync.configureAsPrimary(adminId, "جهاز أساسي اختباري")
         val storeId = database.readableDatabase.rawQuery(
             "SELECT state_value FROM sync_protocol_state WHERE state_key='store_id'", null
         ).use { c -> assertTrue(c.moveToFirst()); c.getString(0) }
