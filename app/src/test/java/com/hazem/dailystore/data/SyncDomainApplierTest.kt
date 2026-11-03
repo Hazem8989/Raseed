@@ -73,6 +73,13 @@ class SyncDomainApplierTest {
         val applier = SyncDomainApplier(context)
 
         assertTrue(applyWithDiagnostic(applier, operationId).applied)
+        // Simulate process death after the invoice posting committed but before
+        // the inbox APPLIED marker was durably written.
+        database.writableDatabase.execSQL(
+            "UPDATE sync_inbox SET status='RECEIVED',applied_at=NULL WHERE operation_id=?",
+            arrayOf(operationId)
+        )
+        assertTrue(applyWithDiagnostic(applier, operationId).applied)
         assertTrue(applyWithDiagnostic(applier, operationId).applied)
         assertEquals("POSTED", invoiceStatus("purchase_invoices", "purchase-remote-1"))
         assertEquals(12.0, stock(), 0.000001)
@@ -99,6 +106,22 @@ class SyncDomainApplierTest {
         assertEquals(8.0, stock(), 0.000001)
         assertEquals(0, database.readableDatabase.rawQuery(
             "SELECT COUNT(*) FROM cash_transactions WHERE source_type='SALES_INVOICE' AND source_id=?",
+            arrayOf("sale-remote-1")
+        ).use { it.moveToFirst(); it.getInt(0) })
+        assertEquals("2026-11-03T12:00:00Z", database.readableDatabase.rawQuery(
+            "SELECT posted_at FROM sales_invoices WHERE id=?",
+            arrayOf("sale-remote-1")
+        ).use { it.moveToFirst(); it.getString(0) })
+        assertEquals("2026-11-03", database.readableDatabase.rawQuery(
+            "SELECT posted_operating_date FROM sales_invoices WHERE id=?",
+            arrayOf("sale-remote-1")
+        ).use { it.moveToFirst(); it.getString(0) })
+        assertEquals("2026-11-03T12:00:00Z", database.readableDatabase.rawQuery(
+            "SELECT created_at FROM inventory_movements WHERE source_id=? AND movement_type='SALE' LIMIT 1",
+            arrayOf("sale-remote-1")
+        ).use { it.moveToFirst(); it.getString(0) })
+        assertEquals(1, database.readableDatabase.rawQuery(
+            "SELECT COUNT(*) FROM inventory_movements WHERE source_id=? AND movement_type='SALE'",
             arrayOf("sale-remote-1")
         ).use { it.moveToFirst(); it.getInt(0) })
         assertEquals("APPLIED", inboxStatus(operationId))
