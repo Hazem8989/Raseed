@@ -199,7 +199,7 @@ class ServiceTransferRepository(context:Context) {
                 put("customer_charge_minor",charge);put("receipt_account_id",receiptAccountId)
                 put("receipt_channel",if(account.first=="WALLET")"ELECTRONIC" else "CASH")
                 put("reference",reference);put("note",note);put("payload_hash",payload);put("created_by",actor)
-                put("created_at",now);put("operating_date",today());put("status","POSTED")
+                put("created_at",now);put("operating_date",StoreTime.operatingDate(db,now));put("status","POSTED")
             }
             db.insertOrThrow("service_transfers",null,v)
             insertWalletMovement(db,serviceKey,"OUT",deliveredMinor,"TRANSFER_OUT",id,operationId,0L,note?:serviceTypeName(serviceType),actor,now)
@@ -330,7 +330,7 @@ class ServiceTransferRepository(context:Context) {
 
     private fun insertWalletMovement(db:SQLiteDatabase,key:String,direction:String,amount:Long,type:String,sourceId:String?,operationId:String,fee:Long,note:String?,actor:String,now:String,payloadHash:String?=null) {
         val movementId=UUID.randomUUID().toString()
-        val v=ContentValues().apply{put("id",movementId);put("service_key",key);put("direction",direction);put("amount_minor",amount);put("transaction_type",type);put("source_id",sourceId);put("operation_id",operationId);if(payloadHash!=null)put("payload_hash",payloadHash);put("fee_minor",fee);put("note",note);put("created_by",actor);put("created_at",now);put("operating_date",today())}
+        val v=ContentValues().apply{put("id",movementId);put("service_key",key);put("direction",direction);put("amount_minor",amount);put("transaction_type",type);put("source_id",sourceId);put("operation_id",operationId);if(payloadHash!=null)put("payload_hash",payloadHash);put("fee_minor",fee);put("note",note);put("created_by",actor);put("created_at",now);put("operating_date",StoreTime.operatingDate(db,now))}
         db.insertOrThrow("service_wallet_transactions",null,v)
         val cashType=when(type) {
             "OPENING" -> "SERVICE_FLOAT_OPENING"
@@ -343,7 +343,7 @@ class ServiceTransferRepository(context:Context) {
             "SERVICE_FLOAT_LEDGER:"+movementId,actor,note?:type,now)
     }
     private fun insertCashMovement(db:SQLiteDatabase,accountId:String,direction:String,amount:Long,type:String,sourceType:String,sourceId:String,operationId:String,actor:String,description:String,now:String) {
-        val v=ContentValues().apply{put("id",UUID.randomUUID().toString());put("account_id",accountId);put("direction",direction);put("amount_minor",amount);put("currency_code","SYP");put("transaction_type",type);put("source_type",sourceType);put("source_id",sourceId);put("operation_id",operationId);put("description",description);put("created_by",actor);put("operating_date",today());put("created_at",now)}
+        val v=ContentValues().apply{put("id",UUID.randomUUID().toString());put("account_id",accountId);put("direction",direction);put("amount_minor",amount);put("currency_code","SYP");put("transaction_type",type);put("source_type",sourceType);put("source_id",sourceId);put("operation_id",operationId);put("description",description);put("created_by",actor);put("operating_date",StoreTime.operatingDate(db,now));put("created_at",now)}
         db.insertOrThrow("cash_transactions",null,v)
     }
     private fun receiptAccount(db:SQLiteDatabase,id:String):Triple<String,String,Boolean> =
