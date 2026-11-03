@@ -180,7 +180,7 @@ class SyncDomainApplierTest {
 
     private fun stock(): Double =
         database.readableDatabase.rawQuery(
-            "SELECT quantity FROM product_stock WHERE product_id=?",
+            "SELECT COALESCE(SUM(quantity),0) FROM inventory_balances WHERE product_id=?",
             arrayOf(productId)
         ).use { c -> assertTrue(c.moveToFirst()); c.getDouble(0) }
 }
