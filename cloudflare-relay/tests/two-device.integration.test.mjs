@@ -4,13 +4,14 @@ import { spawn } from "node:child_process";
 
 const baseUrl = "http://127.0.0.1:8787";
 let worker;
+let workerOutput = "";
 
 async function waitForWorker() {
   const deadline = Date.now() + 60_000;
   let lastError;
   while (Date.now() < deadline) {
     if (worker?.exitCode !== null && worker?.exitCode !== undefined) {
-      throw new Error(`wrangler dev exited with code ${worker.exitCode}`);
+      throw new Error(`wrangler dev exited with code ${worker.exitCode}. Output:\n${workerOutput.slice(-12000)}`);
     }
     try {
       const response = await fetch(`${baseUrl}/healthz`);
@@ -20,7 +21,7 @@ async function waitForWorker() {
     }
     await new Promise(resolve => setTimeout(resolve, 500));
   }
-  throw new Error(`Worker did not become healthy: ${String(lastError)}`);
+  throw new Error(`Worker did not become healthy: ${String(lastError)}. Wrangler output:\n${workerOutput.slice(-12000)}`);
 }
 
 function connect(storeId, deviceId) {
@@ -66,11 +67,15 @@ function close(socket) {
 }
 
 before(async () => {
-  worker = spawn("npx", ["wrangler", "dev", "--local", "--ip", "127.0.0.1", "--port", "8787", "--log-level", "error"], {
-    cwd: new URL("..", import.meta.url),
-    stdio: "ignore",
+  worker = spawn("npx", ["wrangler", "dev", "--local", "--ip", "127.0.0.1", "--port", "8787", "--log-level", "debug"], {
+    cwd: process.cwd(),
+    stdio: ["ignore", "pipe", "pipe"],
     env: process.env,
   });
+  worker.stdout.setEncoding("utf8");
+  worker.stderr.setEncoding("utf8");
+  worker.stdout.on("data", chunk => { workerOutput = (workerOutput + chunk).slice(-16000); });
+  worker.stderr.on("data", chunk => { workerOutput = (workerOutput + chunk).slice(-16000); });
   await waitForWorker();
 });
 
