@@ -265,9 +265,30 @@ class ServiceTransferRepository(context:Context) {
                 require(it.moveToFirst()){"عملية التحويل غير موجودة"}
                 arrayOf(it.getString(0),it.getLong(1).toString(),it.getLong(2).toString(),it.getString(3),it.getString(4))
             }
-            require(row[4]=="POSTED"){"عملية التحويل معكوسة مسبقاً أو غير قابلة للعكس"}
-            require(db.rawQuery("SELECT 1 FROM service_wallet_transactions WHERE operation_id=?",arrayOf(operationId)).use{it.moveToFirst()}.not()){"معرّف العكس مستخدم مسبقاً"}
             val receipt=row[3]!!;val charge=row[2]!!.toLong()
+            val prior=db.rawQuery(
+                """SELECT service_key,direction,amount_minor,transaction_type,source_id,note
+                   FROM service_wallet_transactions WHERE operation_id=?""".trimIndent(),arrayOf(operationId)
+            ).use { c ->
+                if(!c.moveToFirst()) null else arrayOf(c.getString(0),c.getString(1),c.getLong(2).toString(),
+                    c.getString(3),c.getString(4),if(c.isNull(5)) null else c.getString(5))
+            }
+            if(prior!=null) {
+                require(prior[0]==row[0] && prior[1]=="IN" && prior[2]==row[1] &&
+                    prior[3]=="TRANSFER_REVERSAL" && prior[4]==transferId && prior[5]==reason) {
+                    "معرّف العكس مستخدم مسبقاً لعملية أو بيانات مختلفة"
+                }
+                require(row[4]=="REVERSED") { "يوجد سجل عكس دون اكتمال حالة العملية؛ يلزم فحص سلامة الدفتر" }
+                val receiptReversal=db.rawQuery(
+                    """SELECT 1 FROM cash_transactions WHERE operation_id=? AND account_id=?
+                       AND direction='OUT' AND amount_minor=? AND transaction_type='SERVICE_TRANSFER_REVERSAL'""".trimIndent(),
+                    arrayOf(operationId+":RECEIPT",receipt,charge.toString())
+                ).use { it.moveToFirst() }
+                require(receiptReversal) { "سجل عكس المحفظة موجود لكن حركة حساب القبض مفقودة" }
+                db.setTransactionSuccessful()
+                return
+            }
+            require(row[4]=="POSTED"){"عملية التحويل معكوسة مسبقاً أو غير قابلة للعكس"}
             require(cashBalance(db,receipt)>=charge){"لا يمكن عكس العملية: الرصيد المتبقي في حساب القبض أقل من المبلغ المقبوض"}
             val now=stamp()
             insertWalletMovement(db,row[0]!!,"IN",row[1]!!.toLong(),"TRANSFER_REVERSAL",transferId,operationId,0L,reason,actor,now)
