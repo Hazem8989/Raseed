@@ -208,7 +208,7 @@ class OperatingExpenseRepositoryTest {
             .put("exchange_rate_syp_per_usd_milli",10_000_000L)
             .put("amount_usd_cents",250L)
             .put("expense_date","2026-11-02")
-            .put("operating_date","2026-11-02")
+            .put("operating_date","2026-11-03")
             .put("occurred_at",occurredAt)
             .put("reference","فاتورة صيانة")
             .put("notes","حركة من الثانوي")
