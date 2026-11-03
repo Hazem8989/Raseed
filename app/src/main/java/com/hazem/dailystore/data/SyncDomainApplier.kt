@@ -26,6 +26,32 @@ class SyncDomainApplier(context: Context) {
         val reason: String? = null
     )
 
+
+    /**
+     * Central dispatcher used by the sync runtime after an authenticated inbox receipt.
+     * Unsupported operations fail closed and remain unapplied for a later implementation.
+     */
+    fun applyReceivedOperation(operationId: String): ApplyResult {
+        require(operationId.isNotBlank()) { "معرّف الأمر مطلوب" }
+        val payloadJson = database.readableDatabase.rawQuery(
+            "SELECT payload_json FROM sync_inbox WHERE operation_id=?",
+            arrayOf(operationId)
+        ).use { cursor ->
+            require(cursor.moveToFirst()) { "الأمر غير موجود في صندوق الوارد" }
+            cursor.getString(0)
+        }
+        return when (JSONObject(payloadJson).optString("business_operation")) {
+            "UPDATE_STORE_TIME_ZONE" -> applyReceivedStoreTimeZone(operationId)
+            "POST_PURCHASE_INVOICE", "POST_SALES_INVOICE" -> applyReceivedInvoice(operationId)
+            "POST_OPERATING_EXPENSE" -> applyReceivedOperatingExpense(operationId)
+            "POST_SUPPLIER_PAYMENT" -> applyReceivedSupplierPayment(operationId)
+            "COLLECT_CUSTOMER_PAYMENT" -> applyReceivedCustomerCollection(operationId)
+            else -> throw IllegalArgumentException(
+                "نوع العملية الواردة غير مدعوم بعد؛ بقي الأمر محفوظاً دون تطبيق"
+            )
+        }
+    }
+
     /** Applies a signed primary store-time-zone update on a secondary, idempotently. */
     fun applyReceivedStoreTimeZone(operationId: String): ApplyResult = synchronized(APPLY_LOCK) {
         require(operationId.isNotBlank()) { "معرّف الأمر مطلوب" }

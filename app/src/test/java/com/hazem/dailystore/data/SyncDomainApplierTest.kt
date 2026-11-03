@@ -72,7 +72,7 @@ class SyncDomainApplierTest {
         val operationId = receiveInvoice("POST_PURCHASE_INVOICE", "purchase-remote-1", null, "PURCHASE")
         val applier = SyncDomainApplier(context)
 
-        assertTrue(applyWithDiagnostic(applier, operationId).applied)
+        assertTrue(applier.applyReceivedOperation(operationId).applied)
         // Simulate process death after the invoice posting committed but before
         // the inbox APPLIED marker was durably written.
         database.writableDatabase.execSQL(
