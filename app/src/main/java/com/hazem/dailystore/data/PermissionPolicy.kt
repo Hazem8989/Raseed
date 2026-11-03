@@ -98,6 +98,22 @@ object PermissionPolicy {
         INVENTORY_ADJUST, RETURNS_PROCESS, EXPENSES_MANAGE
     )
 
+    /** Checks the user's assigned permission without deciding where a write may be committed. */
+    fun requireAssigned(db: SQLiteDatabase, userId: String, permissionKey: String) {
+        require(userId.isNotBlank()) { "جلسة المستخدم غير صالحة" }
+        require(permissionKey in descriptions) { "الصلاحية المطلوبة غير معروفة" }
+        val allowed = db.rawQuery(
+            """SELECT 1
+               FROM users u
+               JOIN role_permissions rp ON rp.role_key=u.role_key
+               JOIN permissions p ON p.permission_key=rp.permission_key
+               WHERE u.id=? AND u.is_active=1 AND u.must_change_password=0
+                 AND p.permission_key=? AND rp.allowed=1""".trimIndent(),
+            arrayOf(userId, permissionKey)
+        ).use { it.moveToFirst() }
+        require(allowed) { "ليس لديك صلاحية تنفيذ هذا الإجراء" }
+    }
+
     fun require(db: SQLiteDatabase, userId: String, permissionKey: String) {
         require(userId.isNotBlank()) { "جلسة المستخدم غير صالحة" }
         require(permissionKey in descriptions) { "الصلاحية المطلوبة غير معروفة" }
@@ -110,16 +126,7 @@ object PermissionPolicy {
                 "هذا الجهاز ثانوي؛ لا يمكن ترحيل عملية مالية أو مخزنية محلياً قبل اعتمادها من الجهاز الأساسي"
             }
         }
-        val allowed = db.rawQuery(
-            """SELECT 1
-               FROM users u
-               JOIN role_permissions rp ON rp.role_key=u.role_key
-               JOIN permissions p ON p.permission_key=rp.permission_key
-               WHERE u.id=? AND u.is_active=1 AND u.must_change_password=0
-                 AND p.permission_key=? AND rp.allowed=1""".trimIndent(),
-            arrayOf(userId, permissionKey)
-        ).use { it.moveToFirst() }
-        require(allowed) { "ليس لديك صلاحية تنفيذ هذا الإجراء" }
+        requireAssigned(db, userId, permissionKey)
     }
 
     fun setRolePermission(
