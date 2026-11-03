@@ -3,14 +3,14 @@
 **Audit date:** 2026-11-03  
 **Repository:** `Hazem8989/Raseed`  
 **Branch:** `the-daily-shop-development`  
-**Audited HEAD:** `063f5bec9e3b3053f4296d9962b0d83fb85c6923`  
+**Original audit snapshot:** `063f5bec9e3b3053f4296d9962b0d83fb85c6923`; revalidated against development branch changes through the 2026-11-03 follow-up commits.  
 **Main branch:** not modified.
 
 ## Executive conclusion
 
 The repository contains useful local synchronization primitives, but it does **not** contain a working multi-device synchronization engine. No network transport, background worker, primary listener, inbound operation processor, durable acknowledgement flow, or conflict-resolution workflow is wired. The current app must not be represented as synchronizing two phones.
 
-The previous architecture document's baseline statement that the database is version 11 is stale. The audited source declares `AppDatabase.DATABASE_VERSION = 18`.
+The earlier database-version references were stale. The current development source declares `AppDatabase.DATABASE_VERSION = 23`. Version 23 adds store-zone operating dates to the service ledgers; it does not add a network transport engine.
 
 ## Verified foundations
 
@@ -74,7 +74,7 @@ Envelopes carry `actorUserId`, but there is no verified cross-device user identi
 
 ## Two-device simulation status
 
-**Not yet executed as an end-to-end two-database simulation.** Existing tests cover local pairing primitives, credential storage, primary outbox sequencing/idempotency, and envelope integrity. They do not instantiate two independent app databases and run a complete send → receive → validate → apply → acknowledge → replay cycle.
+**A protocol-only two-database harness exists, but it is not an end-to-end simulation of the production repositories or transport.** Existing tests cover local pairing primitives, credential storage, primary outbox sequencing/idempotency, and envelope integrity. They do not instantiate two independent app databases and run a complete send → receive → validate → apply → acknowledge → replay cycle.
 
 A meaningful simulation must use two isolated database files and independent installation identities, not two repository objects sharing the same singleton database. It must prove:
 
@@ -104,3 +104,10 @@ A meaningful simulation must use two isolated database files and independent ins
 ## Release/build evidence
 
 The latest CI run at this audit point is run 559 on the audited HEAD. Unit tests and signed Release APK packaging succeeded, and APK v1/v2 signature verification passed. This is build evidence only; it does not establish live sync, two-device behavior, or production acceptance.
+
+
+## Revalidation note — 2026-11-03
+
+The production source still has no wired network transport, foreground listener/service, retry worker, or end-to-end pairing handshake. The existing `TwoPeerSyncSimulationTest` uses purpose-built SQLite test databases and a simplified peer ledger; it is useful as a protocol model but does not invoke the production `AppDatabase`, `SyncProtocolRepository`, or `SyncDomainApplier` as a complete send/receive/apply/ack pipeline.
+
+The store-time review found service daily summaries deriving the business day from the UTC text prefix of `created_at`. Database v23 corrects this by persisting and querying explicit `operating_date` values in both service ledgers and backfilling historical rows using the configured store time zone. Daily cash movement list timestamps are also rendered in the store time zone. These code changes are awaiting CI validation.
