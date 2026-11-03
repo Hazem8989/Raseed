@@ -142,23 +142,36 @@ class StoreRepository(context: Context) {
             .setScale(0, RoundingMode.HALF_UP).longValueExact()
         require(milli > 0L) { "سعر الصرف غير صالح" }
         val db = helper.writableDatabase
+        val sync = SyncProtocolRepository(appContext)
+        require(!sync.isConfiguredSecondary()) {
+            "تغيير سعر الصرف متاح من الجهاز الأساسي فقط"
+        }
         PermissionPolicy.require(db, actorUserId, PermissionPolicy.EXCHANGE_RATE_MANAGE)
         val now = timestamp()
+        val rateId = UUID.randomUUID().toString()
         db.beginTransaction()
         try {
             PermissionPolicy.require(db, actorUserId, PermissionPolicy.EXCHANGE_RATE_MANAGE)
             val old = getCurrentExchangeRateMilli()
             val values = ContentValues().apply {
-                put("id", UUID.randomUUID().toString())
+                put("id", rateId)
                 put("currency_code", "USD")
                 put("rate_syp_per_usd_milli", milli)
                 put("effective_at", now)
                 put("created_at", now)
+                put("created_by", actorUserId)
             }
             db.insertOrThrow("exchange_rates", null, values)
             insertAudit(db, actorUserId, "UPDATE_EXCHANGE_RATE", "EXCHANGE_RATE", milli.toString(),
                 if (old > 0L) """{"rate_syp_per_usd_milli":$old}""" else null,
                 """{"rate_syp_per_usd_milli":$milli}""", now)
+            sync.enqueueLocalOperation(
+                db, actorUserId, "exchange-rate-$rateId", "SET_EXCHANGE_RATE",
+                "EXCHANGE_RATE", rateId, "CREATE",
+                org.json.JSONObject().put("id", rateId).put("currency_code", "USD")
+                    .put("rate_syp_per_usd_milli", milli).put("effective_at", now)
+                    .put("created_at", now).toString()
+            )
             db.setTransactionSuccessful()
         } finally { db.endTransaction() }
         return milli
