@@ -68,6 +68,82 @@ class SyncDomainApplierTest {
         database.close()
     }
 
+    @Test fun primaryExchangeRateChangeIsQueuedAsAnAuthoritativeReferenceEvent() {
+        val before = database.readableDatabase.rawQuery(
+            "SELECT COUNT(*) FROM sync_operation_envelopes WHERE entity_type='EXCHANGE_RATE'", null
+        ).use { it.moveToFirst(); it.getInt(0) }
+
+        val saved = StoreRepository(context).saveExchangeRate(BigDecimal("15250.75"), adminId)
+        val event = database.readableDatabase.rawQuery(
+            """SELECT e.operation_id,e.entity_id,e.payload_json,q.status
+               FROM sync_operation_envelopes e JOIN sync_queue q ON q.operation_id=e.operation_id
+               WHERE e.entity_type='EXCHANGE_RATE' ORDER BY e.sequence_number DESC LIMIT 1""".trimIndent(), null
+        ).use { c ->
+            assertTrue(c.moveToFirst())
+            arrayOf(c.getString(0), c.getString(1), c.getString(2), c.getString(3))
+        }
+        val payload = JSONObject(event[2])
+        assertEquals(before + 1, database.readableDatabase.rawQuery(
+            "SELECT COUNT(*) FROM sync_operation_envelopes WHERE entity_type='EXCHANGE_RATE'", null
+        ).use { it.moveToFirst(); it.getInt(0) })
+        assertEquals(saved, payload.getLong("rate_syp_per_usd_milli"))
+        assertEquals(event[1], payload.getString("id"))
+        assertEquals("SET_EXCHANGE_RATE", payload.getString("business_operation"))
+        assertEquals("PENDING", event[3])
+    }
+
+    @Test fun secondaryAppliesPrimaryExchangeRateExactlyOnceWithoutEcho() {
+        val db = database.writableDatabase
+        val primaryId = "remote-authoritative-primary"
+        val now = "2026-11-03T13:00:00.000Z"
+        db.execSQL(
+            """INSERT INTO sync_devices(device_id,display_name,device_role,status,created_at)
+               VALUES(?,?,'PRIMARY','ACTIVE',?)""",
+            arrayOf(primaryId, "الجهاز الأساسي البعيد", now)
+        )
+        db.execSQL(
+            "UPDATE sync_protocol_state SET state_value='SECONDARY' WHERE state_key='local_device_role'"
+        )
+        db.execSQL(
+            "UPDATE sync_protocol_state SET state_value=? WHERE state_key='authority_device_id'",
+            arrayOf(primaryId)
+        )
+        val operationId = "primary-exchange-rate-event"
+        val rateId = "primary-exchange-rate-row"
+        val payload = JSONObject().put("business_operation", "SET_EXCHANGE_RATE")
+            .put("id", rateId).put("currency_code", "USD")
+            .put("rate_syp_per_usd_milli", 15_750_000L)
+            .put("effective_at", now).put("created_at", now).toString()
+        db.execSQL(
+            """INSERT INTO sync_inbox(operation_id,origin_device_id,sequence_number,operation_type,
+               entity_type,entity_id,payload_json,payload_sha256,status,received_at,origin_created_at)
+               VALUES(?,?,?,'CREATE','EXCHANGE_RATE',?,?,?,'RECEIVED',?,?)""".trimIndent(),
+            arrayOf(operationId, primaryId, 4L, rateId, payload, "test-payload-hash", now, now)
+        )
+
+        val applier = SyncDomainApplier(context)
+        assertTrue(applier.applyReceivedOperation(operationId).applied)
+        assertEquals("APPLIED", inboxStatus(operationId))
+        assertEquals(15_750_000L, db.rawQuery(
+            "SELECT rate_syp_per_usd_milli FROM exchange_rates WHERE id=?", arrayOf(rateId)
+        ).use { it.moveToFirst(); it.getLong(0) })
+        assertEquals(1, db.rawQuery(
+            "SELECT COUNT(*) FROM exchange_rates WHERE id=?", arrayOf(rateId)
+        ).use { it.moveToFirst(); it.getInt(0) })
+        assertEquals(0, db.rawQuery(
+            "SELECT COUNT(*) FROM sync_operation_envelopes WHERE entity_id=?", arrayOf(rateId)
+        ).use { it.moveToFirst(); it.getInt(0) })
+
+        db.execSQL(
+            "UPDATE sync_inbox SET status='RECEIVED',applied_at=NULL WHERE operation_id=?",
+            arrayOf(operationId)
+        )
+        assertTrue(applier.applyReceivedOperation(operationId).applied)
+        assertEquals(1, db.rawQuery(
+            "SELECT COUNT(*) FROM exchange_rates WHERE id=?", arrayOf(rateId)
+        ).use { it.moveToFirst(); it.getInt(0) })
+    }
+
     @Test fun appliesIncomingPurchaseOnceAndMarksInboxApplied() {
         val operationId = receiveInvoice("POST_PURCHASE_INVOICE", "purchase-remote-1", null, "PURCHASE")
         val applier = SyncDomainApplier(context)
