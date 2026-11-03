@@ -209,7 +209,7 @@ class PurchasePaymentRepository(context: Context) {
                 put("source_type", "PURCHASE_INVOICE"); put("source_id", invoiceId)
                 put("operation_id", operationId)
                 put("description", cleanNote ?: "دفعة للمورد عن الفاتورة ${invoice.invoiceNumber}")
-                put("operating_date", StoreTime.today(db))
+                put("operating_date", StoreTime.operatingDate(db, now))
                 put("created_at", now)
             }
             db.insertOrThrow("cash_transactions", null, cash)
