@@ -55,6 +55,7 @@ class SyncProtocolRepositoryTest {
         val remoteId = UUID.randomUUID().toString()
         val enrolled = repository.enrollSecondaryDevice(adminId, invitation.token, remoteId, "الهاتف الثاني")
         assertEquals(remoteId, enrolled.deviceId)
+        assertEquals(StoreTime.DEFAULT_ZONE_ID, enrolled.storeTimeZoneId)
         assertTrue(repository.authenticateDevice(remoteId, enrolled.credential))
         assertFalse(repository.authenticateDevice(remoteId, "wrong-credential"))
         database.readableDatabase.rawQuery(
@@ -77,8 +78,9 @@ class SyncProtocolRepositoryTest {
             secretBytes,
             android.util.Base64.URL_SAFE or android.util.Base64.NO_WRAP or android.util.Base64.NO_PADDING
         )
-        repository.configureAsSecondary(adminId, "store-remote-01", primaryId, credential, "الهاتف الثاني")
+        repository.configureAsSecondary(adminId, "store-remote-01", primaryId, credential, "الهاتف الثاني", "America/Los_Angeles")
         assertTrue(repository.isConfiguredSecondary())
+        assertEquals("America/Los_Angeles", StoreTime.zoneId(database.readableDatabase))
         assertFalse(repository.hasConfiguredPrimary())
         assertTrue(repository.secondaryCredential()!!.contentEquals(secretBytes))
         database.readableDatabase.rawQuery(
