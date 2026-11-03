@@ -43,7 +43,8 @@ class InventoryAdjustmentRepository(context: Context) {
         reason: String,
         operationId: String,
         unitCostUsdCents: Long? = null,
-        warehouseId: String? = null
+        warehouseId: String? = null,
+        occurredAt: String? = null, syncOrigin: Boolean = false
     ): InventoryAdjustmentResult {
         require(actorUserId.isNotBlank() && productId.isNotBlank() && operationId.isNotBlank()) {
             "بيانات تسوية المخزون غير مكتملة"
@@ -69,6 +70,33 @@ class InventoryAdjustmentRepository(context: Context) {
         val db = database.writableDatabase
         db.beginTransaction()
         try {
+            val localRole=db.rawQuery("SELECT state_value FROM sync_protocol_state WHERE state_key='local_device_role'",null)
+                .use { c -> if(c.moveToFirst()) c.getString(0) else null }
+            if(localRole=="SECONDARY") {
+                PermissionPolicy.requireAssigned(db,actorUserId,PermissionPolicy.INVENTORY_ADJUST)
+                val resolvedWarehouse=warehouseId?.takeIf { it.isNotBlank() } ?: db.rawQuery(
+                    "SELECT id FROM warehouses WHERE is_active=1 ORDER BY is_default DESC,created_at,id LIMIT 1",null
+                ).use { c -> require(c.moveToFirst()) { "لا يوجد مستودع نشط" }; c.getString(0) }
+                val before=db.rawQuery("SELECT quantity FROM inventory_balances WHERE product_id=? AND warehouse_id=?",
+                    arrayOf(productId,resolvedWarehouse)).use { c -> if(c.moveToFirst()) BigDecimal.valueOf(c.getDouble(0)) else BigDecimal.ZERO }
+                val after=before.add(quantityDelta)
+                require(after.signum()>=0) { "لا يمكن أن تؤدي التسوية إلى مخزون سالب على النسخة المحلية" }
+                val eventTime=occurredAt ?: timestamp()
+                val payload=org.json.JSONObject().put("product_id",productId).put("warehouse_id",resolvedWarehouse)
+                    .put("quantity_delta",quantityDelta.stripTrailingZeros().toPlainString())
+                    .put("unit_cost_usd_cents",unitCostUsdCents ?: org.json.JSONObject.NULL)
+                    .put("reason",cleanReason).put("occurred_at",eventTime)
+                    .put("operating_date",StoreTime.operatingDate(db,eventTime))
+                val pendingId="pending-adjustment-$operationId"
+                SyncProtocolRepository(context).enqueueSecondaryCommand(
+                    db,actorUserId,operationId,"POST_INVENTORY_ADJUSTMENT","INVENTORY_ADJUSTMENT",pendingId,payload.toString())
+                db.setTransactionSuccessful()
+                val provisionalCost=if(increase) BigDecimal.valueOf(unitCostUsdCents!!).multiply(absoluteQuantity)
+                    .setScale(0,RoundingMode.HALF_UP).longValueExact() else null
+                return InventoryAdjustmentResult(pendingId,"pending-movement-$operationId",productId,resolvedWarehouse,
+                    if(increase) "INCREASE" else "DECREASE",absoluteQuantity,before,after,unitCostUsdCents,
+                    provisionalCost,cleanReason,false)
+            }
             PermissionPolicy.require(db, actorUserId, PermissionPolicy.INVENTORY_ADJUST)
             val existing = db.rawQuery(
                 "SELECT operation_type,payload_hash,result_reference FROM operation_registry WHERE operation_id=?",
@@ -124,7 +152,7 @@ class InventoryAdjustmentRepository(context: Context) {
 
             val adjustmentId = UUID.randomUUID().toString()
             val movementId = UUID.randomUUID().toString()
-            val now = timestamp()
+            val now = occurredAt ?: timestamp()
             val type = if (increase) "INCREASE" else "DECREASE"
             val movementType = if (increase) "ADJUSTMENT_IN" else "ADJUSTMENT_OUT"
             val cost = if (increase) {
@@ -197,17 +225,19 @@ class InventoryAdjustmentRepository(context: Context) {
                     .put("cost_usd_cents", cost).put("reason", cleanReason).toString())
                 put("created_at", now)
             })
-            SyncProtocolRepository(context).enqueueLocalOperation(
-                db, actorUserId, operationId, "POST_INVENTORY_ADJUSTMENT", "INVENTORY_ADJUSTMENT",
-                adjustmentId, "CREATE",
-                org.json.JSONObject().put("adjustment_id", adjustmentId).put("movement_id", movementId)
-                    .put("product_id", productId).put("warehouse_id", resolvedWarehouse)
-                    .put("adjustment_type", type).put("quantity", absoluteQuantity.toPlainString())
-                    .put("quantity_before", before.toPlainString()).put("quantity_after", after.toPlainString())
-                    .put("unit_cost_usd_cents", unitCostUsdCents ?: org.json.JSONObject.NULL)
-                    .put("cost_usd_cents", cost ?: org.json.JSONObject.NULL)
-                    .put("reason", cleanReason).put("created_at", now).toString()
-            )
+            if(!syncOrigin) {
+                SyncProtocolRepository(context).enqueueLocalOperation(
+                    db, actorUserId, operationId, "POST_INVENTORY_ADJUSTMENT", "INVENTORY_ADJUSTMENT",
+                    adjustmentId, "CREATE",
+                    org.json.JSONObject().put("adjustment_id", adjustmentId).put("movement_id", movementId)
+                        .put("product_id", productId).put("warehouse_id", resolvedWarehouse)
+                        .put("adjustment_type", type).put("quantity", absoluteQuantity.toPlainString())
+                        .put("quantity_before", before.toPlainString()).put("quantity_after", after.toPlainString())
+                        .put("unit_cost_usd_cents", unitCostUsdCents ?: org.json.JSONObject.NULL)
+                        .put("cost_usd_cents", cost ?: org.json.JSONObject.NULL)
+                        .put("reason", cleanReason).put("created_at", now).toString()
+                )
+            }
             db.setTransactionSuccessful()
             return InventoryAdjustmentResult(
                 adjustmentId, movementId, productId, resolvedWarehouse, type,
