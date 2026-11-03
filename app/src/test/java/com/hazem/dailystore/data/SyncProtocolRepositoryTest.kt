@@ -163,6 +163,62 @@ class SyncProtocolRepositoryTest {
         recipientSecret.fill(0)
     }
 
+    @Test fun storeTimeZoneChangeIsQueuedForEachEnrolledSecondaryAndSigned() {
+        repository.configureAsPrimary(adminId, "الرئيسي")
+        val invitation = repository.createPairingInvitation(adminId)
+        val secondaryId = UUID.randomUUID().toString()
+        repository.enrollSecondaryDevice(adminId, invitation.token, secondaryId, "الثانوي")
+
+        assertEquals("America/New_York",
+            StoreRepository(RuntimeEnvironment.getApplication())
+                .saveStoreTimeZoneId("America/New_York", adminId))
+        val pending = repository.pendingStoreSettingsForDevice(secondaryId)
+        assertEquals(1, pending.size)
+        assertEquals("STORE_SETTINGS", pending.single().entityType)
+        assertEquals("UPDATE", pending.single().operationType)
+        val envelope = repository.authenticatedOutbox(pending.single().operationId, secondaryId)
+        val secret = vault.load(secondaryId)!!
+        assertTrue(SyncEnvelopeSecurity.verify(envelope, secret))
+        assertEquals("UPDATE_STORE_TIME_ZONE",
+            org.json.JSONObject(envelope.payloadJson).getString("business_operation"))
+        assertEquals("America/New_York",
+            org.json.JSONObject(envelope.payloadJson).getString("time_zone"))
+        secret.fill(0)
+    }
+
+    @Test fun secondaryReceivesAndAppliesPrimaryTimeZoneUpdateIdempotently() {
+        val primaryId = UUID.randomUUID().toString()
+        val secret = ByteArray(32) { (it + 41).toByte() }
+        val credential = android.util.Base64.encodeToString(
+            secret,
+            android.util.Base64.URL_SAFE or android.util.Base64.NO_WRAP or android.util.Base64.NO_PADDING
+        )
+        repository.configureAsSecondary(
+            adminId, "store-time-zone-01", primaryId, credential, "الثانوي", "Asia/Damascus"
+        )
+        val envelope = SyncEnvelopeSecurity.create(
+            "store-time-zone-01", UUID.randomUUID().toString(), 9L,
+            primaryId, adminId, "UPDATE", "STORE_SETTINGS", "store_time_zone", 0L,
+            """{"business_operation":"UPDATE_STORE_TIME_ZONE","time_zone":"America/New_York"}""",
+            "2026-11-03T12:00:00Z", secret
+        )
+        val encoded = SyncEnvelopeSecurity.encode(envelope)
+        assertEquals(SyncInboxDisposition.RECEIVED,
+            repository.recordIncomingStoreSettingsFromPrimary(encoded))
+        assertEquals(SyncInboxDisposition.DUPLICATE,
+            repository.recordIncomingStoreSettingsFromPrimary(encoded))
+
+        val applier = SyncDomainApplier(RuntimeEnvironment.getApplication())
+        assertTrue(applier.applyReceivedStoreTimeZone(envelope.operationId).applied)
+        assertEquals("America/New_York", StoreTime.zoneId(database.readableDatabase))
+        assertTrue(applier.applyReceivedStoreTimeZone(envelope.operationId).applied)
+        assertEquals("APPLIED", database.readableDatabase.rawQuery(
+            "SELECT status FROM sync_inbox WHERE operation_id=?",
+            arrayOf(envelope.operationId)
+        ).use { c -> assertTrue(c.moveToFirst()); c.getString(0) })
+        secret.fill(0)
+    }
+
     @Test fun secondaryCommandIsQueuedAndSignedWithItsOwnCredentialWithoutPostingLocally() {
         val primaryId = UUID.randomUUID().toString()
         val secretBytes = ByteArray(32) { (it + 31).toByte() }
