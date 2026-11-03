@@ -96,7 +96,9 @@ class InvoiceRepository(context: Context) {
         val payloadHash = hashPayload(type, invoiceId, partyId, invoiceDate, discountUsdCents, notes, lines, saleType)
         db.beginTransaction()
         try {
-            PermissionPolicy.require(
+            // Draft creation is a local, non-authoritative action and is allowed
+            // on a secondary after checking the user's assigned role permission.
+            PermissionPolicy.requireAssigned(
                 db, actorUserId,
                 if (type == "PURCHASE") PermissionPolicy.PURCHASES_MANAGE else PermissionPolicy.SALES_CHECKOUT
             )
@@ -209,10 +211,16 @@ class InvoiceRepository(context: Context) {
         val payloadHash = hash(if (cashAccountId == null) "$type|$invoiceId" else "$type|$invoiceId|$cashAccountId")
         db.beginTransaction()
         try {
-            PermissionPolicy.require(
-                db, actorUserId,
+            val syncRepository = SyncProtocolRepository(context)
+            val requiredInvoicePermission =
                 if (type == "PURCHASE") PermissionPolicy.PURCHASES_MANAGE else PermissionPolicy.SALES_CHECKOUT
-            )
+            if (syncRepository.isConfiguredSecondary()) {
+                // Secondary users may request posting, but only their assigned permission
+                // is checked here; the primary rechecks the mapped actor's permission.
+                PermissionPolicy.requireAssigned(db, actorUserId, requiredInvoicePermission)
+            } else {
+                PermissionPolicy.require(db, actorUserId, requiredInvoicePermission)
+            }
             findOperation(db, operationId)?.let { existing ->
                 require(existing.type == operationType && existing.payloadHash == payloadHash && existing.reference == invoiceId) {
                     "معرّف الاعتماد مستخدم لعملية مختلفة"
