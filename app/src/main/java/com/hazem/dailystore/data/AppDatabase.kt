@@ -436,9 +436,25 @@ class AppDatabase private constructor(context: Context) :
                 db.endTransaction()
             }
         }
+        if (version < 20) {
+            db.beginTransaction()
+            try {
+                ensureSyncInboxOriginTimestampColumn(db)
+                db.setTransactionSuccessful()
+                version = 20
+            } finally { db.endTransaction() }
+        }
         if (version != newVersion) {
             throw IllegalStateException("Missing database migration from version $version to $newVersion")
         }
+    }
+
+    private fun ensureSyncInboxOriginTimestampColumn(db: SQLiteDatabase) {
+        var exists = false
+        db.rawQuery("PRAGMA table_info(sync_inbox)", null).use { c ->
+            while (c.moveToNext()) if (c.getString(1) == "origin_created_at") exists = true
+        }
+        if (!exists) db.execSQL("ALTER TABLE sync_inbox ADD COLUMN origin_created_at TEXT NOT NULL DEFAULT ''")
     }
 
     private fun ensureSyncActorMappingSchema(db: SQLiteDatabase) {
@@ -630,6 +646,7 @@ class AppDatabase private constructor(context: Context) :
             )
         """.trimIndent())
         db.execSQL("CREATE INDEX IF NOT EXISTS idx_sync_devices_status ON sync_devices(status, device_role)")
+        ensureSyncInboxOriginTimestampColumn(db)
         db.execSQL("CREATE INDEX IF NOT EXISTS idx_sync_inbox_status_sequence ON sync_inbox(status, sequence_number)")
         db.execSQL("CREATE INDEX IF NOT EXISTS idx_sync_envelopes_sequence ON sync_operation_envelopes(sequence_number)")
         db.execSQL("CREATE INDEX IF NOT EXISTS idx_sync_invitations_expiry ON sync_pairing_invitations(expires_at, consumed_at)")
@@ -830,7 +847,7 @@ class AppDatabase private constructor(context: Context) :
 
     companion object {
         const val DATABASE_NAME = "the_daily_shop.db"
-        const val DATABASE_VERSION = 19
+        const val DATABASE_VERSION = 20
 
         @Volatile
         private var INSTANCE: AppDatabase? = null
