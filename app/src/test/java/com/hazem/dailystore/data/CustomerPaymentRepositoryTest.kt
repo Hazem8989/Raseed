@@ -13,6 +13,7 @@ import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
+import javax.crypto.spec.SecretKeySpec
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.RuntimeEnvironment
@@ -318,7 +319,7 @@ class CustomerPaymentRepositoryTest {
     fun secondaryCustomerCollectionIsQueuedWithoutLocalFinancialPosting() {
         val context = RuntimeEnvironment.getApplication()
         val invoiceId = createCreditInvoice()
-        val sync = SyncProtocolRepository(context)
+        val sync = SyncProtocolRepository(context, SyncCredentialVault(context) { SecretKeySpec(ByteArray(32) { 13 }, "AES") })
         // Give this isolated secondary fixture a store identity without changing its local role to PRIMARY.
         val storeId = UUID.randomUUID().toString()
         val primaryDeviceId = UUID.randomUUID().toString()
