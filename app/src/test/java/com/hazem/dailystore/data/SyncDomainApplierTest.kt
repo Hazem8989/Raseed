@@ -72,8 +72,8 @@ class SyncDomainApplierTest {
         val operationId = receiveInvoice("POST_PURCHASE_INVOICE", "purchase-remote-1", null, "PURCHASE")
         val applier = SyncDomainApplier(context)
 
-        assertTrue(applier.applyReceivedInvoice(operationId).applied)
-        assertTrue(applier.applyReceivedInvoice(operationId).applied)
+        assertTrue(applyWithDiagnostic(applier, operationId).applied)
+        assertTrue(applyWithDiagnostic(applier, operationId).applied)
         assertEquals("POSTED", invoiceStatus("purchase_invoices", "purchase-remote-1"))
         assertEquals(12.0, stock(), 0.000001)
         assertEquals("APPLIED", inboxStatus(operationId))
@@ -87,7 +87,7 @@ class SyncDomainApplierTest {
         val customerId = CustomerRepository(context).create(adminId, "زبون مزامنة").id
         val operationId = receiveInvoice("POST_SALES_INVOICE", "sale-remote-1", customerId, "CREDIT")
 
-        assertTrue(SyncDomainApplier(context).applyReceivedInvoice(operationId).applied)
+        assertTrue(applyWithDiagnostic(SyncDomainApplier(context), operationId).applied)
         assertEquals("POSTED", invoiceStatus("sales_invoices", "sale-remote-1"))
         assertEquals(8.0, stock(), 0.000001)
         assertEquals(0, database.readableDatabase.rawQuery(
@@ -101,10 +101,12 @@ class SyncDomainApplierTest {
         val operationId = receiveInvoice("POST_SALES_INVOICE", "sale-cash-remote", null, "CASH")
         var rejected = false
         try { SyncDomainApplier(context).applyReceivedInvoice(operationId) }
-        catch (_: IllegalArgumentException) { rejected = true }
+        catch (e: IllegalArgumentException) { rejected = e.message?.contains("بيع نقدي وارد مؤجل") == true }
 
         assertTrue(rejected)
-        assertEquals("DRAFT", invoiceStatus("sales_invoices", "sale-cash-remote"))
+        assertEquals(0, database.readableDatabase.rawQuery(
+            "SELECT COUNT(*) FROM sales_invoices WHERE id=?", arrayOf("sale-cash-remote")
+        ).use { it.moveToFirst(); it.getInt(0) })
         assertEquals(10.0, stock(), 0.000001)
         assertEquals("RECEIVED", inboxStatus(operationId))
     }
@@ -127,6 +129,12 @@ class SyncDomainApplierTest {
         ).use { it.moveToFirst(); it.getInt(0) })
         assertEquals("RECEIVED", inboxStatus(operationId))
     }
+
+    private fun applyWithDiagnostic(applier: SyncDomainApplier, operationId: String): SyncDomainApplier.ApplyResult =
+        try { applier.applyReceivedInvoice(operationId) }
+        catch (e: IllegalArgumentException) {
+            throw AssertionError("Incoming invoice apply failed: ${e.message}", e)
+        }
 
     private fun receiveInvoice(
         operation: String, invoiceId: String, partyId: String?, saleType: String
