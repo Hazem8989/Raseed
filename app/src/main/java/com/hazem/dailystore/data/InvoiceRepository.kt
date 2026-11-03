@@ -317,7 +317,6 @@ class InvoiceRepository(context: Context) {
                 }
             }
             val warehouseId = invoiceWarehouse(db, table, invoiceId)
-            val syncRepository = SyncProtocolRepository(context)
             if (syncRepository.isConfiguredSecondary()) {
                 // Validate the complete draft before queuing it, but never mutate stock,
                 // FIFO layers, invoice status, cash, or local ledgers on a secondary.
