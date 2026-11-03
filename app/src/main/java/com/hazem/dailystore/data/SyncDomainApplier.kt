@@ -26,6 +26,57 @@ class SyncDomainApplier(context: Context) {
         val reason: String? = null
     )
 
+    /** Applies a signed primary store-time-zone update on a secondary, idempotently. */
+    fun applyReceivedStoreTimeZone(operationId: String): ApplyResult = synchronized(APPLY_LOCK) {
+        require(operationId.isNotBlank()) { "معرّف الأمر مطلوب" }
+        val db = database.writableDatabase
+        val localId = SyncDeviceIdentity.getOrCreate(appContext)
+        val role = db.rawQuery(
+            "SELECT state_value FROM sync_protocol_state WHERE state_key='local_device_role'", null
+        ).use { c -> if (c.moveToFirst()) c.getString(0) else null }
+        val authority = db.rawQuery(
+            "SELECT state_value FROM sync_protocol_state WHERE state_key='authority_device_id'", null
+        ).use { c -> if (c.moveToFirst()) c.getString(0) else null }
+        require(role == "SECONDARY" && !authority.isNullOrBlank() && authority != localId) {
+            "تطبيق إعداد المنطقة الزمنية الوارد مسموح على جهاز ثانوي مرتبط فقط"
+        }
+        db.beginTransaction()
+        try {
+            val row = db.rawQuery(
+                """SELECT origin_device_id,operation_type,entity_type,entity_id,payload_json,status
+                   FROM sync_inbox WHERE operation_id=?""".trimIndent(), arrayOf(operationId)
+            ).use { c ->
+                require(c.moveToFirst()) { "تحديث المنطقة الزمنية غير موجود في صندوق الوارد" }
+                arrayOf(c.getString(0),c.getString(1),c.getString(2),c.getString(3),c.getString(4),c.getString(5))
+            }
+            require(row[0] == authority && row[1] == "UPDATE" &&
+                row[2] == "STORE_SETTINGS" && row[3] == "store_time_zone") {
+                "مصدر أو نوع تحديث المنطقة الزمنية غير صالح"
+            }
+            if (row[5] == "APPLIED") {
+                db.setTransactionSuccessful()
+                return@synchronized ApplyResult(operationId, true)
+            }
+            require(row[5] == "RECEIVED") { "حالة تحديث المنطقة الزمنية لا تسمح بالتطبيق" }
+            val payload = JSONObject(row[4])
+            require(payload.optString("business_operation") == "UPDATE_STORE_TIME_ZONE") {
+                "نوع عملية إعداد المتجر غير صالح"
+            }
+            val zoneId = payload.optString("time_zone")
+            require(StoreTime.isValidZoneId(zoneId)) { "معرّف المنطقة الزمنية الوارد غير صالح" }
+            StoreTime.setZoneId(db, zoneId, timestamp())
+            db.update("sync_inbox", ContentValues().apply {
+                put("status", "APPLIED")
+                put("applied_at", timestamp())
+                putNull("rejection_reason")
+            }, "operation_id=? AND status='RECEIVED'", arrayOf(operationId)).also {
+                require(it == 1) { "تعذر تثبيت تطبيق إعداد المنطقة الزمنية" }
+            }
+            db.setTransactionSuccessful()
+            ApplyResult(operationId, true)
+        } finally { db.endTransaction() }
+    }
+
     fun applyReceivedInvoice(operationId: String): ApplyResult = synchronized(APPLY_LOCK) {
         require(operationId.isNotBlank()) { "معرّف الأمر مطلوب" }
         val db = database.writableDatabase
