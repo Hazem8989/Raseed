@@ -41,7 +41,7 @@ class SyncDomainApplier(context: Context) {
         }
         val row = db.rawQuery(
             """SELECT i.origin_device_id,i.entity_type,i.entity_id,i.payload_json,i.status,
-                      m.primary_user_id
+                      m.primary_user_id,i.origin_created_at
                FROM sync_inbox i
                JOIN sync_actor_mappings m
                  ON m.device_id=i.origin_device_id AND m.is_active=1
@@ -55,7 +55,7 @@ class SyncDomainApplier(context: Context) {
             require(c.moveToFirst()) { "الأمر غير موجود أو الجهاز/المستخدم غير مفعل أو لم يتم ربط المستخدم" }
             InboxCommand(
                 c.getString(0), c.getString(1), c.getString(2), c.getString(3),
-                c.getString(4), c.getString(5)
+                c.getString(4), c.getString(5), c.getString(6)
             )
         }
         if (row.status == "APPLIED") return@synchronized ApplyResult(operationId, true)
@@ -89,6 +89,15 @@ class SyncDomainApplier(context: Context) {
         val notes = if (payload.isNull("notes")) null else payload.getString("notes")
         val rate = payload.getLong("exchange_rate_syp_per_usd_milli")
         require(rate > 0L) { "الفاتورة الواردة لا تحتوي سعر صرف صالحاً" }
+
+        val sourceEventAt = payload.optString("posted_at").takeIf { it.isNotBlank() && it != "null" }
+            ?: row.originCreatedAt
+        require(sourceEventAt.matches(Regex("\\d{4}-\\d{2}-\\d{2}T.*"))) {
+            "الأمر الوارد لا يحتوي وقت وقوع أصلياً صالحاً"
+        }
+        val sourceOperatingDate = payload.optString("posted_operating_date")
+            .takeIf { it.matches(Regex("\\d{4}-\\d{2}-\\d{2}")) }
+            ?: sourceEventAt.substring(0, 10)
 
         val invoices = InvoiceRepository(appContext)
         val draftOperationId = "${operationId}:IMPORT_DRAFT"
@@ -124,9 +133,9 @@ class SyncDomainApplier(context: Context) {
         }
 
         if (invoiceType == "PURCHASE") {
-            invoices.postPurchase(row.primaryUserId, invoiceId, postOperationId)
+            invoices.postPurchase(row.primaryUserId, invoiceId, postOperationId, sourceEventAt, sourceOperatingDate)
         } else {
-            invoices.postSale(row.primaryUserId, invoiceId, postOperationId)
+            invoices.postSale(row.primaryUserId, invoiceId, postOperationId, sourceEventAt, sourceOperatingDate)
         }
 
         db.beginTransaction()
@@ -173,7 +182,8 @@ class SyncDomainApplier(context: Context) {
         val entityId: String,
         val payloadJson: String,
         val status: String,
-        val primaryUserId: String
+        val primaryUserId: String,
+        val originCreatedAt: String
     )
 
     private fun timestamp(): String =
