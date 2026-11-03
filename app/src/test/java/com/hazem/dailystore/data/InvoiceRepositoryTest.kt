@@ -154,9 +154,14 @@ class InvoiceRepositoryTest {
         assertEquals("POST_PURCHASE_INVOICE", firstPayload.getString("business_operation"))
         assertEquals(draft.invoiceId, firstPayload.getString("id"))
         assertEquals(1, firstPayload.getJSONArray("items").length())
+        val firstEventAt = firstPayload.getString("posted_at")
+        val firstOperatingDate = firstPayload.getString("posted_operating_date")
 
         assertTrue(invoices.postPurchase(adminId, draft.invoiceId, "ui-post-attempt-2"))
         assertEquals(1, sync.pendingOutbox().size)
+        val retryPayload = org.json.JSONObject(sync.pendingOutbox().single().payloadJson)
+        assertEquals(firstEventAt, retryPayload.getString("posted_at"))
+        assertEquals(firstOperatingDate, retryPayload.getString("posted_operating_date"))
         val envelope = sync.authenticatedOutbox(
             "secondary-invoice-post:${draft.invoiceId}", primaryId
         )
@@ -198,9 +203,14 @@ class InvoiceRepositoryTest {
         assertEquals(500L, receipts.getJSONObject(0).getLong("amount_minor"))
         assertEquals("USD", receipts.getJSONObject(0).getString("currency_code"))
         assertTrue(payload.getString("posted_at").isNotBlank())
+        val firstEventAt = payload.getString("posted_at")
+        val firstOperatingDate = payload.getString("posted_operating_date")
 
         assertTrue(invoices.postCashSale(adminId, draft.invoiceId, "ui-sale-attempt-2", cashAccountId))
         assertEquals(1, sync.pendingOutbox().size)
+        val retryPayload = org.json.JSONObject(sync.pendingOutbox().single().payloadJson)
+        assertEquals(firstEventAt, retryPayload.getString("posted_at"))
+        assertEquals(firstOperatingDate, retryPayload.getString("posted_operating_date"))
         val envelope = sync.authenticatedOutbox(
             "secondary-invoice-post:${draft.invoiceId}", primaryId
         )
