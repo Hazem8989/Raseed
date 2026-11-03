@@ -49,6 +49,7 @@ class SyncDomainApplier(context: Context) {
             "POST_SALES_RETURN" -> applyReceivedSalesReturn(operationId)
             "POST_PURCHASE_RETURN" -> applyReceivedPurchaseReturn(operationId)
             "POST_INVENTORY_ADJUSTMENT" -> applyReceivedInventoryAdjustment(operationId)
+            "EXECUTE_SERVICE_TRANSFER" -> applyReceivedServiceTransfer(operationId)
             else -> throw IllegalArgumentException(
                 "نوع العملية الواردة غير مدعوم بعد؛ بقي الأمر محفوظاً دون تطبيق"
             )
@@ -989,6 +990,72 @@ class SyncDomainApplier(context: Context) {
         } finally { db.endTransaction() }
     }
 
+
+    /** Applies an authenticated service-wallet transfer on the primary exactly once. */
+    fun applyReceivedServiceTransfer(operationId: String): ApplyResult = synchronized(APPLY_LOCK) {
+        require(operationId.isNotBlank()) { "معرّف التحويل مطلوب" }
+        val db = database.writableDatabase
+        val localId = SyncDeviceIdentity.getOrCreate(appContext)
+        val role = db.rawQuery("SELECT state_value FROM sync_protocol_state WHERE state_key='local_device_role'", null).use { if (it.moveToFirst()) it.getString(0) else null }
+        val authority = db.rawQuery("SELECT state_value FROM sync_protocol_state WHERE state_key='authority_device_id'", null).use { if (it.moveToFirst()) it.getString(0) else null }
+        require(role == "PRIMARY" && authority == localId) { "اعتماد تحويل الرصيد الوارد مسموح على الجهاز الأساسي فقط" }
+        db.beginTransaction()
+        try {
+            val row = db.rawQuery(
+                """SELECT i.origin_device_id,i.entity_type,i.entity_id,i.payload_json,i.status,m.primary_user_id,i.payload_sha256
+                   FROM sync_inbox i JOIN sync_actor_mappings m ON m.device_id=i.origin_device_id AND m.is_active=1
+                   JOIN users u ON u.id=m.primary_user_id JOIN sync_devices d ON d.device_id=i.origin_device_id
+                   WHERE i.operation_id=? AND d.device_role='SECONDARY' AND d.status='ACTIVE'
+                     AND u.is_active=1 AND u.must_change_password=0 ORDER BY m.mapped_at DESC LIMIT 1""".trimIndent(),
+                arrayOf(operationId)
+            ).use { c -> require(c.moveToFirst()) { "أمر تحويل الرصيد غير موجود أو الجهاز/المستخدم غير مفعل أو غير مربوط" }; Array(7) { i -> c.getString(i) } }
+            if (row[4] == "APPLIED") { db.setTransactionSuccessful(); return@synchronized ApplyResult(operationId, true) }
+            require(row[4] == "RECEIVED" && row[1] == "SERVICE_TRANSFER") { "حالة أو نوع أمر تحويل الرصيد غير صالح" }
+            val payload = JSONObject(row[3]!!)
+            require(payload.optString("business_operation") == "EXECUTE_SERVICE_TRANSFER") { "نوع العملية الواردة ليس تحويلاً للخدمات" }
+            val actor = row[5]!!
+            PermissionPolicy.require(db, actor, PermissionPolicy.SERVICE_TRANSFERS_EXECUTE)
+            val existing = db.rawQuery("SELECT operation_type,payload_hash,result_reference FROM operation_registry WHERE operation_id=?",arrayOf(operationId))
+                .use { c -> if (c.moveToFirst()) arrayOf(c.getString(0),c.getString(1),if(c.isNull(2)) "" else c.getString(2)) else null }
+            if (existing != null) {
+                require(existing[0] == "EXECUTE_SERVICE_TRANSFER" && existing[1] == row[6] && existing[2].isNotBlank()) { "تعارض في سجل تحويل الرصيد أو إعادة استخدام معرّف العملية" }
+                db.update("sync_inbox",ContentValues().apply{put("status","APPLIED");put("applied_at",timestamp());putNull("rejection_reason")},"operation_id=? AND status='RECEIVED'",arrayOf(operationId))
+                db.setTransactionSuccessful()
+                return@synchronized ApplyResult(operationId,true)
+            }
+            val remoteAccount=payload.getString("cash_account_id")
+            val remoteType=payload.getString("cash_account_type")
+            val remoteCurrency=payload.getString("cash_account_currency_code")
+            require(remoteType in setOf("CASH_BOX","WALLET") && remoteCurrency=="SYP") { "نوع أو عملة حساب قبض التحويل غير مدعومين" }
+            val mappedAccount=db.rawQuery(
+                """SELECT m.primary_cash_account_id,a.account_type,a.currency_code,a.is_active
+                   FROM sync_cash_account_mappings m JOIN cash_accounts a ON a.id=m.primary_cash_account_id
+                   WHERE m.device_id=? AND m.remote_cash_account_id=? AND m.is_active=1""".trimIndent(),arrayOf(row[0],remoteAccount)
+            ).use { c -> require(c.moveToFirst() && c.getInt(3)==1) { "حساب قبض الجهاز الثانوي غير مربوط أو موقوف" }
+                require(c.getString(1)==remoteType && c.getString(2)==remoteCurrency) { "نوع أو عملة حساب القبض المرتبط لا يطابق الحساب الأصلي" }; c.getString(0) }
+            val occurredAt=payload.getString("occurred_at")
+            val operatingDate=payload.getString("operating_date")
+            require(occurredAt.matches(Regex("\\d{4}-\\d{2}-\\d{2}T.*")) && operatingDate.matches(Regex("\\d{4}-\\d{2}-\\d{2}"))) { "تاريخ أو وقت التحويل الأصلي غير صالح" }
+            val serviceType=payload.getString("service_type")
+            val expectedKey=if(serviceType==ServiceTransferRepository.SHAM_CASH_TRANSFER) ServiceTransferRepository.SHAM_CASH else ServiceTransferRepository.SYRIATEL_SHARED
+            require(payload.getString("service_key")==expectedKey) { "محفظة الخدمة لا تطابق نوع التحويل" }
+            val delivered=payload.getLong("delivered_minor")
+            val providerFee=payload.getLong("provider_fee_minor")
+            require(payload.getLong("profit_minor")>=0L && payload.getLong("customer_charge_minor")>0L) { "قيم ربح أو قبض التحويل غير صالحة" }
+            val reference=if(payload.isNull("reference")) null else payload.getString("reference").take(200)
+            val note=if(payload.isNull("note")) null else payload.getString("note").take(500)
+            val result=ServiceTransferRepository(appContext).executeTransfer(actor,serviceType,delivered,providerFee,mappedAccount,operationId,reference,note,occurredAt,operatingDate,true)
+            require(result.profitMinor==payload.getLong("profit_minor") && result.customerChargeMinor==payload.getLong("customer_charge_minor")) { "حساب الربح أو المبلغ المقبوض لا يطابق سياسة التحويل المعتمدة على الجهاز الأساسي" }
+            db.insertOrThrow("operation_registry",null,ContentValues().apply{
+                put("operation_id",operationId);put("operation_type","EXECUTE_SERVICE_TRANSFER");put("payload_hash",row[6]);put("status","COMPLETED")
+                put("result_reference",result.transferId);put("created_at",timestamp());put("completed_at",timestamp())
+            })
+            db.update("sync_inbox",ContentValues().apply{put("status","APPLIED");put("applied_at",timestamp());putNull("rejection_reason")},
+                "operation_id=? AND status='RECEIVED'",arrayOf(operationId)).also{require(it==1){"تعذر تثبيت حالة تطبيق تحويل الرصيد"}}
+            db.setTransactionSuccessful()
+            ApplyResult(operationId,true)
+        } finally { db.endTransaction() }
+    }
 
     fun applyReceivedSalesReturn(operationId: String): ApplyResult =
         applyReceivedReturn(operationId, "POST_SALES_RETURN", "SALES_RETURN")
