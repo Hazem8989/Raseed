@@ -36,3 +36,5 @@ jobs:
         run: npm install --no-audit --no-fund
       - name: Type-check relay
         run: npm run check
+      - name: Test two independent WebSocket devices
+        run: npm run test:integration
