@@ -1595,9 +1595,15 @@ class MainActivity : Activity() {
                         note.text.toString().trim().ifEmpty { null }
                     )
                     dialog.dismiss()
+                    val pendingPrimaryApproval = SyncProtocolRepository(this).isConfiguredSecondary()
                     Toast.makeText(this,
-                        if (result.paymentStatus == "PAID") "تم تسديد الفاتورة بالكامل"
-                        else "تم تسجيل الدفعة الجزئية بنجاح",
+                        if (pendingPrimaryApproval) {
+                            "تم حفظ طلب دفعة المورد محلياً بانتظار المزامنة واعتماد الجهاز الأساسي"
+                        } else if (result.paymentStatus == "PAID") {
+                            "تم تسديد الفاتورة بالكامل"
+                        } else {
+                            "تم تسجيل الدفعة الجزئية بنجاح"
+                        },
                         Toast.LENGTH_LONG).show()
                     onSaved()
                 } catch (e: Exception) {
