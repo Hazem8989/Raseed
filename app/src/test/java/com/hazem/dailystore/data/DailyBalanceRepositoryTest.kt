@@ -1,9 +1,6 @@
 package com.hazem.dailystore.data
 
 import android.content.ContentValues
-import java.text.SimpleDateFormat
-import java.util.Date
-import java.util.Locale
 import java.util.UUID
 import org.junit.After
 import org.junit.Assert.assertEquals
@@ -21,12 +18,13 @@ class DailyBalanceRepositoryTest {
     private lateinit var accounts: CashAccountRepository
     private lateinit var daily: DailyBalanceRepository
     private lateinit var actorId: String
-    private val date = SimpleDateFormat("yyyy-MM-dd", Locale.US).format(Date())
+    private lateinit var date: String
 
     @Before fun setUp() {
         val context = RuntimeEnvironment.getApplication()
         AppDatabase.resetForTests(context)
         database = AppDatabase.getInstance(context)
+        date = StoreTime.today(database.readableDatabase)
         StoreRepository(context).ensureBaseSetup()
         val auth = AuthRepository(context)
         auth.ensureInitialAdmin()
