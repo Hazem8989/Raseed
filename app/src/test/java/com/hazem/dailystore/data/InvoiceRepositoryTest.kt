@@ -127,6 +127,83 @@ class InvoiceRepositoryTest {
     }
 
     @Test
+    fun secondaryPurchasePostingQueuesIdempotentlyWithoutChangingStockOrInvoiceStatus() {
+        val context = RuntimeEnvironment.getApplication()
+        val primaryId = UUID.randomUUID().toString()
+        val secret = ByteArray(32) { (it + 17).toByte() }
+        val credential = android.util.Base64.encodeToString(
+            secret, android.util.Base64.URL_SAFE or android.util.Base64.NO_WRAP or android.util.Base64.NO_PADDING
+        )
+        SyncProtocolRepository(context).configureAsSecondary(
+            adminId, "store-secondary-purchase", primaryId, credential, "الجهاز الثانوي"
+        )
+        val draft = invoices.savePurchaseDraft(
+            adminId, "secondary-purchase-draft", null, null, "2026-10-31", 0, null,
+            listOf(InvoiceLineInput(productId, BigDecimal("3"), 125))
+        )
+        val beforeStock = stock()
+        assertTrue(invoices.postPurchase(adminId, draft.invoiceId, "ui-post-attempt-1"))
+        assertEquals(beforeStock, stock(), 0.000001)
+        assertEquals("DRAFT", invoices.listPurchaseInvoices().single { it.id == draft.invoiceId }.status)
+        val sync = SyncProtocolRepository(context)
+        assertEquals(1, sync.pendingOutbox().size)
+        val firstPayload = org.json.JSONObject(sync.pendingOutbox().single().payloadJson)
+        assertEquals("POST_PURCHASE_INVOICE", firstPayload.getString("business_operation"))
+        assertEquals(draft.invoiceId, firstPayload.getString("id"))
+        assertEquals(1, firstPayload.getJSONArray("items").length())
+
+        assertTrue(invoices.postPurchase(adminId, draft.invoiceId, "ui-post-attempt-2"))
+        assertEquals(1, sync.pendingOutbox().size)
+        val envelope = sync.authenticatedOutbox(
+            "secondary-invoice-post:${draft.invoiceId}", primaryId
+        )
+        assertTrue(SyncEnvelopeSecurity.verify(envelope, secret))
+        secret.fill(0)
+    }
+
+    @Test
+    fun secondaryCashSaleQueuesSyntheticReceiptWithoutPostingCashOrStockLocally() {
+        val context = RuntimeEnvironment.getApplication()
+        val primaryId = UUID.randomUUID().toString()
+        val secret = ByteArray(32) { (it + 29).toByte() }
+        val credential = android.util.Base64.encodeToString(
+            secret, android.util.Base64.URL_SAFE or android.util.Base64.NO_WRAP or android.util.Base64.NO_PADDING
+        )
+        SyncProtocolRepository(context).configureAsSecondary(
+            adminId, "store-secondary-sale", primaryId, credential, "الجهاز الثانوي"
+        )
+        val draft = invoices.saveSalesDraft(
+            adminId, "secondary-sale-draft", null, null, "2026-10-31", 0, null,
+            listOf(InvoiceLineInput(productId, BigDecimal("2"), 250)), "CASH"
+        )
+        val beforeStock = stock()
+        assertTrue(invoices.postCashSale(adminId, draft.invoiceId, "ui-sale-attempt-1", cashAccountId))
+        assertEquals(beforeStock, stock(), 0.000001)
+        assertEquals("DRAFT", invoices.listSalesInvoices().single { it.id == draft.invoiceId }.status)
+        assertEquals(0, database.readableDatabase.rawQuery(
+            "SELECT COUNT(*) FROM cash_transactions WHERE source_id=?", arrayOf(draft.invoiceId)
+        ).use { c -> assertTrue(c.moveToFirst()); c.getInt(0) })
+        val sync = SyncProtocolRepository(context)
+        assertEquals(1, sync.pendingOutbox().size)
+        val payload = org.json.JSONObject(sync.pendingOutbox().single().payloadJson)
+        val receipts = payload.getJSONArray("cash_receipts")
+        assertEquals(1, receipts.length())
+        assertEquals("pending-cash-secondary-invoice-post:${draft.invoiceId}",
+            receipts.getJSONObject(0).getString("cash_transaction_id"))
+        assertEquals(500L, receipts.getJSONObject(0).getLong("amount_minor"))
+        assertEquals("USD", receipts.getJSONObject(0).getString("currency_code"))
+        assertTrue(payload.getString("posted_at").isNotBlank())
+
+        assertTrue(invoices.postCashSale(adminId, draft.invoiceId, "ui-sale-attempt-2", cashAccountId))
+        assertEquals(1, sync.pendingOutbox().size)
+        val envelope = sync.authenticatedOutbox(
+            "secondary-invoice-post:${draft.invoiceId}", primaryId
+        )
+        assertTrue(SyncEnvelopeSecurity.verify(envelope, secret))
+        secret.fill(0)
+    }
+
+    @Test
     fun salePostingDeductsStockAndPreventsDuplicatePosting() {
         val draft = invoices.saveSalesDraft(adminId, 
             "sale-draft-op-1", null, null, "2026-10-31",
