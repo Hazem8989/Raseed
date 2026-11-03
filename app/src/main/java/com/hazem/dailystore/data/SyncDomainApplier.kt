@@ -157,7 +157,7 @@ class SyncDomainApplier(context: Context) {
         } else {
             invoices.saveSalesDraft(
                 row.primaryUserId, draftOperationId, invoiceId, partyId,
-                date, discount, notes, lines, "CREDIT"
+                date, discount, notes, lines, saleType
             )
         }
         require(saved.invoiceId == invoiceId) { "لم يتم حفظ الفاتورة بالمعرّف الوارد" }
