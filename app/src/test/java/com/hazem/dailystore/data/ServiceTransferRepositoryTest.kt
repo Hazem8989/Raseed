@@ -150,6 +150,26 @@ class ServiceTransferRepositoryTest {
         )
     }
 
+    @Test fun configuringRechargeAccountOnSecondaryDoesNotRepairOrCreateFinancialAccounts() {
+        val source = accounts.create(actor, "صندوق تعبئة ثانوي " + UUID.randomUUID(), "CASH_BOX", "SYP", 0L)
+        val db = database.writableDatabase
+        db.delete("daily_cash_sessions", null, null)
+        db.delete("system_cash_account_roles", null, null)
+        db.execSQL(
+            "INSERT OR REPLACE INTO sync_protocol_state(state_key,state_value,updated_at) VALUES('local_device_role','SECONDARY','2026-11-04T00:00:00.000Z')"
+        )
+        try {
+            repo.setRechargeAccount(actor, source.id)
+            throw AssertionError("Secondary devices must not configure service recharge accounts")
+        } catch (expected: IllegalArgumentException) {
+            assertTrue(expected.message!!.contains("الجهاز الثانوي"))
+        }
+        val sessions = db.rawQuery("SELECT COUNT(*) FROM daily_cash_sessions", null).use { it.moveToFirst(); it.getInt(0) }
+        val roles = db.rawQuery("SELECT COUNT(*) FROM system_cash_account_roles", null).use { it.moveToFirst(); it.getInt(0) }
+        assertEquals(0, sessions)
+        assertEquals(0, roles)
+    }
+
     @Test fun managerCanReverseTransferWithAuditedOppositeMovements() {
         val drawer = accounts.create(actor, "درج عكس " + UUID.randomUUID(), "CASH_BOX", "SYP", 0L)
         accounts.setCurrentDayPrimaryDrawer("ADMIN", actor, drawer.id)
