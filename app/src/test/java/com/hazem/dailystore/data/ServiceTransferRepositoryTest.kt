@@ -157,10 +157,22 @@ class ServiceTransferRepositoryTest {
         val transfer = repo.executeTransfer(actor, ServiceTransferRepository.SYRIATEL_BALANCE,
             1_000L, 0L, drawer.id, "svc-reverse-" + UUID.randomUUID())
         assertEquals(1_200L, accounts.balance(drawer.id))
-        repo.reverseTransfer(actor, transfer.transferId, "svc-reverse-action-" + UUID.randomUUID(), "إدخال خاطئ")
+        val reversalOperation = "svc-reverse-action-" + UUID.randomUUID()
+        repo.reverseTransfer(actor, transfer.transferId, reversalOperation, "إدخال خاطئ")
         assertEquals(0L, accounts.balance(drawer.id))
         assertEquals(5_000L, repo.listWallets().single { it.serviceKey == ServiceTransferRepository.SYRIATEL_SHARED }.balanceMinor)
         assertEquals("REVERSED", repo.listTransfers().first().status)
+
+        // A retry after a lost acknowledgement must be a no-op, not a second ledger posting.
+        repo.reverseTransfer(actor, transfer.transferId, reversalOperation, "إدخال خاطئ")
+        assertEquals(0L, accounts.balance(drawer.id))
+        assertEquals(5_000L, repo.listWallets().single { it.serviceKey == ServiceTransferRepository.SYRIATEL_SHARED }.balanceMinor)
+        try {
+            repo.reverseTransfer(actor, transfer.transferId, reversalOperation, "سبب مختلف")
+            throw AssertionError("Expected conflicting reversal replay to be rejected")
+        } catch (expected: IllegalArgumentException) {
+            assertTrue(expected.message!!.contains("مختلفة"))
+        }
     }
 
     @Test fun transferIsIdempotentAndInsufficientFloatDoesNotCreateReceipt() {
