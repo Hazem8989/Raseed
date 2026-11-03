@@ -1034,9 +1034,6 @@ class SyncDomainApplier(context: Context) {
                 require(invoiceId.isNotBlank() && returnDate.matches(Regex("\\d{4}-\\d{2}-\\d{2}")) &&
                     occurredAt.matches(Regex("\\d{4}-\\d{2}-\\d{2}T.*")) &&
                     operatingDate.matches(Regex("\\d{4}-\\d{2}-\\d{2}"))) { "تاريخ أو بيانات المرتجع غير صالحة" }
-                require(StoreTime.operatingDate(db,occurredAt)==operatingDate) {
-                    "تاريخ التشغيل لا يطابق لحظة الحركة الأصلية وفق منطقة المتجر"
-                }
                 val itemsJson=payload.getJSONArray("items")
                 require(itemsJson.length()>0) { "المرتجع الوارد بلا أصناف" }
                 val allocationsJson=payload.getJSONArray("refund_allocations")
@@ -1127,8 +1124,7 @@ class SyncDomainApplier(context: Context) {
             val occurredAt=payload.getString("occurred_at")
             val operatingDate=payload.getString("operating_date")
             require(occurredAt.matches(Regex("\\d{4}-\\d{2}-\\d{2}T.*")) &&
-                operatingDate.matches(Regex("\\d{4}-\\d{2}-\\d{2}")) &&
-                StoreTime.operatingDate(db,occurredAt)==operatingDate) { "تاريخ حركة التسوية غير صالح" }
+                operatingDate.matches(Regex("\\d{4}-\\d{2}-\\d{2}"))) { "تاريخ حركة التسوية غير صالح" }
             val delta=BigDecimal(payload.getString("quantity_delta"))
             require(delta.signum()!=0) { "فرق كمية التسوية لا يمكن أن يكون صفراً" }
             val cost=if(payload.isNull("unit_cost_usd_cents")) null else payload.getLong("unit_cost_usd_cents")
