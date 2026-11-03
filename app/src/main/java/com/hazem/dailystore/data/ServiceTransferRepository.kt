@@ -62,11 +62,11 @@ class ServiceTransferRepository(context:Context) {
                  SELECT service_type,COUNT(*) operation_count,COALESCE(SUM(amount_delivered_minor),0) delivered_minor,
                         COALESCE(SUM(customer_charge_minor),0) customer_receipts_minor,COALESCE(SUM(profit_minor),0) profit_minor,
                         COALESCE(SUM(provider_fee_minor),0) provider_fee_minor
-                 FROM service_transfers WHERE substr(created_at,1,10)=? AND status='POSTED' GROUP BY service_type
+                 FROM service_transfers WHERE operating_date=? AND status='POSTED' GROUP BY service_type
                  UNION ALL
                  SELECT CASE service_key WHEN 'SYRIATEL_SHARED' THEN 'SYRIATEL_BALANCE' ELSE 'SHAM_CASH' END,
                         0,0,0,0,0 FROM service_wallet_transactions
-                 WHERE transaction_type='RECHARGE' AND substr(created_at,1,10)=?
+                 WHERE transaction_type='RECHARGE' AND operating_date=?
                  GROUP BY service_key
                ) GROUP BY service_type ORDER BY service_type""".trimIndent(),arrayOf(date,date)
         ).use { c -> while(c.moveToNext()) {
@@ -79,7 +79,7 @@ class ServiceTransferRepository(context:Context) {
             }
             val rechargeFeePaid=rechargeServiceKey?.let { key ->
                 database.readableDatabase.rawQuery(
-                    "SELECT COALESCE(SUM(fee_minor),0) FROM service_wallet_transactions WHERE service_key=? AND transaction_type='RECHARGE' AND substr(created_at,1,10)=?",
+                    "SELECT COALESCE(SUM(fee_minor),0) FROM service_wallet_transactions WHERE service_key=? AND transaction_type='RECHARGE' AND operating_date=?",
                     arrayOf(key,date)
                 ).use { it.moveToFirst();it.getLong(0) }
             } ?: 0L
@@ -199,7 +199,7 @@ class ServiceTransferRepository(context:Context) {
                 put("customer_charge_minor",charge);put("receipt_account_id",receiptAccountId)
                 put("receipt_channel",if(account.first=="WALLET")"ELECTRONIC" else "CASH")
                 put("reference",reference);put("note",note);put("payload_hash",payload);put("created_by",actor)
-                put("created_at",now);put("status","POSTED")
+                put("created_at",now);put("operating_date",today());put("status","POSTED")
             }
             db.insertOrThrow("service_transfers",null,v)
             insertWalletMovement(db,serviceKey,"OUT",deliveredMinor,"TRANSFER_OUT",id,operationId,0L,note?:serviceTypeName(serviceType),actor,now)
@@ -330,7 +330,7 @@ class ServiceTransferRepository(context:Context) {
 
     private fun insertWalletMovement(db:SQLiteDatabase,key:String,direction:String,amount:Long,type:String,sourceId:String?,operationId:String,fee:Long,note:String?,actor:String,now:String,payloadHash:String?=null) {
         val movementId=UUID.randomUUID().toString()
-        val v=ContentValues().apply{put("id",movementId);put("service_key",key);put("direction",direction);put("amount_minor",amount);put("transaction_type",type);put("source_id",sourceId);put("operation_id",operationId);if(payloadHash!=null)put("payload_hash",payloadHash);put("fee_minor",fee);put("note",note);put("created_by",actor);put("created_at",now)}
+        val v=ContentValues().apply{put("id",movementId);put("service_key",key);put("direction",direction);put("amount_minor",amount);put("transaction_type",type);put("source_id",sourceId);put("operation_id",operationId);if(payloadHash!=null)put("payload_hash",payloadHash);put("fee_minor",fee);put("note",note);put("created_by",actor);put("created_at",now);put("operating_date",today())}
         db.insertOrThrow("service_wallet_transactions",null,v)
         val cashType=when(type) {
             "OPENING" -> "SERVICE_FLOAT_OPENING"
