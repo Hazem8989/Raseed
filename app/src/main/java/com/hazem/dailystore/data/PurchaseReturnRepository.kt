@@ -98,7 +98,7 @@ class PurchaseReturnRepository(context: Context) {
         actorUserId: String, invoiceId: String, operationId: String, returnDate: String,
         reason: String, items: List<PurchaseReturnItemInput>,
         refundAllocations: List<SupplierRefundAllocationInput>,
-        occurredAt: String? = null, syncOrigin: Boolean = false
+        occurredAt: String? = null, syncOrigin: Boolean = false, operatingDate: String? = null
     ): PurchaseReturnResult {
         require(actorUserId.isNotBlank() && invoiceId.isNotBlank() && operationId.isNotBlank())
         require(returnDate.matches(Regex("\\d{4}-\\d{2}-\\d{2}"))) { "تاريخ المرتجع غير صالح" }
@@ -189,7 +189,7 @@ class PurchaseReturnRepository(context: Context) {
                 }
             }
             refundAllocations.forEachIndexed { index, allocation ->
-                postRefund(db,actorUserId,returnId,operationId,index,invoice.rate,returnDate,now,allocation)
+                postRefund(db,actorUserId,returnId,operationId,index,invoice.rate,operatingDate ?: returnDate,now,allocation)
             }
             db.insertOrThrow("audit_log",null,ContentValues().apply {
                 put("id",UUID.randomUUID().toString()); put("user_id",actorUserId)
