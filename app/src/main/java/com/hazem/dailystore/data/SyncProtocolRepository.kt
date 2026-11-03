@@ -657,6 +657,99 @@ class SyncProtocolRepository(private val context: Context, private val credentia
         } finally { db.endTransaction() }
     }
 
+    /** Authenticated primary-to-secondary receipt for authoritative exchange-rate snapshots. */
+    fun recordIncomingExchangeRateFromPrimary(encodedEnvelope: String): SyncInboxDisposition {
+        val envelope = verifyIncomingFromPrimary(encodedEnvelope)
+        require(envelope.operationType == "CREATE" && envelope.entityType == "EXCHANGE_RATE") {
+            "نوع تحديث سعر الصرف الوارد غير مدعوم"
+        }
+        val payload = JSONObject(envelope.payloadJson)
+        require(payload.optString("business_operation") == "SET_EXCHANGE_RATE" &&
+            payload.optString("id") == envelope.entityId &&
+            payload.optString("currency_code") == "USD" &&
+            payload.optLong("rate_syp_per_usd_milli") > 0L &&
+            payload.optString("effective_at").matches(Regex("\\d{4}-\\d{2}-\\d{2}T.*"))) {
+            "بيانات سعر الصرف الواردة غير صالحة"
+        }
+        val db = database.writableDatabase
+        db.beginTransaction()
+        try {
+            val existing = db.rawQuery(
+                "SELECT payload_sha256 FROM sync_inbox WHERE operation_id=?",
+                arrayOf(envelope.operationId)
+            ).use { c -> if (c.moveToFirst()) c.getString(0) else null }
+            if (existing != null) {
+                if (existing == envelope.payloadSha256) {
+                    db.setTransactionSuccessful()
+                    return SyncInboxDisposition.DUPLICATE
+                }
+                db.insertOrThrow("sync_conflicts", null, ContentValues().apply {
+                    put("id", UUID.randomUUID().toString())
+                    put("operation_id", envelope.operationId)
+                    put("entity_type", envelope.entityType)
+                    put("entity_id", envelope.entityId)
+                    put("local_payload_json", "{}")
+                    put("remote_payload_json", envelope.payloadJson)
+                    put("created_at", timestamp())
+                })
+                db.setTransactionSuccessful()
+                return SyncInboxDisposition.CONFLICT
+            }
+            val lastSequence = state(db, "primary_exchange_rate_cursor")?.toLongOrNull() ?: 0L
+            require(envelope.sequenceNumber > lastSequence) {
+                "تم رفض سعر صرف أقدم أو معاد التشغيل"
+            }
+            val now = timestamp()
+            db.insertOrThrow("sync_inbox", null, ContentValues().apply {
+                put("operation_id", envelope.operationId)
+                put("origin_device_id", envelope.originDeviceId)
+                put("sequence_number", envelope.sequenceNumber)
+                put("operation_type", envelope.operationType)
+                put("entity_type", envelope.entityType)
+                put("entity_id", envelope.entityId)
+                put("payload_json", envelope.payloadJson)
+                put("payload_sha256", envelope.payloadSha256)
+                put("status", "RECEIVED")
+                put("received_at", now)
+                put("origin_created_at", envelope.createdAt)
+            })
+            putState(db, "primary_exchange_rate_cursor", envelope.sequenceNumber.toString(), now)
+            db.setTransactionSuccessful()
+            return SyncInboxDisposition.RECEIVED
+        } finally { db.endTransaction() }
+    }
+
+    /** Records an APPLIED acknowledgement for a primary-origin exchange-rate event. */
+    fun acknowledgeExchangeRateApplied(deviceId: String, operationId: String) {
+        val db = database.writableDatabase
+        db.beginTransaction()
+        try {
+            require(state(db, "local_device_role") == "PRIMARY" &&
+                state(db, "authority_device_id") == SyncDeviceIdentity.getOrCreate(context)) {
+                "تثبيت إقرار سعر الصرف متاح على الجهاز الأساسي فقط"
+            }
+            val valid = db.rawQuery(
+                """SELECT 1 FROM sync_devices d
+                   JOIN sync_operation_envelopes e ON e.operation_id=?
+                   WHERE d.device_id=? AND d.device_role='SECONDARY' AND d.status='ACTIVE'
+                     AND e.origin_device_id=? AND e.entity_type='EXCHANGE_RATE'""".trimIndent(),
+                arrayOf(operationId, deviceId, SyncDeviceIdentity.getOrCreate(context))
+            ).use { it.moveToFirst() }
+            require(valid) { "إقرار سعر الصرف لا يطابق جهازاً أو عملية مسجلة" }
+            db.insertWithOnConflict("sync_acknowledgements", null, ContentValues().apply {
+                put("operation_id", operationId)
+                put("device_id", deviceId)
+                put("sequence_number", db.rawQuery(
+                    "SELECT sequence_number FROM sync_operation_envelopes WHERE operation_id=?",
+                    arrayOf(operationId)
+                ).use { c -> require(c.moveToFirst()); c.getLong(0) })
+                put("status", "APPLIED")
+                put("acknowledged_at", timestamp())
+            }, SQLiteDatabase.CONFLICT_REPLACE)
+            db.setTransactionSuccessful()
+        } finally { db.endTransaction() }
+    }
+
     /** Durable per-device acknowledgement; delivery is complete only after APPLIED. */
     fun acknowledgeStoreSettingsApplied(deviceId: String, operationId: String) {
         val db = database.writableDatabase
