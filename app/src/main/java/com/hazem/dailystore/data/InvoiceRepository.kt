@@ -309,6 +309,34 @@ class InvoiceRepository(context: Context) {
                 }
             }
             val warehouseId = invoiceWarehouse(db, table, invoiceId)
+            val syncRepository = SyncProtocolRepository(context)
+            if (syncRepository.isConfiguredSecondary()) {
+                // Validate the complete draft before queuing it, but never mutate stock,
+                // FIFO layers, invoice status, cash, or local ledgers on a secondary.
+                db.rawQuery(
+                    "SELECT product_id,quantity FROM $itemTable WHERE $invoiceForeignKey=?",
+                    arrayOf(invoiceId)
+                ).use { cursor ->
+                    require(cursor.count in 1..500) { "عدد أصناف الفاتورة غير صالح" }
+                    while (cursor.moveToNext()) {
+                        val productId = cursor.getString(0)
+                        val quantity = cursor.getDouble(1)
+                        require(quantity > 0.0 && quantity.isFinite()) { "كمية صنف الفاتورة غير صالحة" }
+                        if (type == "SALE" && productTracksInventory(db, productId)) {
+                            val available = stockQuantity(db, productId, warehouseId)
+                            require(quantity <= available + 0.0000001) {
+                                "المخزون المحلي غير كافٍ للمنتج: ${productName(db, productId)} (المتوفر: $available)"
+                            }
+                        }
+                    }
+                }
+                val pendingOperationId = "secondary-invoice-post:$invoiceId"
+                syncRepository.enqueueInvoicePosting(
+                    db, actorUserId, pendingOperationId, type, invoiceId, cashAccountId
+                )
+                db.setTransactionSuccessful()
+                return true
+            }
             db.rawQuery(
                 "SELECT id,product_id,quantity,unit_cost_usd_cents FROM $itemTable WHERE $invoiceForeignKey=?",
                 arrayOf(invoiceId)
