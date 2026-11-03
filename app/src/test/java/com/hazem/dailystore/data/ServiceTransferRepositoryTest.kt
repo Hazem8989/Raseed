@@ -162,7 +162,7 @@ class ServiceTransferRepositoryTest {
             repo.setRechargeAccount(actor, source.id)
             throw AssertionError("Secondary devices must not configure service recharge accounts")
         } catch (expected: IllegalArgumentException) {
-            assertTrue(expected.message!!.contains("الجهاز الثانوي"))
+            assertTrue(expected.message!!.contains("الجهاز الأساسي"))
         }
         val sessions = db.rawQuery("SELECT COUNT(*) FROM daily_cash_sessions", null).use { it.moveToFirst(); it.getInt(0) }
         val roles = db.rawQuery("SELECT COUNT(*) FROM system_cash_account_roles", null).use { it.moveToFirst(); it.getInt(0) }
