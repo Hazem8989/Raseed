@@ -241,6 +241,41 @@ class SalesReturnRepositoryTest {
     }
 
 
+
+    @Test
+    fun secondarySalesReturnQueuesWithoutLocalLedgerMutationAndRetryKeepsOriginalEventTime() {
+        val context=RuntimeEnvironment.getApplication()
+        val draft=invoices.saveSalesDraft(adminId,"secondary-return-sale-draft",null,null,"2026-11-03",0L,null,
+            listOf(InvoiceLineInput(productId,BigDecimal("2"),250L)))
+        assertTrue(invoices.postCashSale(adminId,draft.invoiceId,"secondary-return-sale-post",cashAccountId))
+        val itemId=saleItemId(draft.invoiceId)
+        val stockBefore=stock()
+        val cashBefore=CashAccountRepository(context).balance(cashAccountId)
+        val vault=SyncCredentialVault(context) { javax.crypto.spec.SecretKeySpec(ByteArray(32){23},"AES") }
+        val sync=SyncProtocolRepository(context,vault)
+        val credential=android.util.Base64.encodeToString(ByteArray(32){(it+3).toByte()},
+            android.util.Base64.URL_SAFE or android.util.Base64.NO_WRAP or android.util.Base64.NO_PADDING)
+        sync.configureAsSecondary(adminId,"sales-return-sync-store",UUID.randomUUID().toString(),credential,
+            "جهاز مرتجعات ثانوي","Asia/Damascus")
+        val operationId="secondary-sales-return-"+UUID.randomUUID()
+        val inputs=listOf(SalesReturnItemInput(itemId,BigDecimal.ONE))
+        val allocations=listOf(SalesRefundAllocationInput(cashAccountId,250L))
+        val first=returns.postSalesReturn(adminId,draft.invoiceId,operationId,"2026-11-03",
+            "مرتجع على جهاز ثانوي",inputs,allocations)
+        val queued=sync.pendingOutbox().single()
+        val originalTime=org.json.JSONObject(queued.payloadJson).getString("occurred_at")
+        val replay=returns.postSalesReturn(adminId,draft.invoiceId,operationId,"2026-11-03",
+            "مرتجع على جهاز ثانوي",inputs,allocations)
+        assertEquals("pending-return-$operationId",first.returnId)
+        assertEquals(first.returnId,replay.returnId)
+        assertEquals(queued.payloadJson,sync.pendingOutbox().single().payloadJson)
+        assertEquals(stockBefore,stock(),0.000001)
+        assertEquals(cashBefore,CashAccountRepository(context).balance(cashAccountId))
+        assertEquals(0,database.readableDatabase.rawQuery("SELECT COUNT(*) FROM returns WHERE operation_id=?",
+            arrayOf(operationId)).use { it.moveToFirst();it.getInt(0) })
+        assertEquals(originalTime,org.json.JSONObject(sync.pendingOutbox().single().payloadJson).getString("occurred_at"))
+    }
+
     @Test
     fun primarySalesReturnIsAddedToOutboxAtomically() {
         val context = RuntimeEnvironment.getApplication()
