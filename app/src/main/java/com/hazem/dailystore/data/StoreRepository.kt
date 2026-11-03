@@ -33,7 +33,8 @@ data class StoreProduct(
  * product, or opening cash balance.
  */
 class StoreRepository(context: Context) {
-    private val helper = AppDatabase.getInstance(context)
+    private val appContext = context.applicationContext
+    private val helper = AppDatabase.getInstance(appContext)
 
     fun ensureBaseSetup() {
         val db = helper.writableDatabase
@@ -106,7 +107,7 @@ class StoreRepository(context: Context) {
         require(StoreTime.isValidZoneId(clean)) { "معرّف المنطقة الزمنية غير صالح" }
         val db = helper.writableDatabase
         requireManager(db, actorUserId)
-        val sync = SyncProtocolRepository(context)
+        val sync = SyncProtocolRepository(appContext)
         require(!sync.isConfiguredSecondary()) {
             "تغيير المنطقة الزمنية مسموح من الجهاز الأساسي فقط"
         }
