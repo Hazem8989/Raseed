@@ -233,7 +233,7 @@ class InvoiceRepository(context: Context) {
             require(movementAt.matches(Regex("\\d{4}-\\d{2}-\\d{2}T.*"))) {
                 "وقت الحركة الأصلي غير صالح"
             }
-            val movementOperatingDate = operatingDate ?: movementAt.substring(0, 10)
+            val movementOperatingDate = operatingDate ?: operatingDateForTimestamp(movementAt)
             require(movementOperatingDate.matches(Regex("\\d{4}-\\d{2}-\\d{2}"))) {
                 "تاريخ الحركة التشغيلي غير صالح"
             }
@@ -599,6 +599,23 @@ class InvoiceRepository(context: Context) {
 
     private fun hash(value: String): String = MessageDigest.getInstance("SHA-256")
         .digest(value.toByteArray(Charsets.UTF_8)).joinToString("") { "%02x".format(it) }
+
+    private fun operatingDateForTimestamp(value: String): String {
+        val parsed = runCatching {
+            SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss.SSSX", Locale.US).apply {
+                isLenient = false
+                timeZone = TimeZone.getTimeZone("UTC")
+            }.parse(value)
+        }.getOrNull() ?: runCatching {
+            SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ssX", Locale.US).apply {
+                isLenient = false
+                timeZone = TimeZone.getTimeZone("UTC")
+            }.parse(value)
+        }.getOrNull() ?: throw IllegalArgumentException("وقت الحركة الأصلي غير صالح")
+        return SimpleDateFormat("yyyy-MM-dd", Locale.US).apply {
+            timeZone = java.util.SimpleTimeZone(3 * 60 * 60 * 1000, "UTC+03:00")
+        }.format(parsed)
+    }
 
     private fun timestamp(): String = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss.SSS'Z'", Locale.US)
         .apply { timeZone = TimeZone.getTimeZone("UTC") }.format(Date())
