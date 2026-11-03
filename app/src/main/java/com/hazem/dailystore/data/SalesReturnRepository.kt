@@ -174,10 +174,15 @@ class SalesReturnRepository(context: Context) {
             if (localRole == "SECONDARY") {
                 PermissionPolicy.requireAssigned(db, actorUserId, PermissionPolicy.RETURNS_PROCESS)
                 val preview = previewSalesReturn(originalInvoiceId, items)
-                val eventTime = occurredAt ?: timestamp()
+                val priorPayload = db.rawQuery("SELECT payload_json FROM sync_operation_envelopes WHERE operation_id=?", arrayOf(operationId))
+                    .use { c -> if (c.moveToFirst()) org.json.JSONObject(c.getString(0)) else null }
+                val eventTime = occurredAt ?: priorPayload?.optString("occurred_at")
+                    ?.takeIf { it.matches(Regex("\\d{4}-\\d{2}-\\d{2}T.*")) } ?: timestamp()
+                val movementDate = operatingDate ?: priorPayload?.optString("operating_date")
+                    ?.takeIf { it.matches(Regex("\\d{4}-\\d{2}-\\d{2}")) } ?: StoreTime.operatingDate(db, eventTime)
                 val payload = org.json.JSONObject().put("original_invoice_id", originalInvoiceId)
                     .put("return_date", returnDate).put("reason", reason.trim())
-                    .put("occurred_at", eventTime).put("operating_date", StoreTime.operatingDate(db, eventTime))
+                    .put("occurred_at", eventTime).put("operating_date", movementDate)
                     .put("items", org.json.JSONArray().apply { items.forEach { put(org.json.JSONObject()
                         .put("original_sales_item_id", it.originalSalesItemId)
                         .put("quantity", it.quantity.stripTrailingZeros().toPlainString())) } })
