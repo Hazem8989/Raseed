@@ -106,7 +106,7 @@ class DailyBalanceRepository(context:Context) {
                     .put("amount_minor",amount).put("note",note ?: org.json.JSONObject.NULL)
                     .put("occurred_at",eventAt).put("operating_date",date)
                 SyncProtocolRepository(appContext).enqueueLocalOperation(
-                    db,actor,operationId,"SET_SUPPLIER_ROLLOVER","DAILY_SUPPLIER_ROLLOVER",date,"UPSERT",payload.toString()
+                    db,actor,operationId,"SET_SUPPLIER_ROLLOVER","DAILY_SUPPLIER_ROLLOVER",date,"UPDATE",payload.toString()
                 )
             }
             db.setTransactionSuccessful()
