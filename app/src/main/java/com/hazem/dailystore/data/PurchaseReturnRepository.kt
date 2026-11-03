@@ -134,7 +134,9 @@ class PurchaseReturnRepository(context: Context) {
                         .put("original_purchase_item_id",it.originalPurchaseItemId)
                         .put("quantity",it.quantity.stripTrailingZeros().toPlainString())) } })
                     .put("refund_allocations",org.json.JSONArray().apply { refundAllocations.forEach { put(org.json.JSONObject()
-                        .put("cash_account_id",it.cashAccountId).put("amount_minor",it.amountMinor)) } })
+                        .put("cash_account_id",it.cashAccountId).put("amount_minor",it.amountMinor)
+                        .put("cash_account_type",db.rawQuery("SELECT account_type FROM cash_accounts WHERE id=?",arrayOf(it.cashAccountId)).use { c -> require(c.moveToFirst());c.getString(0) })
+                        .put("cash_account_currency_code",db.rawQuery("SELECT currency_code FROM cash_accounts WHERE id=?",arrayOf(it.cashAccountId)).use { c -> require(c.moveToFirst());c.getString(0) })) } })
                 SyncProtocolRepository(context).enqueueSecondaryCommand(
                     db,actorUserId,operationId,"POST_PURCHASE_RETURN","PURCHASE_RETURN",
                     "pending-return-$operationId",payload.toString())
