@@ -784,7 +784,8 @@ class SyncProtocolRepository(private val context: Context, private val credentia
 
     fun enqueueInvoicePosting(
         db: SQLiteDatabase, actorUserId: String, operationId: String,
-        invoiceType: String, invoiceId: String, cashAccountId: String? = null
+        invoiceType: String, invoiceId: String, cashAccountId: String? = null,
+        occurredAt: String? = null, operatingDate: String? = null
     ): Long? {
         require(invoiceType == "SALE" || invoiceType == "PURCHASE")
         val table = if (invoiceType == "SALE") "sales_invoices" else "purchase_invoices"
@@ -810,6 +811,23 @@ class SyncProtocolRepository(private val context: Context, private val credentia
                 put("posted_at", c.getString(13)); put("posted_operating_date", c.getString(14))
             }
         }
+        val existingSecondaryPayload = if (state(db, "local_device_role") == "SECONDARY") {
+            db.rawQuery(
+                "SELECT payload_json FROM sync_operation_envelopes WHERE operation_id=?",
+                arrayOf(operationId)
+            ).use { c -> if (c.moveToFirst()) JSONObject(c.getString(0)) else null }
+        } else null
+        val eventAt = occurredAt
+            ?: existingSecondaryPayload?.optString("posted_at")?.takeIf { it.isNotBlank() && it != "null" }
+            ?: timestamp()
+        val eventOperatingDate = operatingDate
+            ?: existingSecondaryPayload?.optString("posted_operating_date")?.takeIf {
+                it.matches(Regex("\\d{4}-\\d{2}-\\d{2}"))
+            }
+            ?: StoreTime.operatingDate(db, eventAt)
+        header.put("posted_at", eventAt)
+        header.put("posted_operating_date", eventOperatingDate)
+
         val items = org.json.JSONArray()
         db.rawQuery(
             """SELECT id,product_id,quantity,${if (invoiceType == "SALE") "unit_price_usd_cents,unit_cost_usd_cents" else "unit_cost_usd_cents,unit_cost_usd_cents"},line_total_usd_cents
@@ -846,13 +864,39 @@ class SyncProtocolRepository(private val context: Context, private val credentia
                 if (c.isNull(3)) put("exchange_rate_syp_per_usd_milli", JSONObject.NULL)
                 else put("exchange_rate_syp_per_usd_milli", c.getLong(3))
             }) }
+            if (receipts.length() == 0) {
+                // A secondary has not posted locally, so its receipt exists only as
+                // a validated intent. The primary will create the real cash ledger row.
+                val totalUsdCents = header.getLong("total_usd_cents")
+                val rate = header.getLong("exchange_rate_syp_per_usd_milli")
+                val currency = sourceAccount.second
+                val amountMinor = when (currency) {
+                    "USD" -> totalUsdCents
+                    "SYP" -> CurrencyConverter.usdCentsToSyp(totalUsdCents, rate)
+                    else -> throw IllegalArgumentException("عملة حساب القبض غير مدعومة")
+                }
+                receipts.put(JSONObject().apply {
+                    put("cash_transaction_id", "pending-cash-$operationId")
+                    put("amount_minor", amountMinor)
+                    put("currency_code", currency)
+                    put("exchange_rate_syp_per_usd_milli", rate)
+                })
+            }
             header.put("cash_receipts", receipts)
         }
-        return enqueueLocalOperation(
-            db, actorUserId, operationId, "POST_${invoiceType}_INVOICE",
-            if (invoiceType == "SALE") "SALES_INVOICE" else "PURCHASE_INVOICE",
-            invoiceId, "CREATE", header.toString()
-        )
+        return if (state(db, "local_device_role") == "SECONDARY") {
+            enqueueSecondaryCommand(
+                db, actorUserId, operationId, "POST_${invoiceType}_INVOICE",
+                if (invoiceType == "SALE") "SALES_INVOICE" else "PURCHASE_INVOICE",
+                invoiceId, header.toString()
+            )
+        } else {
+            enqueueLocalOperation(
+                db, actorUserId, operationId, "POST_${invoiceType}_INVOICE",
+                if (invoiceType == "SALE") "SALES_INVOICE" else "PURCHASE_INVOICE",
+                invoiceId, "CREATE", header.toString()
+            )
+        }
     }
 
     fun pendingOutbox(limit: Int = 100): List<SyncOutboxItem> {
