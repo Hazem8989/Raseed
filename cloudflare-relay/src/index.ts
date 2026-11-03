@@ -23,7 +23,7 @@ export default {
     }
     const id = env.SYNC_ROOMS.idFromName(storeId);
     return env.SYNC_ROOMS.get(id).fetch(
-      new Request(\`https://relay.internal/connect/\${deviceId}\`, request)
+      new Request(`https://relay.internal/connect/${deviceId}`, request)
     );
   },
 } satisfies ExportedHandler<Env>;
