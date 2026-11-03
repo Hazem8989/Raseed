@@ -1,6 +1,6 @@
 name = "the-daily-shop-relay"
 main = "src/index.ts"
-compatibility_date = "2026-11-04"
+compatibility_date = "2026-11-03"
 
 [[durable_objects.bindings]]
 name = "SYNC_ROOMS"
