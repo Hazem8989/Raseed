@@ -170,11 +170,15 @@ class InvoiceRepository(context: Context) {
         }
     }
 
-    fun postPurchase(actorUserId: String, invoiceId: String, operationId: String): Boolean =
-        postInvoice("PURCHASE", actorUserId, invoiceId, operationId)
+    fun postPurchase(
+        actorUserId: String, invoiceId: String, operationId: String,
+        occurredAt: String? = null, operatingDate: String? = null
+    ): Boolean = postInvoice("PURCHASE", actorUserId, invoiceId, operationId, null, occurredAt, operatingDate)
 
-    fun postSale(actorUserId: String, invoiceId: String, operationId: String): Boolean =
-        postInvoice("SALE", actorUserId, invoiceId, operationId, null)
+    fun postSale(
+        actorUserId: String, invoiceId: String, operationId: String,
+        occurredAt: String? = null, operatingDate: String? = null
+    ): Boolean = postInvoice("SALE", actorUserId, invoiceId, operationId, null, occurredAt, operatingDate)
 
     /**
      * Completes a CASH sale and its full receipt in the same transaction as stock posting.
@@ -190,7 +194,8 @@ class InvoiceRepository(context: Context) {
     )
 
     private fun postInvoice(
-        type: String, actorUserId: String, invoiceId: String, operationId: String, cashAccountId: String? = null
+        type: String, actorUserId: String, invoiceId: String, operationId: String,
+        cashAccountId: String? = null, occurredAt: String? = null, operatingDate: String? = null
     ): Boolean {
         require(invoiceId.isNotBlank() && operationId.isNotBlank()) { "بيانات اعتماد الفاتورة غير مكتملة" }
         val db = database.writableDatabase
@@ -293,6 +298,14 @@ class InvoiceRepository(context: Context) {
             }
             val warehouseId = invoiceWarehouse(db, table, invoiceId)
             val now = timestamp()
+            val movementAt = occurredAt ?: now
+            require(movementAt.matches(Regex("\\d{4}-\\d{2}-\\d{2}T.*"))) {
+                "وقت الحركة الأصلي غير صالح"
+            }
+            val movementOperatingDate = operatingDate ?: movementAt.substring(0, 10)
+            require(movementOperatingDate.matches(Regex("\\d{4}-\\d{2}-\\d{2}"))) {
+                "تاريخ الحركة التشغيلي غير صالح"
+            }
             db.rawQuery(
                 "SELECT id,product_id,quantity,unit_cost_usd_cents FROM $itemTable WHERE $invoiceForeignKey=?",
                 arrayOf(invoiceId)
@@ -313,14 +326,14 @@ class InvoiceRepository(context: Context) {
                     if (tracks) {
                         if (type == "SALE") {
                             FifoCosting.consumeForSale(
-                                db, invoiceId, itemId, productId, warehouseId, quantity, now
+                                db, invoiceId, itemId, productId, warehouseId, quantity, movementAt
                             )
                         }
                         val delta = if (type == "PURCHASE") quantity else -quantity
                         applyStockMovement(
                             db, productId, warehouseId, delta, unitCost,
                             if (type == "PURCHASE") "PURCHASE" else "SALE",
-                            invoiceId, "$operationId:$itemId", now
+                            invoiceId, "$operationId:$itemId", movementAt
                         )
                     }
                     if (type == "PURCHASE") {
@@ -350,8 +363,8 @@ class InvoiceRepository(context: Context) {
                     put("source_id", invoiceId)
                     put("operation_id", operationId)
                     put("description", "قبض قيمة فاتورة البيع " + invoiceNumber)
-                    put("operating_date", SimpleDateFormat("yyyy-MM-dd", Locale.US).format(Date()))
-                    put("created_at", now)
+                    put("operating_date", movementOperatingDate)
+                    put("created_at", movementAt)
                 }
                 db.insertOrThrow("cash_transactions", null, cash)
                 val payment = ContentValues().apply {
@@ -372,7 +385,7 @@ class InvoiceRepository(context: Context) {
                 val operatingDate = SimpleDateFormat("yyyy-MM-dd", Locale.US).format(Date())
                 db.execSQL(
                     "UPDATE sales_invoices SET status=?,updated_at=?,posted_at=?,posted_operating_date=? WHERE id=? AND status='DRAFT'",
-                    arrayOf(finalStatus, now, now, operatingDate, invoiceId)
+                    arrayOf(finalStatus, now, movementAt, movementOperatingDate, invoiceId)
                 )
             } else {
                 db.execSQL("UPDATE purchase_invoices SET status=?,updated_at=? WHERE id=? AND status='DRAFT'",
