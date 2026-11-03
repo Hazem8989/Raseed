@@ -155,7 +155,11 @@ class OperatingExpenseRepositoryTest {
 
     @Test fun secondaryExpenseQueuesWithoutChangingLocalCashOrExpenseLedger() {
         val context=RuntimeEnvironment.getApplication()
-        val sync=SyncProtocolRepository(context)
+        val vault=SyncCredentialVault(context) {
+            javax.crypto.spec.SecretKeySpec(ByteArray(32) { 31 }, "AES")
+        }
+        repository=OperatingExpenseRepository(context,vault)
+        val sync=SyncProtocolRepository(context,vault)
         val primaryId=UUID.randomUUID().toString()
         val credential=android.util.Base64.encodeToString(
             ByteArray(32) { (it+7).toByte() },
