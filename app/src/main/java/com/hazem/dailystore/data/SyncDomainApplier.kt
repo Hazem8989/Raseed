@@ -1070,7 +1070,7 @@ class SyncDomainApplier(context: Context) {
                     }
                     SalesReturnRepository(appContext).postSalesReturn(
                         row[5],invoiceId,operationId,returnDate,reason,inputs,
-                        mapped.map { SalesRefundAllocationInput(it.first,it.second) },occurredAt,true
+                        mapped.map { SalesRefundAllocationInput(it.first,it.second) },occurredAt,true,operatingDate
                     )
                     resultReference(db,operationId,"POST_SALES_RETURN")
                 } else {
@@ -1080,7 +1080,7 @@ class SyncDomainApplier(context: Context) {
                     }
                     PurchaseReturnRepository(appContext).postPurchaseReturn(
                         row[5],invoiceId,operationId,returnDate,reason,inputs,
-                        mapped.map { SupplierRefundAllocationInput(it.first,it.second) },occurredAt,true
+                        mapped.map { SupplierRefundAllocationInput(it.first,it.second) },occurredAt,true,operatingDate
                     )
                     resultReference(db,operationId,"POST_PURCHASE_RETURN")
                 }.also { require(!it.isNullOrBlank()) { "لم يُنشأ سجل المرتجع على الجهاز الأساسي" } }
