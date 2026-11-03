@@ -297,6 +297,16 @@ class SyncDomainApplierTest {
         return id
     }
 
+    private fun createPrimaryWallet(currency: String): String {
+        val id=UUID.randomUUID().toString()
+        database.writableDatabase.execSQL(
+            """INSERT INTO cash_accounts(id,name,account_type,currency_code,opening_balance_minor,is_active,created_at)
+               VALUES(?,?,?,?,0,1,?)""",
+            arrayOf(id,"محفظة مزامنة $currency","WALLET",currency,"2026-11-03T11:00:00Z")
+        )
+        return id
+    }
+
     private fun receiveInvoice(
         operation: String, invoiceId: String, partyId: String?, saleType: String,
         remoteCashAccountId: String? = null, remoteAccountType: String? = null,
@@ -332,16 +342,95 @@ class SyncDomainApplierTest {
         return receiveRaw(operation, invoiceId, payload)
     }
 
+    @Test fun appliesCustomerCollectionWithOriginalTimeAndNoDuplicateOnReplay() {
+        val customerId = CustomerRepository(context).create(adminId, "زبون مزامنة").id
+        val invoices = InvoiceRepository(context)
+        val draft = invoices.saveSalesDraft(
+            adminId, "sync-credit-draft", null, customerId, "2026-11-03", 0L, null,
+            listOf(InvoiceLineInput(productId, BigDecimal("2"), 150L)), saleType = "CREDIT"
+        )
+        invoices.postSale(adminId, draft.invoiceId, "sync-credit-post")
+        val primaryWallet = createPrimaryWallet("SYP")
+        protocol.mapSecondaryCashAccount(adminId, secondaryId, "remote-syp-wallet", primaryWallet)
+        val paymentId = "remote-customer-payment-1"
+        val payload = JSONObject().put("business_operation","COLLECT_CUSTOMER_PAYMENT")
+            .put("invoice_id",draft.invoiceId).put("payment_id",paymentId)
+            .put("cash_transaction_id","remote-cash-1").put("cash_account_id","remote-syp-wallet")
+            .put("cash_account_type","WALLET").put("cash_account_currency_code","SYP")
+            .put("amount_minor",10_000L).put("currency_code","SYP")
+            .put("collection_rate_milli",10_000_000L).put("effective_rate_milli",10_000_000L)
+            .put("usd_reference_reduction_cents",100L).put("note","تحصيل اختباري")
+            .put("occurred_at","2026-11-03T12:00:00Z").put("operating_date","2026-11-03")
+        val operationId = receiveRaw("COLLECT_CUSTOMER_PAYMENT",paymentId,payload)
+        val applier=SyncDomainApplier(context)
+        assertTrue(applier.applyReceivedCustomerCollection(operationId).applied)
+        assertEquals("PARTIALLY_PAID",invoiceStatus("sales_invoices",draft.invoiceId))
+        assertEquals(1,database.readableDatabase.rawQuery(
+            "SELECT COUNT(*) FROM invoice_payments WHERE invoice_id=?",arrayOf(draft.invoiceId)
+        ).use { it.moveToFirst(); it.getInt(0) })
+        assertEquals(10_000L,database.readableDatabase.rawQuery(
+            "SELECT amount_minor FROM cash_transactions WHERE operation_id=?",arrayOf(operationId)
+        ).use { it.moveToFirst(); it.getLong(0) })
+        assertEquals(primaryWallet,database.readableDatabase.rawQuery(
+            "SELECT account_id FROM cash_transactions WHERE operation_id=?",arrayOf(operationId)
+        ).use { it.moveToFirst(); it.getString(0) })
+        assertEquals("2026-11-03T12:00:00Z",database.readableDatabase.rawQuery(
+            "SELECT created_at FROM invoice_payments WHERE invoice_id=?",arrayOf(draft.invoiceId)
+        ).use { it.moveToFirst(); it.getString(0) })
+        assertEquals("2026-11-03",database.readableDatabase.rawQuery(
+            "SELECT operating_date FROM cash_transactions WHERE operation_id=?",arrayOf(operationId)
+        ).use { it.moveToFirst(); it.getString(0) })
+        database.writableDatabase.execSQL(
+            "UPDATE sync_inbox SET status='RECEIVED',applied_at=NULL WHERE operation_id=?",arrayOf(operationId)
+        )
+        assertTrue(applier.applyReceivedCustomerCollection(operationId).applied)
+        assertEquals(1,database.readableDatabase.rawQuery(
+            "SELECT COUNT(*) FROM invoice_payments WHERE invoice_id=?",arrayOf(draft.invoiceId)
+        ).use { it.moveToFirst(); it.getInt(0) })
+        assertEquals(1,database.readableDatabase.rawQuery(
+            "SELECT COUNT(*) FROM cash_transactions WHERE operation_id=?",arrayOf(operationId)
+        ).use { it.moveToFirst(); it.getInt(0) })
+    }
+
+    @Test fun rejectsCustomerCollectionWithoutActiveCashMapping() {
+        val customerId=CustomerRepository(context).create(adminId,"زبون رفض").id
+        val invoices=InvoiceRepository(context)
+        val draft=invoices.saveSalesDraft(adminId,"reject-credit-draft",null,customerId,
+            "2026-11-03",0L,null,listOf(InvoiceLineInput(productId,BigDecimal.ONE,150L)),saleType="CREDIT")
+        invoices.postSale(adminId,draft.invoiceId,"reject-credit-post")
+        val payload=JSONObject().put("business_operation","COLLECT_CUSTOMER_PAYMENT")
+            .put("invoice_id",draft.invoiceId).put("payment_id","remote-payment-unmapped")
+            .put("cash_transaction_id","remote-cash-unmapped").put("cash_account_id","unmapped-wallet")
+            .put("cash_account_type","WALLET").put("cash_account_currency_code","SYP")
+            .put("amount_minor",1_000L).put("currency_code","SYP")
+            .put("collection_rate_milli",10_000_000L).put("effective_rate_milli",10_000_000L)
+            .put("usd_reference_reduction_cents",10L).put("occurred_at","2026-11-03T12:00:00Z")
+            .put("operating_date","2026-11-03")
+        val operationId=receiveRaw("COLLECT_CUSTOMER_PAYMENT","remote-payment-unmapped",payload)
+        var rejected=false
+        try { SyncDomainApplier(context).applyReceivedCustomerCollection(operationId) }
+        catch(e:IllegalArgumentException) { rejected=e.message?.contains("غير مربوط أو موقوف")==true }
+        assertTrue(rejected)
+        assertEquals("RECEIVED",inboxStatus(operationId))
+        assertEquals(0,database.readableDatabase.rawQuery(
+            "SELECT COUNT(*) FROM invoice_payments WHERE invoice_id=?",arrayOf(draft.invoiceId)
+        ).use { it.moveToFirst(); it.getInt(0) })
+    }
+
     private fun receiveRaw(operation: String, entityId: String, payload: JSONObject): String {
         val db = database.readableDatabase
         val storeId = db.rawQuery(
             "SELECT state_value FROM sync_protocol_state WHERE state_key='store_id'", null
         ).use { c -> assertTrue(c.moveToFirst()); c.getString(0) }
         val operationId = UUID.randomUUID().toString()
+        val entityType = when(operation) {
+            "POST_PURCHASE_INVOICE" -> "PURCHASE_INVOICE"
+            "COLLECT_CUSTOMER_PAYMENT" -> "CUSTOMER_PAYMENT"
+            else -> "SALES_INVOICE"
+        }
         val envelope = SyncEnvelopeSecurity.create(
             storeId, operationId, nextSequence(), secondaryId, "remote-admin",
-            "CREATE", if (operation == "POST_PURCHASE_INVOICE") "PURCHASE_INVOICE" else "SALES_INVOICE",
-            entityId, 0L, payload.toString(), "2026-11-03T12:00:00Z", secondarySecret
+            "CREATE", entityType, entityId, 0L, payload.toString(), "2026-11-03T12:00:00Z", secondarySecret
         )
         assertEquals(SyncInboxDisposition.RECEIVED,
             protocol.recordIncomingFromSecondary(SyncEnvelopeSecurity.encode(envelope)))
