@@ -8,7 +8,7 @@
 
 ## Executive conclusion
 
-The repository contains useful local synchronization primitives, but it does **not** contain a working multi-device synchronization engine. No network transport, background worker, primary listener, inbound operation processor, durable acknowledgement flow, or conflict-resolution workflow is wired. The current app must not be represented as synchronizing two phones.
+The repository contains useful local synchronization primitives and a few secondary-command/domain-apply paths, but it does **not** contain a working multi-device synchronization engine. No network transport, background worker, primary listener, complete inbound dispatch, or durable end-to-end acknowledgement flow is wired. The current app must not be represented as synchronizing two phones.
 
 The earlier database-version references were stale. The current development source declares `AppDatabase.DATABASE_VERSION = 23`. Version 23 adds store-zone operating dates to the service ledgers; it does not add a network transport engine.
 
@@ -25,28 +25,21 @@ The earlier database-version references were stale. The current development sour
 
 ## Blocking findings
 
-### S1 — Secondary devices cannot enqueue business operations
+### S1 — Secondary command coverage is partial; local posting remains unsafe for unsupported operations
 
-`SyncProtocolRepository.enqueueLocalOperation()` returns `null` unless the local installation is the configured primary. This means a configured secondary cannot create a durable outbound operation, despite the approved architecture requiring staff devices to retain pending operations.
+`SyncProtocolRepository.enqueueLocalOperation()` is primary-only, while `enqueueSecondaryCommand()` provides a separate pending-command path. `CustomerPaymentRepository.addPayment()` uses that path for customer collections and does not post the local cash/debt ledger on the secondary.
 
-The existing invoice/payment repositories also post locally before calling the sync hook. They do not convert secondary-originated financial actions into `PENDING_PRIMARY` requests. A secondary can therefore create a locally posted invoice/stock/cash effect that is not authoritative and cannot currently be delivered.
+That support is not generalized. Invoice posting, supplier payments, returns, expenses, cash-account transfers, service transfers, and master-data changes are not all converted into secondary pending commands. Some secondary-originated paths can still reach local posting code or have no supported command contract. Every such path must be audited and either safely queued with a matching primary applier or explicitly blocked before multi-device use.
 
-### S2 — No inbound persistence or replay/idempotency gate
+### S2 — Inbound persistence exists, but complete ACK and dispatch orchestration are missing
 
-`verifyIncomingFromPrimary()` and `verifyIncomingFromSecondary()` decode and authenticate an envelope, then return it. They do not:
-- persist it into `sync_inbox`;
-- compare an existing operation ID's payload hash;
-- detect reused sequence numbers or sequence gaps;
-- reject replayed operations durably;
-- update an applied/received cursor;
-- create a durable acknowledgement;
-- invoke a domain validator or posting transaction.
+`recordIncomingFromSecondary()` now authenticates and persists secondary envelopes, checks operation-ID payload hashes, records conflicts, enforces per-device sequence order, and advances the received cursor. `recordIncomingStoreSettingsFromPrimary()` provides a narrower primary-to-secondary receive path for the store time-zone setting. `SyncDomainApplier` has explicit handlers for invoices, customer collections, and store time-zone changes.
 
-The `sync_inbox`, `sync_acknowledgements`, and `sync_cursors` tables exist, but their existence alone is not an inbox processor.
+Still missing are a network-driven dispatcher that routes every supported entity to the correct applier, durable acknowledgement creation/return for all command types, a complete outbound bootstrap/replication path, and end-to-end replay/ACK handling. Table presence and isolated repository methods are not a complete inbox processor.
 
-### S3 — Secondary outbound signing is not correctly wired
+### S3 — Direction-aware signing primitive exists; transport call-site is absent
 
-The primary stores a peer credential under the secondary device ID. The secondary stores its copy under its own local device ID. `authenticatedOutbox(operationId, recipientDeviceId)` always loads the vault entry using the recipient ID. There is no direction-aware mapping for a secondary signing an operation to its primary, and no secondary enqueue path currently calls it.
+`authenticatedOutbox()` now selects the correct credential by direction: a primary signs to an enrolled secondary using that peer's credential, while a secondary signs only to its configured primary using its own local credential. The generic secondary enqueue method also persists a command. However, no production transport currently calls these methods, so successful envelope creation is not evidence that any bytes are transmitted or received.
 
 ### S4 — No network/runtime transport exists
 
@@ -64,9 +57,9 @@ No corresponding enqueue hook was found in the inspected implementations for cas
 
 The envelope supports `baseRevision`, but `authenticatedOutbox()` currently supplies `0L`. No entity revision store, deterministic conflict detector, owner-review queue, or conflict resolution transaction was found. Financial and inventory events must never use last-write-wins.
 
-### S7 — Authentication/authorization mapping across devices is unresolved
+### S7 — Actor mapping and authorization exist for selected paths, not the full event catalogue
 
-Envelopes carry `actorUserId`, but there is no verified cross-device user identity mapping or primary-side authorization/revalidation workflow for a remote actor. A locally valid user ID on a secondary is not automatically a valid user ID in the primary database.
+`sync_actor_mappings` and `mapSecondaryActor()` bind a secondary actor ID to a primary user. `recordIncomingFromSecondary()` checks the mapping, active user/device state, and the permission required by the operation. Invoice and customer-collection appliers re-check selected permissions. This is useful groundwork, but each future command type must define its required permission, mapping behavior, and primary-side business validation; it is not yet a universal authorization layer.
 
 ### S8 — Delivery state/retry management is absent
 
