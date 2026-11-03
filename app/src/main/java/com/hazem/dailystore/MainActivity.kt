@@ -2704,7 +2704,10 @@ class MainActivity : Activity() {
                     when (operation) {
                         0 -> {
                             val result = repo.setSupplierRollover(actor, selected.id, value, note)
-                            Toast.makeText(this, "تم تحديد النقد المدور. المتاح: " + formatSypAmount(result.availableMinor) + " ل.س", Toast.LENGTH_LONG).show()
+                            Toast.makeText(this, if (result.pending)
+                                "تم حفظ طلب تخصيص النقد المدور محلياً، وينتظر اعتماد الجهاز الأساسي."
+                            else "تم تحديد النقد المدور. المتاح: " + formatSypAmount(result.availableMinor) + " ل.س",
+                                Toast.LENGTH_LONG).show()
                         }
                         1 -> repo.addPersonalWithdrawal(actor, selected.id, value, operationId, note)
                         2 -> repo.setWalletOpening(actor, selected.id, value, note)

@@ -19,7 +19,7 @@ data class DailyAccountSummary(
 data class DailyCashReport(val operatingDate:String,val accounts:List<DailyAccountSummary>,val electronicReceiptsByCurrency:Map<String,Long>,val liquidatableElectronicReceiptsByCurrency:Map<String,Long>,val physicalCashReceiptsByCurrency:Map<String,Long>,val supplierRollover:SupplierRolloverSummary?)
 data class SupplierRolloverSummary(
     val operatingDate:String,val accountId:String,val accountName:String,val allocatedMinor:Long,
-    val supplierPaymentsMinor:Long,val personalWithdrawalsMinor:Long
+    val supplierPaymentsMinor:Long,val personalWithdrawalsMinor:Long,val pending:Boolean=false
 ) { val availableMinor:Long get()=(allocatedMinor-supplierPaymentsMinor-personalWithdrawalsMinor).coerceAtLeast(0L) }
 data class AccountTransferResult(val transferId:String,val replayed:Boolean)
 
@@ -55,7 +55,7 @@ class DailyBalanceRepository(context:Context) {
                 )
                 db.setTransactionSuccessful()
             } finally { db.endTransaction() }
-            return SupplierRolloverSummary(date,accountId,name,amount,0L,0L)
+            return SupplierRolloverSummary(date,accountId,name,amount,0L,0L,true)
         }
         manager(db,actor); db.beginTransaction()
         try {
