@@ -187,9 +187,10 @@ class ServiceTransferRepositoryTest {
         val drawer = accounts.create(actor, "درج تاريخ الخدمة " + UUID.randomUUID(), "CASH_BOX", "SYP", 0L)
         accounts.setCurrentDayPrimaryDrawer("ADMIN", actor, drawer.id)
         repo.setOpeningBalance(actor, ServiceTransferRepository.SYRIATEL_SHARED, 5_000L)
+        val operationId = "svc-store-date-" + UUID.randomUUID()
         val result = repo.executeTransfer(
             actor, ServiceTransferRepository.SYRIATEL_BALANCE, 1_000L, 0L,
-            drawer.id, "svc-store-date-" + UUID.randomUUID()
+            drawer.id, operationId
         )
         val expectedDate = StoreTime.today(database.readableDatabase)
         val transferDate = database.readableDatabase.rawQuery(
@@ -198,7 +199,7 @@ class ServiceTransferRepositoryTest {
         ).use { c -> assertTrue(c.moveToFirst()); c.getString(0) }
         val walletDate = database.readableDatabase.rawQuery(
             "SELECT operating_date FROM service_wallet_transactions WHERE operation_id=?",
-            arrayOf(result.transferId)
+            arrayOf(operationId)
         ).use { c -> assertTrue(c.moveToFirst()); c.getString(0) }
         assertEquals(expectedDate, transferDate)
         assertEquals(expectedDate, walletDate)
