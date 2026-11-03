@@ -897,7 +897,9 @@ class MainActivity : Activity() {
                     dialog.dismiss()
                     Toast.makeText(
                         this,
-                        if (isCredit) "تم اعتماد البيع الآجل على حساب الزبون • فاتورة " + invoiceNumber
+                        if (SyncProtocolRepository(this).isConfiguredSecondary()) {
+                            "تم حفظ طلب البيع محلياً بانتظار المزامنة واعتماد الجهاز الأساسي؛ لم يُعتمد البيع بعد • فاتورة $invoiceNumber"
+                        } else if (isCredit) "تم اعتماد البيع الآجل على حساب الزبون • فاتورة " + invoiceNumber
                         else "تم البيع وقبض كامل القيمة وتحديث الصندوق • فاتورة " + invoiceNumber,
                         Toast.LENGTH_LONG
                     ).show()
@@ -3409,8 +3411,14 @@ class MainActivity : Activity() {
                         lines.map { InvoiceLineInput(it.product.id, it.quantity, it.unitCostUsdCents) }
                     )
                     draftId = saved.invoiceId
-                    invoiceRepository.postPurchase(currentUserId ?: error("جلسة المستخدم غير صالحة"), saved.invoiceId, UUID.randomUUID().toString())
-                    Toast.makeText(this@MainActivity, "تم اعتماد الفاتورة وتحديث المخزون", Toast.LENGTH_LONG).show()
+                    val posted = invoiceRepository.postPurchase(
+                        currentUserId ?: error("جلسة المستخدم غير صالحة"), saved.invoiceId, UUID.randomUUID().toString()
+                    )
+                    require(posted) { "تعذر حفظ طلب اعتماد الفاتورة" }
+                    val message = if (SyncProtocolRepository(this@MainActivity).isConfiguredSecondary()) {
+                        "تم حفظ طلب اعتماد الشراء محلياً بانتظار المزامنة واعتماد الجهاز الأساسي؛ لم يُرحّل المخزون بعد"
+                    } else "تم اعتماد الفاتورة وتحديث المخزون"
+                    Toast.makeText(this@MainActivity, message, Toast.LENGTH_LONG).show()
                     showPurchases()
                 } catch (e: Exception) {
                     Toast.makeText(this@MainActivity, e.message ?: "تعذر اعتماد الفاتورة", Toast.LENGTH_LONG).show()
