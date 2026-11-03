@@ -400,7 +400,7 @@ class SyncDomainApplier(context: Context) {
             val operatingDate = payload.getString("operating_date")
             val occurredAt = payload.optString("occurred_at").ifBlank { command[7] }
             require(expenseDate.matches(Regex("\\d{4}-\\d{2}-\\d{2}")) &&
-                operatingDate==expenseDate &&
+                operatingDate.matches(Regex("\\d{4}-\\d{2}-\\d{2}")) &&
                 occurredAt.matches(Regex("\\d{4}-\\d{2}-\\d{2}T.*"))) {
                 "تاريخ أو وقت المصروف الأصلي غير صالح"
             }
