@@ -352,7 +352,16 @@ class DailyBalanceRepository(context:Context) {
         val v=ContentValues().apply{put("id",UUID.randomUUID().toString());put("user_id",user);put("action",action);put("entity_type",kind);put("entity_id",id);if(before==null)putNull("before_json")else put("before_json",before);put("after_json",after);put("created_at",now)}
         db.insertOrThrow("audit_log",null,v)
     }
-    private fun manager(db:SQLiteDatabase,id:String){PermissionPolicy.require(db,id,PermissionPolicy.DAILY_CASH_MANAGE)}
+    private fun manager(db:SQLiteDatabase,id:String){
+        PermissionPolicy.require(db,id,PermissionPolicy.DAILY_CASH_MANAGE)
+        val role=db.rawQuery(
+            "SELECT state_value FROM sync_protocol_state WHERE state_key='local_device_role'",null
+        ).use { if(it.moveToFirst()) it.getString(0) else null }
+        require(role!="SECONDARY") {
+            "هذه الحركة المالية لم يكتمل مسار اعتمادها ومزامنتها بعد؛ نفّذها من الجهاز الأساسي لتجنب اختلاف الأرصدة"
+        }
+        require(role==null || role=="PRIMARY") { "دور الجهاز غير صالح لتنفيذ الحركة المالية" }
+    }
     private fun typeName(t:String)=when(t){"SALE_RECEIPT"->"قبض مبيعات";"CUSTOMER_CREDIT_COLLECTION"->"تحصيل ديون";"PURCHASE_PAYMENT"->"دفعة مورد";"PERSONAL_WITHDRAWAL"->"مسحوبات شخصية";"ACCOUNT_TRANSFER_IN","ACCOUNT_TRANSFER_OUT"->"تحويل داخلي – تصريف محفظة";"WALLET_TOP_UP"->"تغذية محفظة";"SERVICE_TRANSFER_RECEIPT"->"مقبوض تحويل رصيد";"SERVICE_RECHARGE"->"شراء رصيد خدمة";"OPERATING_EXPENSE"->"مصروف تشغيلي";"SALE_RETURN_REFUND"->"رد مبلغ مرتجع للعميل";"PURCHASE_RETURN_REFUND"->"مبلغ مسترد من المورد";else->t}
     private fun esc(s:String)=s.replace("\\","\\\\").replace("\"","\\\"").replace("\n","\\n").replace("\r","\\r")
     private fun hash(s:String)=MessageDigest.getInstance("SHA-256").digest(s.toByteArray(Charsets.UTF_8)).joinToString(""){"%02x".format(it)}
