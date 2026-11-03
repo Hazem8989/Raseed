@@ -60,6 +60,10 @@ class AppDatabase private constructor(context: Context) :
                 """INSERT INTO app_settings(setting_key, setting_value, updated_at)
                    VALUES('store_currency', 'SYP', strftime('%Y-%m-%dT%H:%M:%fZ','now'))"""
             )
+            db.execSQL(
+                """INSERT INTO app_settings(setting_key, setting_value, updated_at)
+                   VALUES('store_time_zone', 'Asia/Damascus', strftime('%Y-%m-%dT%H:%M:%fZ','now'))"""
+            )
             db.setTransactionSuccessful()
         } finally {
             db.endTransaction()
@@ -451,6 +455,34 @@ class AppDatabase private constructor(context: Context) :
                 ensureSyncCashAccountMappingSchema(db)
                 db.setTransactionSuccessful()
                 version = 21
+            } finally { db.endTransaction() }
+        }
+        if (version < 22) {
+            db.beginTransaction()
+            try {
+                db.execSQL(
+                    """INSERT OR IGNORE INTO app_settings(setting_key, setting_value, updated_at)
+                       VALUES('store_time_zone', 'Asia/Damascus', strftime('%Y-%m-%dT%H:%M:%fZ','now'))"""
+                )
+                val missingCashDates = mutableListOf<Pair<String, String>>()
+                db.rawQuery(
+                    "SELECT id,created_at FROM cash_transactions WHERE operating_date IS NULL OR TRIM(operating_date)=''",
+                    null
+                ).use { c ->
+                    while (c.moveToNext()) missingCashDates.add(c.getString(0) to c.getString(1))
+                }
+                missingCashDates.forEach { (id, createdAt) ->
+                    db.update(
+                        "cash_transactions",
+                        android.content.ContentValues().apply {
+                            put("operating_date", StoreTime.operatingDate(db, createdAt))
+                        },
+                        "id=?",
+                        arrayOf(id)
+                    )
+                }
+                db.setTransactionSuccessful()
+                version = 22
             } finally { db.endTransaction() }
         }
         if (version != newVersion) {
@@ -877,7 +909,7 @@ class AppDatabase private constructor(context: Context) :
 
     companion object {
         const val DATABASE_NAME = "the_daily_shop.db"
-        const val DATABASE_VERSION = 21
+        const val DATABASE_VERSION = 22
 
         @Volatile
         private var INSTANCE: AppDatabase? = null
