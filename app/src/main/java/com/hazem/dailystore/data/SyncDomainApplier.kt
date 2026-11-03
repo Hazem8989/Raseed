@@ -42,6 +42,7 @@ class SyncDomainApplier(context: Context) {
         }
         return when (JSONObject(payloadJson).optString("business_operation")) {
             "UPDATE_STORE_TIME_ZONE" -> applyReceivedStoreTimeZone(operationId)
+            "SET_EXCHANGE_RATE" -> applyReceivedExchangeRate(operationId)
             "POST_PURCHASE_INVOICE", "POST_SALES_INVOICE" -> applyReceivedInvoice(operationId)
             "POST_OPERATING_EXPENSE" -> applyReceivedOperatingExpense(operationId)
             "POST_SUPPLIER_PAYMENT" -> applyReceivedSupplierPayment(operationId)
@@ -115,6 +116,93 @@ class SyncDomainApplier(context: Context) {
                 putNull("rejection_reason")
             }, "operation_id=? AND status='RECEIVED'", arrayOf(operationId)).also {
                 require(it == 1) { "تعذر تثبيت تطبيق إعداد المنطقة الزمنية" }
+            }
+            db.setTransactionSuccessful()
+            ApplyResult(operationId, true)
+        } finally { db.endTransaction() }
+    }
+
+    /** Applies an authoritative exchange-rate snapshot from the primary on a secondary. */
+    fun applyReceivedExchangeRate(operationId: String): ApplyResult = synchronized(APPLY_LOCK) {
+        require(operationId.isNotBlank()) { "معرّف الأمر مطلوب" }
+        val db = database.writableDatabase
+        val localId = SyncDeviceIdentity.getOrCreate(appContext)
+        val role = db.rawQuery(
+            "SELECT state_value FROM sync_protocol_state WHERE state_key='local_device_role'", null
+        ).use { c -> if (c.moveToFirst()) c.getString(0) else null }
+        val authority = db.rawQuery(
+            "SELECT state_value FROM sync_protocol_state WHERE state_key='authority_device_id'", null
+        ).use { c -> if (c.moveToFirst()) c.getString(0) else null }
+        require(role == "SECONDARY" && !authority.isNullOrBlank() && authority != localId) {
+            "تطبيق سعر الصرف الوارد مسموح على جهاز ثانوي مرتبط فقط"
+        }
+        db.beginTransaction()
+        try {
+            val row = db.rawQuery(
+                """SELECT origin_device_id,operation_type,entity_type,entity_id,payload_json,status,
+                          sequence_number,origin_created_at
+                   FROM sync_inbox WHERE operation_id=?""".trimIndent(),
+                arrayOf(operationId)
+            ).use { c ->
+                require(c.moveToFirst()) { "سعر الصرف غير موجود في صندوق الوارد" }
+                Array(8) { i -> c.getString(i) }
+            }
+            require(row[0] == authority && row[1] == "CREATE" && row[2] == "EXCHANGE_RATE") {
+                "مصدر أو نوع سعر الصرف الوارد غير صالح"
+            }
+            if (row[5] == "APPLIED") {
+                db.setTransactionSuccessful()
+                return@synchronized ApplyResult(operationId, true)
+            }
+            require(row[5] == "RECEIVED") { "حالة سعر الصرف لا تسمح بالتطبيق" }
+            val currentSequence = row[6].toLong()
+            val earlierPending = db.rawQuery(
+                """SELECT COUNT(*) FROM sync_inbox
+                   WHERE entity_type='EXCHANGE_RATE' AND status='RECEIVED' AND sequence_number<?""".trimIndent(),
+                arrayOf(currentSequence.toString())
+            ).use { c -> c.moveToFirst(); c.getInt(0) }
+            require(earlierPending == 0) { "يجب تطبيق أسعار الصرف حسب ترتيب صدورها من الجهاز الأساسي" }
+
+            val payload = JSONObject(row[4])
+            require(payload.optString("business_operation") == "SET_EXCHANGE_RATE" &&
+                payload.optString("id") == row[3] && payload.optString("currency_code") == "USD") {
+                "بيانات سعر الصرف الواردة لا تطابق الكيان"
+            }
+            val rate = payload.optLong("rate_syp_per_usd_milli", 0L)
+            val effectiveAt = payload.optString("effective_at")
+            val createdAt = payload.optString("created_at").takeIf { it.matches(Regex("\\d{4}-\\d{2}-\\d{2}T.*")) }
+                ?: row[7]
+            require(rate > 0L && effectiveAt.matches(Regex("\\d{4}-\\d{2}-\\d{2}T.*")) &&
+                createdAt.matches(Regex("\\d{4}-\\d{2}-\\d{2}T.*"))) {
+                "قيمة أو تاريخ سعر الصرف الوارد غير صالح"
+            }
+            val existing = db.rawQuery(
+                "SELECT currency_code,rate_syp_per_usd_milli,effective_at,created_at FROM exchange_rates WHERE id=?",
+                arrayOf(row[3])
+            ).use { c ->
+                if (!c.moveToFirst()) null else arrayOf(c.getString(0), c.getLong(1).toString(), c.getString(2), c.getString(3))
+            }
+            if (existing == null) {
+                db.insertOrThrow("exchange_rates", null, ContentValues().apply {
+                    put("id", row[3])
+                    put("currency_code", "USD")
+                    put("rate_syp_per_usd_milli", rate)
+                    put("effective_at", effectiveAt)
+                    putNull("created_by")
+                    put("created_at", createdAt)
+                })
+            } else {
+                require(existing[0] == "USD" && existing[1] == rate.toString() &&
+                    existing[2] == effectiveAt && existing[3] == createdAt) {
+                    "معرّف سعر الصرف موجود مسبقاً ببيانات مختلفة"
+                }
+            }
+            db.update("sync_inbox", ContentValues().apply {
+                put("status", "APPLIED")
+                put("applied_at", timestamp())
+                putNull("rejection_reason")
+            }, "operation_id=? AND status='RECEIVED'", arrayOf(operationId)).also {
+                require(it == 1) { "تعذر تثبيت تطبيق سعر الصرف" }
             }
             db.setTransactionSuccessful()
             ApplyResult(operationId, true)
