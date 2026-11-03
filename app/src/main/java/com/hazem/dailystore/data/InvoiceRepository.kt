@@ -600,22 +600,8 @@ class InvoiceRepository(context: Context) {
     private fun hash(value: String): String = MessageDigest.getInstance("SHA-256")
         .digest(value.toByteArray(Charsets.UTF_8)).joinToString("") { "%02x".format(it) }
 
-    private fun operatingDateForTimestamp(value: String): String = StoreTime.operatingDate(database.readableDatabase, value)\n\n    /* Legacy parser replaced by StoreTime; retained below only if referenced by migration tooling. */\n    private fun legacyOperatingDateForTimestamp(value: String): String {
-        val parsed = runCatching {
-            SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss.SSSX", Locale.US).apply {
-                isLenient = false
-                timeZone = TimeZone.getTimeZone("UTC")
-            }.parse(value)
-        }.getOrNull() ?: runCatching {
-            SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ssX", Locale.US).apply {
-                isLenient = false
-                timeZone = TimeZone.getTimeZone("UTC")
-            }.parse(value)
-        }.getOrNull() ?: throw IllegalArgumentException("وقت الحركة الأصلي غير صالح")
-        return SimpleDateFormat("yyyy-MM-dd", Locale.US).apply {
-            timeZone = java.util.SimpleTimeZone(3 * 60 * 60 * 1000, "UTC+03:00")
-        }.format(parsed)
-    }
+    private fun operatingDateForTimestamp(value: String): String =
+        StoreTime.operatingDate(database.readableDatabase, value)
 
     private fun timestamp(): String = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss.SSS'Z'", Locale.US)
         .apply { timeZone = TimeZone.getTimeZone("UTC") }.format(Date())
