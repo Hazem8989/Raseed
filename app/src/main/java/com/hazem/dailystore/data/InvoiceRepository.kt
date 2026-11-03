@@ -184,9 +184,12 @@ class InvoiceRepository(context: Context) {
      * Completes a CASH sale and its full receipt in the same transaction as stock posting.
      * A cash sale cannot be posted without choosing the account that receives the money.
      */
-    fun postCashSale(actorUserId: String, invoiceId: String, operationId: String, cashAccountId: String): Boolean {
+    fun postCashSale(
+        actorUserId: String, invoiceId: String, operationId: String, cashAccountId: String,
+        occurredAt: String? = null, operatingDate: String? = null
+    ): Boolean {
         require(cashAccountId.isNotBlank()) { "يجب اختيار الصندوق أو المحفظة المستلمة" }
-        return postInvoice("SALE", actorUserId, invoiceId, operationId, cashAccountId)
+        return postInvoice("SALE", actorUserId, invoiceId, operationId, cashAccountId, occurredAt, operatingDate)
     }
 
     private data class CashSaleReceipt(
@@ -376,13 +379,12 @@ class InvoiceRepository(context: Context) {
                     put("currency_code", receipt.currencyCode)
                     if (receipt.rateMilli > 0L) put("exchange_rate_syp_per_usd_milli", receipt.rateMilli)
                     else putNull("exchange_rate_syp_per_usd_milli")
-                    put("created_at", now)
+                    put("created_at", movementAt)
                 }
                 db.insertOrThrow("invoice_payments", null, payment)
             }
             val finalStatus = if (type == "SALE" && cashReceipt != null) "PAID" else "POSTED"
             if (type == "SALE") {
-                val operatingDate = SimpleDateFormat("yyyy-MM-dd", Locale.US).format(Date())
                 db.execSQL(
                     "UPDATE sales_invoices SET status=?,updated_at=?,posted_at=?,posted_operating_date=? WHERE id=? AND status='DRAFT'",
                     arrayOf(finalStatus, now, movementAt, movementOperatingDate, invoiceId)
