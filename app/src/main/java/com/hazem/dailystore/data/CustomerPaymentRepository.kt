@@ -164,7 +164,15 @@ class CustomerPaymentRepository(context: Context) {
         val payloadHash = hash(invoiceId + "|" + cashAccountId + "|" + amountSypMinor + "|" + cleanNote.orEmpty())
         db.beginTransaction()
         try {
-            PermissionPolicy.require(db, actorUserId, PermissionPolicy.CUSTOMERS_COLLECT)
+            val localRole = db.rawQuery(
+                "SELECT state_value FROM sync_protocol_state WHERE state_key='local_device_role'", null
+            ).use { c -> if (c.moveToFirst()) c.getString(0) else null }
+            if (localRole == "SECONDARY") {
+                // A secondary may authorize and queue a collection, but never post its ledger locally.
+                PermissionPolicy.requireAssigned(db, actorUserId, PermissionPolicy.CUSTOMERS_COLLECT)
+            } else {
+                PermissionPolicy.require(db, actorUserId, PermissionPolicy.CUSTOMERS_COLLECT)
+            }
             val invoice = db.rawQuery(
                 """SELECT status,sale_type,total_usd_cents,customer_id,invoice_number,
                           exchange_rate_syp_per_usd_milli
@@ -225,9 +233,6 @@ class CustomerPaymentRepository(context: Context) {
                 else -> throw IllegalArgumentException("يجب اختيار الدرج اليومي الرئيسي أو محفظة إلكترونية نشطة")
             }
 
-            val localRole = db.rawQuery(
-                "SELECT state_value FROM sync_protocol_state WHERE state_key='local_device_role'", null
-            ).use { c -> if (c.moveToFirst()) c.getString(0) else null }
             if (localRole == "SECONDARY") {
                 val state = invoicePaymentState(db, invoiceId, invoice.totalUsdCents, invoice.originalRateMilli)
                 require(state.outstandingUsdCents > 0L) { "الفاتورة مسددة بالكامل" }
