@@ -188,6 +188,37 @@ class SyncProtocolRepositoryTest {
         assertTrue(repository.pendingStoreSettingsForDevice(secondaryId).isEmpty())
     }
 
+    @Test fun newlyEnrolledSecondaryReceivesCurrentStoreTimeZoneInBootstrapData() {
+        repository.configureAsPrimary(adminId, "الرئيسي")
+        StoreRepository(RuntimeEnvironment.getApplication())
+            .saveStoreTimeZoneId("Asia/Dubai", adminId)
+        val invitation = repository.createPairingInvitation(adminId)
+        val enrollment = repository.enrollSecondaryDevice(
+            adminId, invitation.token, UUID.randomUUID().toString(), "جهاز جديد"
+        )
+        assertEquals("Asia/Dubai", enrollment.storeTimeZoneId)
+    }
+
+    @Test fun secondaryCannotChangeAuthoritativeStoreTimeZoneLocally() {
+        val primaryId = UUID.randomUUID().toString()
+        val secret = ByteArray(32) { (it + 51).toByte() }
+        val credential = android.util.Base64.encodeToString(
+            secret,
+            android.util.Base64.URL_SAFE or android.util.Base64.NO_WRAP or android.util.Base64.NO_PADDING
+        )
+        repository.configureAsSecondary(adminId, "store-time-zone-02", primaryId, credential, "الثانوي")
+        var rejected = false
+        try {
+            StoreRepository(RuntimeEnvironment.getApplication())
+                .saveStoreTimeZoneId("America/Los_Angeles", adminId)
+        } catch (_: IllegalArgumentException) {
+            rejected = true
+        }
+        assertTrue(rejected)
+        assertEquals(StoreTime.DEFAULT_ZONE_ID, StoreTime.zoneId(database.readableDatabase))
+        secret.fill(0)
+    }
+
     @Test fun secondaryReceivesAndAppliesPrimaryTimeZoneUpdateIdempotently() {
         val primaryId = UUID.randomUUID().toString()
         val secret = ByteArray(32) { (it + 41).toByte() }
