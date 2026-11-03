@@ -318,7 +318,7 @@ class ServiceTransferRepository(context:Context) {
                     put("source_type","SERVICE_WALLET_LEDGER");put("source_id",movementId)
                     put("operation_id","SERVICE_FLOAT_LEDGER:"+movementId)
                     put("description","ترحيل حركة رصيد خدمة قديمة • "+(c.getString(4)?:legacyType))
-                    putNull("created_by");put("created_at",createdAt);put("operating_date",createdAt.take(10))
+                    putNull("created_by");put("created_at",createdAt);put("operating_date",StoreTime.operatingDate(db,createdAt))
                 }
                 db.insertOrThrow("cash_transactions",null,v)
             }
@@ -364,6 +364,6 @@ class ServiceTransferRepository(context:Context) {
     private fun percent(amount:Long,rate:Long):Long=Math.addExact(Math.multiplyExact(amount,rate),50L)/100L
     private fun hash(value:String)=MessageDigest.getInstance("SHA-256").digest(value.toByteArray(Charsets.UTF_8)).joinToString(""){"%02x".format(it)}
     private fun esc(value:String)=value.replace("\\","\\\\").replace("\"","\\\"").replace("\n","\\n").replace("\r","\\r")
-    private fun today()=SimpleDateFormat("yyyy-MM-dd",Locale.US).apply{timeZone=java.util.SimpleTimeZone(3*60*60*1000,"UTC+03:00")}.format(Date())
+    private fun today()=StoreTime.today(database.readableDatabase)
     private fun stamp()=SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss.SSS'Z'",Locale.US).apply{timeZone=TimeZone.getTimeZone("UTC")}.format(Date())
 }
