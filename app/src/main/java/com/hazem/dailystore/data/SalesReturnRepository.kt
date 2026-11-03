@@ -136,7 +136,8 @@ class SalesReturnRepository(context: Context) {
     fun postSalesReturn(
         actorUserId: String, originalInvoiceId: String, operationId: String,
         returnDate: String, reason: String, items: List<SalesReturnItemInput>,
-        refundAllocations: List<SalesRefundAllocationInput>
+        refundAllocations: List<SalesRefundAllocationInput>,
+        occurredAt: String? = null, syncOrigin: Boolean = false
     ): SalesReturnResult {
         require(originalInvoiceId.isNotBlank() && operationId.isNotBlank()) { "بيانات المرتجع غير مكتملة" }
         require(returnDate.matches(Regex("\\d{4}-\\d{2}-\\d{2}"))) { "تاريخ المرتجع غير صالح" }
@@ -168,6 +169,28 @@ class SalesReturnRepository(context: Context) {
         val db = database.writableDatabase
         db.beginTransaction()
         try {
+            val localRole = db.rawQuery("SELECT state_value FROM sync_protocol_state WHERE state_key='local_device_role'", null)
+                .use { c -> if (c.moveToFirst()) c.getString(0) else null }
+            if (localRole == "SECONDARY") {
+                PermissionPolicy.requireAssigned(db, actorUserId, PermissionPolicy.RETURNS_PROCESS)
+                val preview = previewSalesReturn(originalInvoiceId, items)
+                val eventTime = occurredAt ?: timestamp()
+                val payload = org.json.JSONObject().put("original_invoice_id", originalInvoiceId)
+                    .put("return_date", returnDate).put("reason", reason.trim())
+                    .put("occurred_at", eventTime).put("operating_date", StoreTime.operatingDate(db, eventTime))
+                    .put("items", org.json.JSONArray().apply { items.forEach { put(org.json.JSONObject()
+                        .put("original_sales_item_id", it.originalSalesItemId)
+                        .put("quantity", it.quantity.stripTrailingZeros().toPlainString())) } })
+                    .put("refund_allocations", org.json.JSONArray().apply { refundAllocations.forEach { put(org.json.JSONObject()
+                        .put("cash_account_id", it.cashAccountId).put("amount_minor", it.amountMinor)) } })
+                SyncProtocolRepository(context).enqueueSecondaryCommand(
+                    db, actorUserId, operationId, "POST_SALES_RETURN", "SALES_RETURN",
+                    "pending-return-$operationId", payload.toString()
+                )
+                db.setTransactionSuccessful()
+                return SalesReturnResult("pending-return-$operationId", "معلق", preview.totalUsdCents,
+                    preview.creditReductionUsdCents, preview.cashRefundUsdCents, null, false)
+            }
             PermissionPolicy.require(db, actorUserId, PermissionPolicy.RETURNS_PROCESS)
             val existing = db.rawQuery(
                 "SELECT operation_type,payload_hash,result_reference FROM operation_registry WHERE operation_id=?",
@@ -215,7 +238,7 @@ class SalesReturnRepository(context: Context) {
             validateRefundAllocations(db, invoice, cashRefund, refundAllocations)
 
             val returnId = UUID.randomUUID().toString()
-            val now = timestamp()
+            val now = occurredAt ?: timestamp()
             val number = nextReturnNumber(db, returnDate)
             val allCogsKnown = itemPlans.all { it.returnedCogsUsdCents != null }
             val totalCogs = if (allCogsKnown) itemPlans.fold(0L) { sum, plan ->
@@ -297,15 +320,17 @@ class SalesReturnRepository(context: Context) {
                 put("payload_hash", payloadHash); put("status", "COMPLETED")
                 put("result_reference", returnId); put("created_at", now); put("completed_at", now)
             })
-            SyncProtocolRepository(context).enqueueLocalOperation(
-                db, actorUserId, operationId, "POST_SALES_RETURN", "SALES_RETURN", returnId, "CREATE",
-                org.json.JSONObject().put("original_invoice_id", originalInvoiceId)
-                    .put("return_id", returnId).put("return_number", number).put("return_date", returnDate)
-                    .put("reason", reason.trim()).put("total_usd_cents", totalReturn)
-                    .put("credit_reduction_usd_cents", creditReduction)
-                    .put("cash_refund_usd_cents", cashRefund)
-                    .put("returned_cogs_usd_cents", totalCogs).toString()
-            )
+            if (!syncOrigin) {
+                SyncProtocolRepository(context).enqueueLocalOperation(
+                    db, actorUserId, operationId, "POST_SALES_RETURN", "SALES_RETURN", returnId, "CREATE",
+                    org.json.JSONObject().put("original_invoice_id", originalInvoiceId)
+                        .put("return_id", returnId).put("return_number", number).put("return_date", returnDate)
+                        .put("reason", reason.trim()).put("total_usd_cents", totalReturn)
+                        .put("credit_reduction_usd_cents", creditReduction)
+                        .put("cash_refund_usd_cents", cashRefund)
+                        .put("returned_cogs_usd_cents", totalCogs).toString()
+                )
+            }
             db.setTransactionSuccessful()
             return SalesReturnResult(returnId, number, totalReturn, creditReduction, cashRefund, totalCogs, false)
         } finally { db.endTransaction() }
