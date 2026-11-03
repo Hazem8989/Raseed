@@ -471,7 +471,7 @@ class SyncDomainApplier(context: Context) {
             }.getOrNull()
         } ?: throw IllegalArgumentException("وقت الحركة الوارد غير صالح")
         return java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.US).apply {
-            timeZone = java.util.TimeZone.getTimeZone("Asia/Damascus")
+            timeZone = java.util.SimpleTimeZone(3 * 60 * 60 * 1000, "UTC+03:00")
         }.format(instant)
     }
 
