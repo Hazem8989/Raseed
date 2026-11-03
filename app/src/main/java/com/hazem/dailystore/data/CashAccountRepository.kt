@@ -240,7 +240,7 @@ class CashAccountRepository(context: Context) {
     }
 
     private fun operatingDate(): String =
-        SimpleDateFormat("yyyy-MM-dd", Locale.US).apply { timeZone = java.util.SimpleTimeZone(3 * 60 * 60 * 1000, "UTC+03:00") }.format(Date())
+        StoreTime.today(database.readableDatabase)
 
     private fun jsonEscape(value: String): String =
         value.replace("\\", "\\\\").replace("\"", "\\\"").replace("\n", "\\n")
