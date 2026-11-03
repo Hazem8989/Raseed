@@ -23,6 +23,7 @@ import android.widget.Button
 import android.widget.RadioButton
 import android.widget.RadioGroup
 import android.widget.ArrayAdapter
+import android.widget.AutoCompleteTextView
 import android.widget.CheckBox
 import android.widget.Spinner
 import android.widget.EditText
@@ -40,6 +41,7 @@ import com.hazem.dailystore.data.AuthRepository
 import com.hazem.dailystore.data.SecureSessionStore
 import com.hazem.dailystore.data.CurrencyConverter
 import com.hazem.dailystore.data.StoreRepository
+import com.hazem.dailystore.data.StoreTime
 import com.hazem.dailystore.data.InvoiceRepository
 import com.hazem.dailystore.data.InvoiceLineInput
 import com.hazem.dailystore.data.SupplierRepository
@@ -871,7 +873,7 @@ class MainActivity : Activity() {
                         "سجّل سعر الصرف قبل قبض البيع بالليرة السورية"
                     }
                     val saleType = if (isCredit) "CREDIT" else "CASH"
-                    val date = SimpleDateFormat("yyyy-MM-dd", Locale.US).format(Date())
+                    val date = StoreTime.today(AppDatabase.getInstance(this).readableDatabase)
                     val lines = cart.values.map { line ->
                         InvoiceLineInput(line.product.id, BigDecimal.valueOf(line.quantity), line.product.priceUsdCents)
                     }
@@ -1186,6 +1188,7 @@ class MainActivity : Activity() {
             "تحويل رصيد" to "سيرياتيل العادي وكاش وشام كاش",
             "التقارير" to "المبيعات والأرباح والمخزون",
             "النسخ الاحتياطي والاستعادة" to "حفظ بيانات المتجر واستعادتها بأمان",
+            "إعدادات المتجر" to "اختيار المنطقة الزمنية التي تعتمدها جميع أجهزة المتجر",
             "المستخدمون والصلاحيات" to "إضافة الموظفين والتحكم بصلاحياتهم"
         )
         lateinit var popup: PopupWindow
@@ -1194,7 +1197,7 @@ class MainActivity : Activity() {
                 "تسويات المخزون" -> hasPermission(PermissionPolicy.INVENTORY_ADJUST)
                 "مرتجعات المبيعات", "مرتجعات المشتريات" -> isManager() && hasPermission(PermissionPolicy.RETURNS_PROCESS)
                 "المصاريف التشغيلية" -> isManager() && hasPermission(PermissionPolicy.EXPENSES_MANAGE)
-                "المنتجات والمخزون", "المشتريات", "التقارير", "النسخ الاحتياطي والاستعادة", "المستخدمون والصلاحيات" -> isManager()
+                "المنتجات والمخزون", "المشتريات", "التقارير", "النسخ الاحتياطي والاستعادة", "إعدادات المتجر", "المستخدمون والصلاحيات" -> isManager()
                 else -> true
             }
         }
@@ -1219,6 +1222,7 @@ class MainActivity : Activity() {
                         "تحويل رصيد" -> showServiceTransfers()
                         "التقارير" -> showGeneralReports()
                         "النسخ الاحتياطي والاستعادة" -> showBackupRestoreOptions()
+                        "إعدادات المتجر" -> showStoreTimeZoneSettings()
                         "المستخدمون والصلاحيات" -> showUserManagement()
                         else -> Toast.makeText(this@MainActivity, "قسم $title سيُفعّل في مرحلته", Toast.LENGTH_SHORT).show()
                     }
@@ -1245,6 +1249,67 @@ class MainActivity : Activity() {
         popup.showAtLocation(window.decorView, Gravity.END, 0, 0)
     }
 
+
+    private fun showStoreTimeZoneSettings() {
+        if (!isManager()) {
+            Toast.makeText(this, "إعدادات المتجر متاحة للمدير فقط", Toast.LENGTH_SHORT).show()
+            return
+        }
+        val repository = StoreRepository(this)
+        val currentZone = repository.getStoreTimeZoneId()
+        val zoneField = AutoCompleteTextView(this).apply {
+            setText(currentZone, false)
+            hint = "مثال: Asia/Damascus"
+            threshold = 1
+            isSingleLine = true
+            setPadding(dp(12), dp(12), dp(12), dp(12))
+            setAdapter(ArrayAdapter(
+                this@MainActivity,
+                android.R.layout.simple_dropdown_item_1line,
+                StoreTime.availableZoneIds()
+            ))
+        }
+        val content = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(20), dp(8), dp(20), dp(4))
+            addView(label("المنطقة الزمنية الحالية: $currentZone", 13f, green, true, Gravity.RIGHT))
+            addView(zoneField, fieldParams(dp(54), dp(10)))
+            addView(label(
+                "اختر معرّف المنطقة الزمنية للمدينة التي يوجد فيها المتجر. ستعتمد جميع الأجهزة المرتبطة هذا التوقيت، بما في ذلك قواعد التوقيت الصيفي إن وجدت. لن تتغير تواريخ الحركات السابقة.",
+                12f, mutedColor, false, Gravity.RIGHT
+            ).apply { setPadding(0, dp(8), 0, 0) })
+        }
+        val dialog = AlertDialog.Builder(this)
+            .setTitle("المنطقة الزمنية للمتجر")
+            .setView(content)
+            .setNegativeButton("إلغاء", null)
+            .setPositiveButton("حفظ الإعداد", null)
+            .create()
+        dialog.setOnShowListener {
+            dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener {
+                val selected = zoneField.text.toString().trim()
+                if (!StoreTime.isValidZoneId(selected)) {
+                    zoneField.error = "اختر منطقة زمنية صحيحة من القائمة"
+                    return@setOnClickListener
+                }
+                try {
+                    repository.saveStoreTimeZoneId(
+                        selected,
+                        currentUserId ?: error("انتهت جلسة المستخدم")
+                    )
+                    dialog.dismiss()
+                    Toast.makeText(
+                        this,
+                        "تم اعتماد توقيت المتجر: $selected",
+                        Toast.LENGTH_LONG
+                    ).show()
+                } catch (error: Exception) {
+                    zoneField.error = error.message ?: "تعذر حفظ إعداد المنطقة الزمنية"
+                }
+            }
+        }
+        dialog.show()
+    }
 
     private data class PurchaseLineDraft(
         val product: StoreProduct,
@@ -1371,7 +1436,7 @@ class MainActivity : Activity() {
                         setPadding(dp(8), dp(6), dp(8), dp(6))
                     }
                     paymentRow.addView(label(
-                        "${formatAccountBalance(payment.amountMinor, payment.currencyCode)} • ${payment.accountName} • ${payment.createdAt.take(10)}",
+                        "${formatAccountBalance(payment.amountMinor, payment.currencyCode)} • ${payment.accountName} • ${StoreTime.formatTimestamp(AppDatabase.getInstance(this).readableDatabase, payment.createdAt)}",
                         11f, textColor, false, Gravity.RIGHT
                     ))
                     if (isManager()) paymentRow.addView(smallButton("تعديل هذه الدفعة") {
@@ -1494,7 +1559,7 @@ class MainActivity : Activity() {
         val note = fieldForDialog("ملاحظة (اختياري)")
         val history = payments.listPayments(invoiceId)
         val historyText = if (history.isEmpty()) "لا توجد دفعات سابقة." else history.joinToString("\n") {
-            "${formatAccountBalance(it.amountMinor, it.currencyCode)} • ${it.accountName} • ${it.createdAt.take(10)}"
+            "${formatAccountBalance(it.amountMinor, it.currencyCode)} • ${it.accountName} • ${StoreTime.formatTimestamp(AppDatabase.getInstance(this).readableDatabase, it.createdAt)}"
         }
         val invoiceBalance = payments.listPurchaseInvoices().firstOrNull { it.id == invoiceId }
         content.addView(label("الفاتورة: $invoiceNumber", 15f, green, true, Gravity.RIGHT))
@@ -3204,7 +3269,7 @@ class MainActivity : Activity() {
                 textSize = 14f; setSingleLine(true); setPadding(dp(12), 0, dp(12), 0)
                 background = inputBackground()
             }
-        val date = field("تاريخ الفاتورة", SimpleDateFormat("yyyy-MM-dd", Locale.US).format(Date()))
+        val date = field("تاريخ الفاتورة", StoreTime.today(AppDatabase.getInstance(this).readableDatabase))
         val supplierSpinner = Spinner(this)
         fun refreshSuppliers(selectedId: String? = null) {
             val options = listOf("بدون تحديد مورد") + suppliers.map { it.name }
@@ -3624,7 +3689,7 @@ class MainActivity : Activity() {
                     require(usedIds.distinct().size == usedIds.size) { "لا تكرر الحساب؛ اجمع مبلغه في سطر واحد" }
                     val result = repository.postSalesReturn(
                         actor, invoiceId, UUID.randomUUID().toString(),
-                        SimpleDateFormat("yyyy-MM-dd", Locale.US).format(Date()),
+                        StoreTime.today(AppDatabase.getInstance(this).readableDatabase),
                         reason.text.toString(), selected, allocations
                     )
                     Toast.makeText(this, "تم اعتماد المرتجع " + result.returnNumber, Toast.LENGTH_LONG).show()
@@ -3714,7 +3779,7 @@ class MainActivity : Activity() {
             row.addView(quantity,fieldParams(dp(44),dp(4)))
             content.addView(row,matchWidth())
         }
-        val returnDate=fieldForDialog("تاريخ المرتجع",SimpleDateFormat("yyyy-MM-dd",Locale.US).format(Date()))
+        val returnDate=fieldForDialog("تاريخ المرتجع",StoreTime.today(AppDatabase.getInstance(this).readableDatabase))
         val reason=fieldForDialog("سبب المرتجع")
         content.addView(returnDate,fieldParams(dp(44),dp(6)))
         content.addView(reason,fieldParams(dp(44),dp(6)))
@@ -3894,7 +3959,7 @@ class MainActivity : Activity() {
         accountSpinner.adapter=ArrayAdapter(this,android.R.layout.simple_spinner_dropdown_item,
             accounts.map { it.name+" • "+it.currencyCode+" • "+formatAccountBalance(it.balanceMinor,it.currencyCode) })
         val amount=fieldForDialog("قيمة المصروف",type=InputType.TYPE_CLASS_NUMBER or InputType.TYPE_NUMBER_FLAG_DECIMAL)
-        val date=fieldForDialog("تاريخ المصروف",SimpleDateFormat("yyyy-MM-dd",Locale.US).format(Date()))
+        val date=fieldForDialog("تاريخ المصروف",StoreTime.today(AppDatabase.getInstance(this).readableDatabase))
         val reference=fieldForDialog("رقم فاتورة أو مرجع (اختياري)")
         val notes=fieldForDialog("بيان المصروف (اختياري)")
         content.addView(label("التصنيف",13f,textColor,true,Gravity.RIGHT))
