@@ -81,12 +81,17 @@ class InventoryAdjustmentRepository(context: Context) {
                     arrayOf(productId,resolvedWarehouse)).use { c -> if(c.moveToFirst()) BigDecimal.valueOf(c.getDouble(0)) else BigDecimal.ZERO }
                 val after=before.add(quantityDelta)
                 require(after.signum()>=0) { "لا يمكن أن تؤدي التسوية إلى مخزون سالب على النسخة المحلية" }
-                val eventTime=occurredAt ?: timestamp()
+                val priorPayload=db.rawQuery("SELECT payload_json FROM sync_operation_envelopes WHERE operation_id=?",arrayOf(operationId))
+                    .use { c -> if(c.moveToFirst()) org.json.JSONObject(c.getString(0)) else null }
+                val eventTime=occurredAt ?: priorPayload?.optString("occurred_at")
+                    ?.takeIf { it.matches(Regex("\\d{4}-\\d{2}-\\d{2}T.*")) } ?: timestamp()
+                val movementDate=priorPayload?.optString("operating_date")
+                    ?.takeIf { it.matches(Regex("\\d{4}-\\d{2}-\\d{2}")) } ?: StoreTime.operatingDate(db,eventTime)
                 val payload=org.json.JSONObject().put("product_id",productId).put("warehouse_id",resolvedWarehouse)
                     .put("quantity_delta",quantityDelta.stripTrailingZeros().toPlainString())
                     .put("unit_cost_usd_cents",unitCostUsdCents ?: org.json.JSONObject.NULL)
                     .put("reason",cleanReason).put("occurred_at",eventTime)
-                    .put("operating_date",StoreTime.operatingDate(db,eventTime))
+                    .put("operating_date",movementDate)
                 val pendingId="pending-adjustment-$operationId"
                 SyncProtocolRepository(context).enqueueSecondaryCommand(
                     db,actorUserId,operationId,"POST_INVENTORY_ADJUSTMENT","INVENTORY_ADJUSTMENT",pendingId,payload.toString())
