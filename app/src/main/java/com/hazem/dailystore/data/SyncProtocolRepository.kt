@@ -14,7 +14,7 @@ import java.util.UUID
 import android.util.Base64
 
 data class SyncPairingInvitation(val invitationId: String, val token: String, val expiresAt: String)
-data class SyncEnrollment(val deviceId: String, val credential: String, val storeId: String, val primaryDeviceId: String)
+data class SyncEnrollment(val deviceId: String, val credential: String, val storeId: String, val primaryDeviceId: String, val storeTimeZoneId: String)
 data class SyncOutboxItem(
     val operationId: String, val sequence: Long, val operationType: String,
     val entityType: String, val entityId: String, val payloadJson: String,
@@ -153,7 +153,8 @@ class SyncProtocolRepository(private val context: Context, private val credentia
             return SyncEnrollment(
                 remoteDeviceId, credential,
                 state(db, "store_id") ?: error("معرّف المتجر غير مهيأ"),
-                SyncDeviceIdentity.getOrCreate(context)
+                SyncDeviceIdentity.getOrCreate(context),
+                StoreTime.zoneId(db)
             )
         } catch (error: Exception) {
             if (credentialSaved) credentialVault.remove(remoteDeviceId)
@@ -170,9 +171,11 @@ class SyncProtocolRepository(private val context: Context, private val credentia
      */
     fun configureAsSecondary(
         actorUserId: String, storeId: String, primaryDeviceId: String,
-        credential: String, displayName: String
+        credential: String, displayName: String,
+        storeTimeZoneId: String = StoreTime.DEFAULT_ZONE_ID
     ) {
         require(storeId.isNotBlank() && displayName.trim().isNotEmpty() && displayName.length <= 80)
+        require(StoreTime.isValidZoneId(storeTimeZoneId)) { "منطقة المتجر الزمنية غير صالحة" }
         require(runCatching { UUID.fromString(primaryDeviceId) }.isSuccess) { "معرّف الجهاز الأساسي غير صالح" }
         val secret = runCatching {
             Base64.decode(credential, Base64.URL_SAFE or Base64.NO_WRAP or Base64.NO_PADDING)
@@ -212,6 +215,7 @@ class SyncProtocolRepository(private val context: Context, private val credentia
             putState(db, "authority_device_id", primaryDeviceId, now)
             putState(db, "local_device_role", "SECONDARY", now)
             putState(db, "store_id", storeId, now)
+            StoreTime.setZoneId(db, storeTimeZoneId, now)
             if (state(db, "secondary_next_sequence") == null) {
                 putState(db, "secondary_next_sequence", "1", now)
             }
