@@ -316,6 +316,7 @@ class CustomerPaymentRepositoryTest {
     @Test
     fun secondaryCustomerCollectionIsQueuedWithoutLocalFinancialPosting() {
         val context = RuntimeEnvironment.getApplication()
+        val invoiceId = createCreditInvoice()
         val sync = SyncProtocolRepository(context)
         val storeId = database.readableDatabase.rawQuery(
             "SELECT state_value FROM sync_protocol_state WHERE state_key='store_id'", null
@@ -327,7 +328,6 @@ class CustomerPaymentRepositoryTest {
         )
         sync.configureAsSecondary(adminId, storeId, primaryDeviceId, credential, "جهاز ثانوي اختباري")
 
-        val invoiceId = createCreditInvoice()
         val operationId = "secondary-customer-collection-" + UUID.randomUUID()
         val result = payments.addPayment(adminId, invoiceId, operationId, cashDrawerId, 15_000L)
 
