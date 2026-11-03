@@ -179,7 +179,6 @@ class ServiceTransferRepository(context:Context) {
             val localRole=db.rawQuery("SELECT state_value FROM sync_protocol_state WHERE state_key='local_device_role'",null).use{if(it.moveToFirst())it.getString(0)else null}
             if(localRole=="SECONDARY") PermissionPolicy.requireAssigned(db,actor,PermissionPolicy.SERVICE_TRANSFERS_EXECUTE)
             else PermissionPolicy.require(db,actor,PermissionPolicy.SERVICE_TRANSFERS_EXECUTE)
-            ensureSystemAccounts(db)
             val account=receiptAccount(db,receiptAccountId)
             require(account.second=="SYP"&&account.third){"اختر حساب قبض نشطاً بالليرة السورية"}
             val priorSecondaryPayload=if(localRole=="SECONDARY") db.rawQuery(
@@ -220,6 +219,7 @@ class ServiceTransferRepository(context:Context) {
                 return ServiceTransferResult(pendingId,deliveredMinor,profit,providerFeeMinor,charge,false)
             }
             require(localRole==null || localRole=="PRIMARY"){"دور الجهاز غير صالح لتنفيذ تحويل الرصيد"}
+            ensureSystemAccounts(db)
             require(walletBalance(db,serviceKey)>=deliveredMinor){"رصيد ${serviceName(serviceKey)} غير كافٍ. المتاح: ${walletBalance(db,serviceKey)} ل.س"}
             val id=UUID.randomUUID().toString();val now=eventAt
             val v=ContentValues().apply {
