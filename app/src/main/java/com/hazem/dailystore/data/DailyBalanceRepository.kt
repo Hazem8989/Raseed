@@ -318,6 +318,6 @@ class DailyBalanceRepository(context:Context) {
     private fun typeName(t:String)=when(t){"SALE_RECEIPT"->"قبض مبيعات";"CUSTOMER_CREDIT_COLLECTION"->"تحصيل ديون";"PURCHASE_PAYMENT"->"دفعة مورد";"PERSONAL_WITHDRAWAL"->"مسحوبات شخصية";"ACCOUNT_TRANSFER_IN","ACCOUNT_TRANSFER_OUT"->"تحويل داخلي – تصريف محفظة";"WALLET_TOP_UP"->"تغذية محفظة";"SERVICE_TRANSFER_RECEIPT"->"مقبوض تحويل رصيد";"SERVICE_RECHARGE"->"شراء رصيد خدمة";"OPERATING_EXPENSE"->"مصروف تشغيلي";"SALE_RETURN_REFUND"->"رد مبلغ مرتجع للعميل";"PURCHASE_RETURN_REFUND"->"مبلغ مسترد من المورد";else->t}
     private fun esc(s:String)=s.replace("\\","\\\\").replace("\"","\\\"").replace("\n","\\n").replace("\r","\\r")
     private fun hash(s:String)=MessageDigest.getInstance("SHA-256").digest(s.toByteArray(Charsets.UTF_8)).joinToString(""){"%02x".format(it)}
-    private fun today()=SimpleDateFormat("yyyy-MM-dd",Locale.US).apply{timeZone=java.util.SimpleTimeZone(3*60*60*1000,"UTC+03:00")}.format(Date())
+    private fun today()=StoreTime.today(database.readableDatabase)
     private fun stamp()=SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss.SSS'Z'",Locale.US).apply{timeZone=TimeZone.getTimeZone("UTC")}.format(Date())
 }
