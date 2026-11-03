@@ -389,6 +389,51 @@ class SyncProtocolRepository(private val context: Context, private val credentia
         } finally { db.endTransaction() }
     }
 
+    /** Maps a secondary's cash box or wallet to an explicitly selected primary account. */
+    fun mapSecondaryCashAccount(
+        managerUserId: String, secondaryDeviceId: String,
+        remoteCashAccountId: String, primaryCashAccountId: String
+    ) {
+        require(secondaryDeviceId.isNotBlank() && remoteCashAccountId.isNotBlank() &&
+            primaryCashAccountId.isNotBlank()) { "بيانات ربط الحساب المالي غير مكتملة" }
+        val db = database.writableDatabase
+        db.beginTransaction()
+        try {
+            requirePrimaryManager(db, managerUserId)
+            val enrolled = db.rawQuery(
+                "SELECT 1 FROM sync_devices WHERE device_id=? AND device_role='SECONDARY' AND status='ACTIVE'",
+                arrayOf(secondaryDeviceId)
+            ).use { it.moveToFirst() }
+            require(enrolled) { "الجهاز الثانوي غير مسجل أو غير مفعل" }
+            val account = db.rawQuery(
+                "SELECT account_type,currency_code,is_active FROM cash_accounts WHERE id=?",
+                arrayOf(primaryCashAccountId)
+            ).use { c ->
+                require(c.moveToFirst()) { "الحساب المالي الأساسي غير موجود" }
+                require(c.getInt(2) == 1) { "لا يمكن الربط بحساب مالي موقوف" }
+                c.getString(0) to c.getString(1)
+            }
+            require(account.first in setOf("CASH_BOX", "WALLET") &&
+                account.second in setOf("USD", "SYP")) {
+                "يجب اختيار صندوق أو محفظة نشطة بعملة مدعومة"
+            }
+            val now = timestamp()
+            db.insertWithOnConflict("sync_cash_account_mappings", null, ContentValues().apply {
+                put("device_id", secondaryDeviceId)
+                put("remote_cash_account_id", remoteCashAccountId)
+                put("primary_cash_account_id", primaryCashAccountId)
+                put("is_active", 1)
+                put("mapped_by", managerUserId)
+                put("mapped_at", now)
+            }, SQLiteDatabase.CONFLICT_REPLACE)
+            audit(db, managerUserId, "SYNC_CASH_ACCOUNT_MAPPED", secondaryDeviceId, null,
+                JSONObject().put("remote_cash_account_id", remoteCashAccountId)
+                    .put("primary_cash_account_id", primaryCashAccountId)
+                    .put("account_type", account.first).put("currency_code", account.second).toString(), now)
+            db.setTransactionSuccessful()
+        } finally { db.endTransaction() }
+    }
+
     private fun requiredPermissionForBusinessOperation(operation: String): String =
         when (operation) {
             "POST_SALES_INVOICE" -> PermissionPolicy.SALES_CHECKOUT
@@ -646,6 +691,15 @@ class SyncProtocolRepository(private val context: Context, private val credentia
         header.put("items", items)
         header.put("cash_account_id", cashAccountId ?: JSONObject.NULL)
         if (invoiceType == "SALE" && cashAccountId != null) {
+            val sourceAccount = db.rawQuery(
+                "SELECT account_type,currency_code,is_active FROM cash_accounts WHERE id=?",
+                arrayOf(cashAccountId)
+            ).use { c ->
+                require(c.moveToFirst() && c.getInt(2) == 1) { "حساب قبض البيع غير موجود أو موقوف" }
+                c.getString(0) to c.getString(1)
+            }
+            header.put("cash_account_type", sourceAccount.first)
+            header.put("cash_account_currency_code", sourceAccount.second)
             val receipts = org.json.JSONArray()
             db.rawQuery(
                 """SELECT id,amount_minor,currency_code,exchange_rate_syp_per_usd_milli
