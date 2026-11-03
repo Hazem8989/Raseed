@@ -433,6 +433,115 @@ class SyncDomainApplierTest {
         ).use { it.moveToFirst(); it.getInt(0) })
     }
 
+    private data class CustomerCollectionFixture(
+        val customerId: String, val invoiceId: String, val operationId: String
+    )
+
+    private fun receiveCustomerCollectionCommand(
+        amountMinor: Long = 10_000L,
+        collectionRateMilli: Long = 10_000_000L,
+        effectiveRateMilli: Long = 10_000_000L,
+        reductionCents: Long = 100L,
+        remoteAccountType: String = "WALLET",
+        remoteCurrency: String = "SYP",
+        mappingActive: Boolean = true
+    ): CustomerCollectionFixture {
+        val customerId = CustomerRepository(context).create(adminId, "زبون تحصيل " + UUID.randomUUID()).id
+        val invoices = InvoiceRepository(context)
+        val draft = invoices.saveSalesDraft(
+            adminId, "sync-collection-draft-" + UUID.randomUUID(), null, customerId,
+            "2026-11-03", 0L, null,
+            listOf(InvoiceLineInput(productId, BigDecimal("2"), 150L)), saleType = "CREDIT"
+        )
+        invoices.postSale(adminId, draft.invoiceId, "sync-collection-post-" + UUID.randomUUID())
+        val primaryWallet = createPrimaryWallet("SYP")
+        val remoteAccountId = "remote-wallet-" + UUID.randomUUID()
+        protocol.mapSecondaryCashAccount(adminId, secondaryId, remoteAccountId, primaryWallet)
+        if (!mappingActive) {
+            database.writableDatabase.execSQL(
+                "UPDATE sync_cash_account_mappings SET is_active=0 WHERE device_id=? AND remote_cash_account_id=?",
+                arrayOf(secondaryId, remoteAccountId)
+            )
+        }
+        val paymentId = "remote-payment-" + UUID.randomUUID()
+        val payload = JSONObject().put("business_operation", "COLLECT_CUSTOMER_PAYMENT")
+            .put("invoice_id", draft.invoiceId).put("payment_id", paymentId)
+            .put("cash_transaction_id", "remote-cash-" + UUID.randomUUID())
+            .put("cash_account_id", remoteAccountId)
+            .put("cash_account_type", remoteAccountType)
+            .put("cash_account_currency_code", remoteCurrency)
+            .put("amount_minor", amountMinor).put("currency_code", "SYP")
+            .put("collection_rate_milli", collectionRateMilli)
+            .put("effective_rate_milli", effectiveRateMilli)
+            .put("usd_reference_reduction_cents", reductionCents)
+            .put("note", "تحصيل اختبار")
+            .put("occurred_at", "2026-11-03T12:00:00Z")
+            .put("operating_date", "2026-11-03")
+        val operationId = receiveRaw("COLLECT_CUSTOMER_PAYMENT", paymentId, payload)
+        return CustomerCollectionFixture(customerId, draft.invoiceId, operationId)
+    }
+
+    private fun assertCustomerCollectionRejected(
+        fixture: CustomerCollectionFixture, expectedMessage: String
+    ) {
+        var rejected = false
+        try {
+            SyncDomainApplier(context).applyReceivedCustomerCollection(fixture.operationId)
+        } catch (e: IllegalArgumentException) {
+            rejected = e.message?.contains(expectedMessage) == true
+        }
+        assertTrue("Expected rejection containing: $expectedMessage", rejected)
+        assertEquals("RECEIVED", inboxStatus(fixture.operationId))
+        assertEquals("POSTED", invoiceStatus("sales_invoices", fixture.invoiceId))
+        assertEquals(0, database.readableDatabase.rawQuery(
+            "SELECT COUNT(*) FROM invoice_payments WHERE invoice_id=?", arrayOf(fixture.invoiceId)
+        ).use { it.moveToFirst(); it.getInt(0) })
+        assertEquals(0, database.readableDatabase.rawQuery(
+            "SELECT COUNT(*) FROM cash_transactions WHERE operation_id=?", arrayOf(fixture.operationId)
+        ).use { it.moveToFirst(); it.getInt(0) })
+    }
+
+    @Test fun rejectsCustomerCollectionWhenMappedAccountTypeOrCurrencyDoesNotMatch() {
+        val fixture = receiveCustomerCollectionCommand(remoteAccountType = "CASH_BOX")
+        assertCustomerCollectionRejected(fixture, "نوع أو عملة حساب القبض المرتبط")
+    }
+
+    @Test fun rejectsCustomerCollectionWhenMappedAccountIsInactive() {
+        val fixture = receiveCustomerCollectionCommand(mappingActive = false)
+        assertCustomerCollectionRejected(fixture, "غير مربوط أو موقوف")
+    }
+
+    @Test fun rejectsCustomerCollectionOverpaymentWithoutAnyLedgerMutation() {
+        val fixture = receiveCustomerCollectionCommand(amountMinor = 30_001L, reductionCents = 300L)
+        assertCustomerCollectionRejected(fixture, "يتجاوز الرصيد المتبقي")
+    }
+
+    @Test fun rejectsCustomerCollectionWithInvalidRateOrReferenceReduction() {
+        val invalidRate = receiveCustomerCollectionCommand(collectionRateMilli = 0L)
+        assertCustomerCollectionRejected(invalidRate, "سعر صرف التحصيل غير صالح")
+
+        val invalidReduction = receiveCustomerCollectionCommand(reductionCents = 99L)
+        assertCustomerCollectionRejected(invalidReduction, "تخفيض الدين المرجعي لا يطابق")
+    }
+
+    @Test fun customerCollectionReducesUsdReferenceAndCreatesNoOutboxEcho() {
+        val fixture = receiveCustomerCollectionCommand()
+        val outboxBefore = protocol.pendingOutbox().size
+        assertTrue(SyncDomainApplier(context).applyReceivedCustomerCollection(fixture.operationId).applied)
+
+        val remaining = CustomerPaymentRepository(context).listInvoices(fixture.customerId)
+            .single { it.id == fixture.invoiceId }
+        assertEquals(200L, remaining.outstandingUsdCents)
+        assertEquals(1, database.readableDatabase.rawQuery(
+            "SELECT COUNT(*) FROM invoice_payments WHERE invoice_id=?", arrayOf(fixture.invoiceId)
+        ).use { it.moveToFirst(); it.getInt(0) })
+        assertEquals(1, database.readableDatabase.rawQuery(
+            "SELECT COUNT(*) FROM cash_transactions WHERE operation_id=?", arrayOf(fixture.operationId)
+        ).use { it.moveToFirst(); it.getInt(0) })
+        assertEquals("APPLIED", inboxStatus(fixture.operationId))
+        assertEquals(outboxBefore, protocol.pendingOutbox().size)
+    }
+
     private fun receiveRaw(operation: String, entityId: String, payload: JSONObject): String {
         val db = database.readableDatabase
         val storeId = db.rawQuery(
