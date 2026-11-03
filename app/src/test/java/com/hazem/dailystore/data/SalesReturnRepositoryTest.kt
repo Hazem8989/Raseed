@@ -75,11 +75,15 @@ class SalesReturnRepositoryTest {
         )
         assertTrue(invoices.postCashSale(adminId, draft.invoiceId, "return-cash-sale", cashAccountId))
         assertEquals(7.0, stock(), 0.000001)
+        val operatingDate = database.readableDatabase.rawQuery(
+            "SELECT operating_date FROM cash_transactions WHERE source_type='SALES_INVOICE' AND source_id=? LIMIT 1",
+            arrayOf(draft.invoiceId)
+        ).use { c -> assertTrue(c.moveToFirst()); c.getString(0) }
         val itemId = saleItemId(draft.invoiceId)
         val input = listOf(SalesReturnItemInput(itemId, BigDecimal.ONE))
         val allocation = listOf(SalesRefundAllocationInput(cashAccountId, 250L))
         val first = returns.postSalesReturn(
-            adminId, draft.invoiceId, "cash-return-op", "2026-11-02",
+            adminId, draft.invoiceId, "cash-return-op", operatingDate,
             "إرجاع قطعة سليمة", input, allocation
         )
         assertFalse(first.replayed)
@@ -89,12 +93,12 @@ class SalesReturnRepositoryTest {
         assertEquals(100L, first.returnedCogsUsdCents)
         assertEquals(8.0, stock(), 0.000001)
         assertEquals(500L, CashAccountRepository(RuntimeEnvironment.getApplication()).balance(cashAccountId))
-        val dailyCash=DailyBalanceRepository(RuntimeEnvironment.getApplication()).dailyReport("2026-11-02")
+        val dailyCash=DailyBalanceRepository(RuntimeEnvironment.getApplication()).dailyReport(operatingDate)
         val dailyAccount=dailyCash.accounts.first { it.accountId==cashAccountId }
         assertEquals(250L,dailyAccount.salesReturnRefundsMinor)
         assertEquals(500L,dailyAccount.closingMinor)
         val replay = returns.postSalesReturn(
-            adminId, draft.invoiceId, "cash-return-op", "2026-11-02",
+            adminId, draft.invoiceId, "cash-return-op", operatingDate,
             "إرجاع قطعة سليمة", input, allocation
         )
         assertTrue(replay.replayed)
