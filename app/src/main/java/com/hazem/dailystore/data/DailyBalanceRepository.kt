@@ -259,7 +259,7 @@ class DailyBalanceRepository(context:Context) {
     fun todayTransactions():List<String>{
         val out=mutableListOf<String>()
         database.readableDatabase.rawQuery("SELECT t.created_at,a.name,t.transaction_type,t.direction,t.amount_minor,t.currency_code,COALESCE(t.description,'') FROM cash_transactions t JOIN cash_accounts a ON a.id=t.account_id WHERE COALESCE(t.operating_date,substr(t.created_at,1,10))=? ORDER BY t.created_at DESC",arrayOf(today())).use { c->
-            while(c.moveToNext())out.add(c.getString(0)+" • "+c.getString(1)+" • "+typeName(c.getString(2))+" • "+(if(c.getString(3)=="IN")"وارد" else "صادر")+" • "+c.getLong(4)+" "+c.getString(5)+" • "+c.getString(6))
+            while(c.moveToNext())out.add(StoreTime.formatTimestamp(database.readableDatabase,c.getString(0))+" • "+c.getString(1)+" • "+typeName(c.getString(2))+" • "+(if(c.getString(3)=="IN")"وارد" else "صادر")+" • "+c.getLong(4)+" "+c.getString(5)+" • "+c.getString(6))
         };return out
     }
 
