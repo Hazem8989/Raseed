@@ -132,9 +132,16 @@ class PurchasePaymentRepository(context: Context) {
         val db = database.writableDatabase
         val cleanNote = note?.trim()?.takeIf { it.isNotEmpty() }
         val payloadHash = hash("$invoiceId|$cashAccountId|$amountMinor|${cleanNote.orEmpty()}")
+        val localRole = db.rawQuery(
+            "SELECT state_value FROM sync_protocol_state WHERE state_key='local_device_role'", null
+        ).use { c -> if (c.moveToFirst()) c.getString(0) else null }
         db.beginTransaction()
         try {
-            PermissionPolicy.require(db, actorUserId, PermissionPolicy.SUPPLIER_PAYMENTS_MANAGE)
+            if (localRole == "SECONDARY") {
+                PermissionPolicy.requireAssigned(db, actorUserId, PermissionPolicy.SUPPLIER_PAYMENTS_MANAGE)
+            } else {
+                PermissionPolicy.require(db, actorUserId, PermissionPolicy.SUPPLIER_PAYMENTS_MANAGE)
+            }
             findOperation(db, operationId)?.let { existing ->
                 require(existing.type == "PURCHASE_PAYMENT" && existing.payloadHash == payloadHash) {
                     "معرّف العملية مستخدم لعملية أو بيانات مختلفة"
@@ -174,7 +181,7 @@ class PurchasePaymentRepository(context: Context) {
             require(account.currencyCode == "USD" || account.currencyCode == "SYP") {
                 "عملة الحساب غير مدعومة"
             }
-            if (account.accountType == "CASH_BOX" && account.currencyCode == "SYP") {
+            if (localRole != "SECONDARY" && account.accountType == "CASH_BOX" && account.currencyCode == "SYP") {
                 val date = StoreTime.today(db)
                 val rollover = db.rawQuery("SELECT allocated_minor FROM daily_supplier_rollovers WHERE operating_date=? AND account_id=?", arrayOf(date, cashAccountId)).use { if (it.moveToFirst()) it.getLong(0) else null }
                 require(rollover != null) { "يجب على المدير تحديد مبلغ النقد المدور لهذا الصندوق اليوم قبل دفع الموردين منه" }
@@ -191,6 +198,52 @@ class PurchasePaymentRepository(context: Context) {
             require(amountSypEquivalent>0L) { "مبلغ الدفعة صغير جداً" }
             val currentState=invoicePaymentStateSyp(db,invoiceId,invoice.totalUsdCents,invoiceRate)
             require(amountSypEquivalent<=currentState.second) { "مبلغ الدفعة يتجاوز المتبقي السوري الثابت على الفاتورة" }
+
+            if (localRole == "SECONDARY") {
+                val sync = SyncProtocolRepository(context)
+                val priorPayload = db.rawQuery(
+                    "SELECT payload_json FROM sync_operation_envelopes WHERE operation_id=?",
+                    arrayOf(operationId)
+                ).use { c -> if (c.moveToFirst()) org.json.JSONObject(c.getString(0)) else null }
+                val occurredAt = priorPayload?.optString("occurred_at")
+                    ?.takeIf { it.matches(Regex("\\d{4}-\\d{2}-\\d{2}T.*")) } ?: timestamp()
+                val movementDate = priorPayload?.optString("operating_date")
+                    ?.takeIf { it.matches(Regex("\\d{4}-\\d{2}-\\d{2}")) }
+                    ?: StoreTime.operatingDate(db, occurredAt)
+                val recordedPaymentRate = priorPayload?.optLong("payment_rate_milli", paymentRate)
+                    ?.takeIf { it > 0L } ?: paymentRate
+                val paymentId = "pending-payment-$operationId"
+                val cashTransactionId = "pending-cash-$operationId"
+                val payload = org.json.JSONObject()
+                    .put("invoice_id", invoiceId)
+                    .put("payment_id", paymentId)
+                    .put("cash_transaction_id", cashTransactionId)
+                    .put("cash_account_id", cashAccountId)
+                    .put("cash_account_type", account.accountType)
+                    .put("cash_account_currency_code", account.currencyCode)
+                    .put("amount_minor", amountMinor)
+                    .put("currency_code", account.currencyCode)
+                    .put("payment_rate_milli", recordedPaymentRate)
+                    .put("amount_syp_equivalent", amountSypEquivalent)
+                    .put("note", cleanNote ?: org.json.JSONObject.NULL)
+                    .put("occurred_at", occurredAt)
+                    .put("operating_date", movementDate)
+                sync.enqueueSecondaryCommand(
+                    db, actorUserId, operationId, "POST_SUPPLIER_PAYMENT",
+                    "SUPPLIER_PAYMENT", paymentId, payload.toString()
+                )
+                db.setTransactionSuccessful()
+                return PurchasePaymentResult(
+                    paymentId,
+                    CurrencyConverter.sypToUsdCents(currentState.first, invoiceRate),
+                    CurrencyConverter.sypToUsdCents(currentState.second, invoiceRate),
+                    currentState.third, false, currentState.first, currentState.second
+                )
+            }
+            require(localRole == null || localRole == "PRIMARY") {
+                "دور الجهاز غير صالح لتسجيل دفعات الموردين"
+            }
+
             val currentAccountBalance = accountBalance(db, cashAccountId, account.openingBalanceMinor)
             require(currentAccountBalance >= amountMinor) {
                 "رصيد الحساب غير كافٍ. الرصيد المتاح: $currentAccountBalance ${account.currencyCode}"
@@ -238,7 +291,7 @@ class PurchasePaymentRepository(context: Context) {
             }
             registerOperation(db, operationId, "PURCHASE_PAYMENT", payloadHash, paymentId, now)
             SyncProtocolRepository(context).enqueueLocalOperation(
-                db, actorUserId, operationId, "PURCHASE_PAYMENT",
+                db, actorUserId, operationId, "POST_SUPPLIER_PAYMENT",
                 "SUPPLIER_PAYMENT", paymentId, "CREATE",
                 org.json.JSONObject().put("invoice_id", invoiceId).put("payment_id", paymentId)
                     .put("cash_transaction_id", cashTransactionId).put("cash_account_id", cashAccountId)
