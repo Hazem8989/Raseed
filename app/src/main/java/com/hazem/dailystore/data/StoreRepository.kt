@@ -99,6 +99,28 @@ class StoreRepository(context: Context) {
             "SELECT rate_syp_per_usd_milli FROM exchange_rates ORDER BY effective_at DESC, created_at DESC LIMIT 1", null
         ).use { c -> if (c.moveToFirst()) c.getLong(0) else 0L }
 
+    fun getStoreTimeZoneId(): String = StoreTime.zoneId(helper.readableDatabase)
+
+    fun saveStoreTimeZoneId(zoneId: String, actorUserId: String): String {
+        val clean = zoneId.trim()
+        require(StoreTime.isValidZoneId(clean)) { "معرّف المنطقة الزمنية غير صالح" }
+        val db = helper.writableDatabase
+        requireManager(db, actorUserId)
+        db.beginTransaction()
+        try {
+            val old = StoreTime.zoneId(db)
+            val now = timestamp()
+            StoreTime.setZoneId(db, clean, now)
+            insertAudit(
+                db, actorUserId, "UPDATE_STORE_TIME_ZONE", "STORE_SETTINGS", "store_time_zone",
+                """{"time_zone":"${jsonEscape(old)}"}""",
+                """{"time_zone":"${jsonEscape(clean)}"}""", now
+            )
+            db.setTransactionSuccessful()
+        } finally { db.endTransaction() }
+        return clean
+    }
+
     fun saveExchangeRate(rateSypPerUsd: BigDecimal, actorUserId: String): Long {
         require(rateSypPerUsd.signum() > 0) { "سعر الصرف يجب أن يكون أكبر من صفر" }
         val milli = rateSypPerUsd.multiply(BigDecimal.valueOf(1000))
