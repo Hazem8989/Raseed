@@ -13,13 +13,13 @@ This inventory supplements `SYNC_PROTOCOL_AUDIT_2026-11-03.md`. It records repos
 | Sales invoice posting | InvoiceRepository | Enqueues invoice header, lines, and cash receipt snapshot inside posting transaction |
 | Purchase invoice posting | InvoiceRepository | Enqueues invoice header and lines inside posting transaction |
 | Customer credit collection | CustomerPaymentRepository | Enqueues payment, cash transaction, invoice and FX allocation data inside transaction |
-| Supplier payment | PurchasePaymentRepository | Enqueues payment, cash transaction, invoice and FX snapshot inside transaction |
-| Sales return | SalesReturnRepository | Enqueues return totals, credit reduction, cash refund and returned COGS |
-| Purchase return | PurchaseReturnRepository | Enqueues supplier-return operation |
-| Inventory adjustment | InventoryAdjustmentRepository | Enqueues adjustment operation |
-| Operating expense | OperatingExpenseRepository | Enqueues expense and cash transaction references inside transaction |
+| Supplier payment | PurchasePaymentRepository | Primary: enqueues payment/cash/invoice/FX snapshot. Secondary: queues `POST_SUPPLIER_PAYMENT` without local ledger posting; primary applier validates and applies idempotently (unit tests now pass) |
+| Sales return | SalesReturnRepository | Primary-side outbox only; no secondary pending-command path or primary incoming domain applier verified |
+| Purchase return | PurchaseReturnRepository | Primary-side outbox only; no secondary pending-command path or primary incoming domain applier verified |
+| Inventory adjustment | InventoryAdjustmentRepository | Primary-side outbox only; no secondary pending-command path or primary incoming domain applier verified |
+| Operating expense | OperatingExpenseRepository | Primary-side outbox only; no secondary pending-command path or primary incoming domain applier verified |
 
-The associated tests include primary-side atomic outbox checks for invoice posting, customer collections, supplier payments, returns, inventory adjustments, and operating expenses. These are local transactional tests, not two-device delivery tests.
+The associated tests include primary-side atomic outbox checks for invoice posting, customer collections, supplier payments, returns, inventory adjustments, and operating expenses. Supplier payment additionally has a secondary pending-command test and a primary inbox-applier idempotency/event-time test. These remain local repository/domain tests, not two-device delivery tests.
 
 ## Write paths with no outbox hook found in the inspected source
 
@@ -60,3 +60,14 @@ For each event family, define and test:
 - Do not broadcast local-only UI preferences or raw SQLite files.
 - A financial action on a secondary must remain visibly pending until the primary accepts and commits it.
 - No operation may be marked centrally committed merely because it entered a local outbox.
+
+
+## Re-audit after supplier-payment implementation (2026-11-03)
+
+- Development branch head at audit: `c4a087468f6206641753346fb5246d0cd3c1faaa`.
+- CI run `41692103349` completed successfully: unit tests, signed release build, and artifact upload all passed. This is a build artifact only, not a final user release.
+- Supplier payment is now the first non-invoice financial command with a complete local secondary-queue → primary-domain-applier unit-tested path. The secondary records an immutable event timestamp, operating date, invoice FX basis, amount, and remote cash-account identity; the primary maps the account and revalidates permissions, invoice balance, FX, rollover and funds before committing cash/payment/invoice status atomically.
+- Still missing: secondary queue + primary domain applier for operating expenses, sales returns, purchase returns, and inventory adjustments. Existing primary outbox hooks alone do not make those operations executable from a secondary.
+- Still missing: command handling for cash transfers, drawer/wallet openings, personal withdrawals, service-wallet operations, product/category/customer/supplier/cash-account master data, exchange-rate changes, and opening stock. These require explicit contracts and conflict/reversal policy before implementation.
+- `PurchasePaymentRepository.editPayment` is not supported as a secondary correction command. Do not silently edit a posted supplier payment on a secondary; design a manager-authorized correction/reversal event.
+- No network transport, live remote delivery, production two-database pipeline, or final acceptance has been demonstrated.
