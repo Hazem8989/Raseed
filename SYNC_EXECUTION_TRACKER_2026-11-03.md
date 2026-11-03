@@ -80,3 +80,12 @@ The store-specific, internationally configurable time-zone feature is implemente
 **Important delivery boundary:** the feature's configuration and authenticated replication protocol are implemented and unit-tested, but no live transport currently invokes these methods. Therefore a later zone change is durably queued for linked devices, not yet delivered to them in real time. It becomes effective on a secondary only after the future authenticated transport delivers the event and the secondary applies it. Do not describe this as live multi-device synchronization until the transport and end-to-end two-database test gates pass.
 
 Latest verification: GitHub Actions run `41686212136`, commit `ff1ad90f51a237ab942d4f8cb7831e5357e948ba`, passed unit tests, permanently signed release APK build, and artifact upload. This validates the current build snapshot, not live delivery.
+
+
+## Event-catalogue re-audit after supplier-payment support (2026-11-03)
+
+Latest development snapshot audited: `c4a087468f6206641753346fb5246d0cd3c1faaa`. CI run `41692103349` passed unit tests, signed Release APK build, and artifact upload. The supplier-payment path is now covered by a secondary pending-command test and a primary idempotent domain-application test, preserving the original event timestamp and operating date. This does not prove network delivery.
+
+The next domain-coverage work is now explicitly bounded: implement and test secondary queue + primary applier pairs for (1) operating expenses, (2) sales returns, (3) purchase returns, and (4) inventory adjustments. Existing primary-side outbox hooks for these events are insufficient: the current domain applier has no incoming applier for them, and their repositories have not been verified to queue secondary commands. After these, address cash/drawer/wallet movements and service-wallet operations, then master data (products, categories, customers, suppliers, cash accounts, exchange rates, opening stock) with version/conflict semantics.
+
+Supplier-payment correction/edit remains unsupported on secondary and must be designed as a controlled reversal/correction command rather than a raw update. Transport, pairing, retries, Android runtime wiring, and production two-database end-to-end tests remain blocked until the full domain catalogue and authorization/idempotency rules are complete. No intermediate APK is to be installed by the owner.
