@@ -151,4 +151,5 @@ class OperatingExpenseRepositoryTest {
         assertTrue(queued.payloadJson.contains("amount_usd_cents"))
     }
 
+    // Sync-domain coverage is added below.
 }
