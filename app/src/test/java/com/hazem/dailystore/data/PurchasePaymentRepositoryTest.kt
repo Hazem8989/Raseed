@@ -280,7 +280,7 @@ class PurchasePaymentRepositoryTest {
         val queued = sync.pendingOutbox().single()
         assertEquals("SUPPLIER_PAYMENT", queued.entityType)
         assertEquals("CREATE", queued.operationType)
-        assertTrue(queued.payloadJson.contains("PURCHASE_PAYMENT"))
+        assertTrue(queued.payloadJson.contains("POST_SUPPLIER_PAYMENT"))
         assertTrue(queued.payloadJson.contains(invoiceId))
     }
 
