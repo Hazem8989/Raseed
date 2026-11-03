@@ -235,8 +235,15 @@ class DailyBalanceRepository(context:Context) {
         val db=database.writableDatabase;manager(db,actor);db.beginTransaction()
         try {
             val r=rollover(db,accountId)?:throw IllegalArgumentException("يجب تحديد النقد المدور لهذا اليوم أولاً")
-            val old=db.rawQuery("SELECT account_id,amount_minor,transaction_type FROM cash_transactions WHERE operation_id=?",arrayOf(operationId)).use { if(it.moveToFirst())Triple(it.getString(0),it.getLong(1),it.getString(2))else null }
-            if(old!=null){require(old.first==accountId&&old.second==amount&&old.third=="PERSONAL_WITHDRAWAL"){"معرّف العملية مستخدم لبيانات مختلفة"};db.setTransactionSuccessful();return}
+            val old=db.rawQuery(
+                "SELECT account_id,amount_minor,transaction_type,created_by,description FROM cash_transactions WHERE operation_id=?",
+                arrayOf(operationId)
+            ).use { c -> if(c.moveToFirst()) arrayOf(c.getString(0),c.getLong(1).toString(),c.getString(2),c.getString(3),c.getString(4)) else null }
+            if(old!=null){
+                require(old[0]==accountId&&old[1]==amount.toString()&&old[2]=="PERSONAL_WITHDRAWAL"&&
+                    old[3]==actor&&old[4]==(note?:"مسحوبات شخصية")){"معرّف العملية مستخدم لبيانات مختلفة"}
+                db.setTransactionSuccessful();return
+            }
             require(r.availableMinor>=amount){"المتاح من النقد المدور لا يكفي. المتاح: "+r.availableMinor+" ل.س"}
             require(balance(db,accountId)>=amount){"الرصيد الفعلي في صندوق الموردين لا يكفي للمسحوب الشخصي"}
             val now=stamp();movement(db,accountId,"OUT",amount,"SYP","PERSONAL_WITHDRAWAL","PERSONAL_WITHDRAWAL",operationId,operationId,actor,note?:"مسحوبات شخصية",now)
