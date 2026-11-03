@@ -462,6 +462,7 @@ class SyncProtocolRepository(private val context: Context, private val credentia
                 put("entity_type", envelope.entityType); put("entity_id", envelope.entityId)
                 put("payload_json", envelope.payloadJson); put("payload_sha256", envelope.payloadSha256)
                 put("status", "RECEIVED"); put("received_at", now)
+                put("origin_created_at", envelope.createdAt)
             })
             db.update("sync_cursors", ContentValues().apply {
                 put("last_sequence", envelope.sequenceNumber); put("updated_at", now)
