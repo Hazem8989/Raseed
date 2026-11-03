@@ -1,0 +1,13 @@
+{
+  "name": "the-daily-shop-relay",
+  "private": true,
+  "version": "1.0.0",
+  "scripts": {
+    "check": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^4.20261104.0",
+    "typescript": "^5.7.2",
+    "wrangler": "^4.45.0"
+  }
+}
