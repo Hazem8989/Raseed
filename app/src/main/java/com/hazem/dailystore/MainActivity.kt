@@ -2083,7 +2083,7 @@ class MainActivity : Activity() {
                     card.addView(label(
                         formatSypAmount(adjustment.previousSypMinor) + " ← " +
                             formatSypAmount(adjustment.newSypMinor) + " ل.س • " +
-                            rateText + " ل.س/دولار • " + adjustment.createdAt,
+                            rateText + " ل.س/دولار • " + StoreTime.formatTimestamp(AppDatabase.getInstance(this).readableDatabase, adjustment.createdAt),
                         10f, mutedColor, false, Gravity.RIGHT
                     ).apply { setPadding(0, dp(2), 0, dp(2)) })
                 }
@@ -2097,7 +2097,7 @@ class MainActivity : Activity() {
                         formatSypAmount(payment.amountMinor) + " ل.س" else "$" + moneyText(payment.amountMinor)
                     val channel = if (payment.accountType == "WALLET") "محفظة إلكترونية" else "درج نقدي"
                     card.addView(label(
-                        amount + " • " + channel + ": " + payment.accountName + " • " + payment.createdAt,
+                        amount + " • " + channel + ": " + payment.accountName + " • " + StoreTime.formatTimestamp(AppDatabase.getInstance(this).readableDatabase, payment.createdAt),
                         11f, mutedColor, false, Gravity.RIGHT
                     ).apply { setPadding(0, dp(2), 0, dp(2)) })
                     val originalRateText = BigDecimal.valueOf(payment.originalInvoiceRateMilli, 3)
@@ -2994,7 +2994,7 @@ class MainActivity : Activity() {
             card.addView(label("الواصل للزبون: "+formatSypAmount(r.deliveredMinor)+" ل.س",13f,textColor,false,Gravity.RIGHT))
             card.addView(label("ربح المتجر: "+formatSypAmount(r.profitMinor)+" • رسوم الشركة: "+formatSypAmount(r.providerFeeMinor)+" ل.س",12f,mutedColor,false,Gravity.RIGHT))
             card.addView(label("المقبوض: "+formatSypAmount(r.customerChargeMinor)+" ل.س • "+r.receiptAccountName+(if(r.receiptChannel=="ELECTRONIC")" (إلكتروني)" else " (نقدي)"),13f,green,true,Gravity.RIGHT))
-            card.addView(label(r.createdAt.replace('T',' ').replace("Z",""),10f,mutedColor,false,Gravity.RIGHT))
+            card.addView(label(StoreTime.formatTimestamp(AppDatabase.getInstance(this).readableDatabase, r.createdAt),10f,mutedColor,false,Gravity.RIGHT))
             content.addView(card,fieldParams(-2,dp(8)))
         }
         body.addView(content);page.addView(header,matchWidth());page.addView(body,LinearLayout.LayoutParams(-1,0,1f));setContentView(page)
