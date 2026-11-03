@@ -485,6 +485,46 @@ class AppDatabase private constructor(context: Context) :
                 version = 22
             } finally { db.endTransaction() }
         }
+        if (version < 23) {
+            db.beginTransaction()
+            try {
+                fun ensureOperatingDateColumn(table: String) {
+                    var exists = false
+                    db.rawQuery("PRAGMA table_info($table)", null).use { c ->
+                        while (c.moveToNext()) if (c.getString(1) == "operating_date") exists = true
+                    }
+                    if (!exists) db.execSQL("ALTER TABLE $table ADD COLUMN operating_date TEXT")
+                }
+                ensureOperatingDateColumn("service_transfers")
+                ensureOperatingDateColumn("service_wallet_transactions")
+
+                val missingServiceTransferDates = mutableListOf<Pair<String, String>>()
+                db.rawQuery(
+                    "SELECT id,created_at FROM service_transfers WHERE operating_date IS NULL OR TRIM(operating_date)=''",
+                    null
+                ).use { c -> while (c.moveToNext()) missingServiceTransferDates.add(c.getString(0) to c.getString(1)) }
+                missingServiceTransferDates.forEach { (id, createdAt) ->
+                    db.update("service_transfers", android.content.ContentValues().apply {
+                        put("operating_date", StoreTime.operatingDate(db, createdAt))
+                    }, "id=?", arrayOf(id))
+                }
+
+                val missingServiceWalletDates = mutableListOf<Pair<String, String>>()
+                db.rawQuery(
+                    "SELECT id,created_at FROM service_wallet_transactions WHERE operating_date IS NULL OR TRIM(operating_date)=''",
+                    null
+                ).use { c -> while (c.moveToNext()) missingServiceWalletDates.add(c.getString(0) to c.getString(1)) }
+                missingServiceWalletDates.forEach { (id, createdAt) ->
+                    db.update("service_wallet_transactions", android.content.ContentValues().apply {
+                        put("operating_date", StoreTime.operatingDate(db, createdAt))
+                    }, "id=?", arrayOf(id))
+                }
+                db.execSQL("CREATE INDEX IF NOT EXISTS idx_service_transfers_operating_date ON service_transfers(operating_date,service_type,status)")
+                db.execSQL("CREATE INDEX IF NOT EXISTS idx_service_wallet_transactions_operating_date ON service_wallet_transactions(operating_date,service_key,transaction_type)")
+                db.setTransactionSuccessful()
+                version = 23
+            } finally { db.endTransaction() }
+        }
         if (version != newVersion) {
             throw IllegalStateException("Missing database migration from version $version to $newVersion")
         }
@@ -909,7 +949,7 @@ class AppDatabase private constructor(context: Context) :
 
     companion object {
         const val DATABASE_NAME = "the_daily_shop.db"
-        const val DATABASE_VERSION = 22
+        const val DATABASE_VERSION = 23
 
         @Volatile
         private var INSTANCE: AppDatabase? = null
@@ -1324,6 +1364,7 @@ class AppDatabase private constructor(context: Context) :
                 note TEXT,
                 created_by TEXT NOT NULL,
                 created_at TEXT NOT NULL,
+                operating_date TEXT,
                 FOREIGN KEY(service_key) REFERENCES service_wallets(service_key) ON UPDATE RESTRICT ON DELETE RESTRICT,
                 FOREIGN KEY(created_by) REFERENCES users(id) ON UPDATE RESTRICT ON DELETE RESTRICT
             )
@@ -1346,6 +1387,7 @@ class AppDatabase private constructor(context: Context) :
                 payload_hash TEXT NOT NULL,
                 created_by TEXT NOT NULL,
                 created_at TEXT NOT NULL,
+                operating_date TEXT,
                 status TEXT NOT NULL DEFAULT 'POSTED' CHECK(status IN ('POSTED','REVERSED')),
                 reversed_at TEXT,
                 reversed_by TEXT,
