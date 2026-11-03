@@ -382,6 +382,32 @@ class SyncDomainApplierTest {
         ).use { it.moveToFirst(); it.getInt(0) })
     }
 
+    @Test fun acceptsCustomerCollectionWhenSyriaOperatingDateDiffersFromUtcCalendarDate() {
+        val customerId=CustomerRepository(context).create(adminId,"زبون توقيت سوريا").id
+        val invoices=InvoiceRepository(context)
+        val draft=invoices.saveSalesDraft(adminId,"syria-time-credit-draft",null,customerId,
+            "2026-11-03",0L,null,listOf(InvoiceLineInput(productId,BigDecimal.ONE,150L)),saleType="CREDIT")
+        invoices.postSale(adminId,draft.invoiceId,"syria-time-credit-post")
+        val wallet=createPrimaryWallet("SYP")
+        protocol.mapSecondaryCashAccount(adminId,secondaryId,"remote-syria-wallet",wallet)
+        val payload=JSONObject().put("business_operation","COLLECT_CUSTOMER_PAYMENT")
+            .put("invoice_id",draft.invoiceId).put("payment_id","remote-syria-payment")
+            .put("cash_transaction_id","remote-syria-cash").put("cash_account_id","remote-syria-wallet")
+            .put("cash_account_type","WALLET").put("cash_account_currency_code","SYP")
+            .put("amount_minor",1_000L).put("currency_code","SYP")
+            .put("collection_rate_milli",10_000_000L).put("effective_rate_milli",10_000_000L)
+            .put("usd_reference_reduction_cents",10L).put("occurred_at","2026-11-03T22:30:00Z")
+            .put("operating_date","2026-11-04")
+        val operationId=receiveRaw("COLLECT_CUSTOMER_PAYMENT","remote-syria-payment",payload)
+        assertTrue(SyncDomainApplier(context).applyReceivedCustomerCollection(operationId).applied)
+        assertEquals("2026-11-03T22:30:00Z",database.readableDatabase.rawQuery(
+            "SELECT created_at FROM invoice_payments WHERE invoice_id=?",arrayOf(draft.invoiceId)
+        ).use { it.moveToFirst(); it.getString(0) })
+        assertEquals("2026-11-04",database.readableDatabase.rawQuery(
+            "SELECT operating_date FROM cash_transactions WHERE operation_id=?",arrayOf(operationId)
+        ).use { it.moveToFirst(); it.getString(0) })
+    }
+
     @Test fun rejectsCustomerCollectionWithoutActiveCashMapping() {
         val customerId=CustomerRepository(context).create(adminId,"زبون رفض").id
         val invoices=InvoiceRepository(context)
