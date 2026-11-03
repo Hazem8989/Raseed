@@ -171,6 +171,31 @@ class InventoryAdjustmentRepositoryTest {
         } catch (_: IllegalArgumentException) { }
     }
 
+
+    @Test
+    fun secondaryAdjustmentQueuesWithoutChangingStockAndRetryPreservesEventTime() {
+        val context=RuntimeEnvironment.getApplication()
+        val before=stock()
+        val vault=SyncCredentialVault(context) { javax.crypto.spec.SecretKeySpec(ByteArray(32){41},"AES") }
+        val sync=SyncProtocolRepository(context,vault)
+        val credential=android.util.Base64.encodeToString(ByteArray(32){(it+11).toByte()},
+            android.util.Base64.URL_SAFE or android.util.Base64.NO_WRAP or android.util.Base64.NO_PADDING)
+        sync.configureAsSecondary(adminId,"inventory-adjust-sync-store",UUID.randomUUID().toString(),credential,
+            "جهاز جرد ثانوي","Asia/Damascus")
+        val operationId="secondary-adjustment-"+UUID.randomUUID()
+        val first=repository.postAdjustment(adminId,productId,BigDecimal.ONE,"زيادة جرد معلقة",operationId,200L)
+        val queued=sync.pendingOutbox().single()
+        val eventTime=org.json.JSONObject(queued.payloadJson).getString("occurred_at")
+        val replay=repository.postAdjustment(adminId,productId,BigDecimal.ONE,"زيادة جرد معلقة",operationId,200L)
+        assertEquals("pending-adjustment-$operationId",first.adjustmentId)
+        assertEquals(first.adjustmentId,replay.adjustmentId)
+        assertEquals(queued.payloadJson,sync.pendingOutbox().single().payloadJson)
+        assertEquals(before,stock(),0.000001)
+        assertEquals(0,database.readableDatabase.rawQuery("SELECT COUNT(*) FROM inventory_adjustments WHERE operation_id=?",
+            arrayOf(operationId)).use { it.moveToFirst();it.getInt(0) })
+        assertEquals(eventTime,org.json.JSONObject(sync.pendingOutbox().single().payloadJson).getString("occurred_at"))
+    }
+
     @Test
     fun primaryInventoryAdjustmentIsAddedToOutboxAtomically() {
         val context = RuntimeEnvironment.getApplication()
