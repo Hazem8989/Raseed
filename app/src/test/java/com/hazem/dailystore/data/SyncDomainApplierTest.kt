@@ -198,6 +198,70 @@ class SyncDomainApplierTest {
         assertEquals("RECEIVED", inboxStatus(operationId))
     }
 
+    @Test fun rejectsCashSaleWhenReceiptAmountDoesNotMatchInvoice() {
+        val primaryWalletId = createPrimaryWallet("USD")
+        protocol.mapSecondaryCashAccount(adminId, secondaryId, "remote-wallet-bad-amount", primaryWalletId)
+        val operationId = receiveInvoice(
+            "POST_SALES_INVOICE", "sale-cash-bad-amount", null, "CASH",
+            "remote-wallet-bad-amount", "WALLET", "USD", receiptAmountMinor = 299L
+        )
+
+        var rejected = false
+        try { SyncDomainApplier(context).applyReceivedInvoice(operationId) }
+        catch (e: IllegalArgumentException) { rejected = e.message?.contains("قيمة قيد القبض") == true }
+
+        assertTrue(rejected)
+        assertEquals("RECEIVED", inboxStatus(operationId))
+        assertEquals(0, database.readableDatabase.rawQuery(
+            "SELECT COUNT(*) FROM sales_invoices WHERE id='sale-cash-bad-amount'", null
+        ).use { it.moveToFirst(); it.getInt(0) })
+        assertEquals(10.0, stock(), 0.000001)
+        assertEquals(0, database.readableDatabase.rawQuery(
+            "SELECT COUNT(*) FROM cash_transactions WHERE source_id='sale-cash-bad-amount'", null
+        ).use { it.moveToFirst(); it.getInt(0) })
+    }
+
+    @Test fun rejectsCashSaleWhenMappedAccountIsDeactivated() {
+        val primaryWalletId = createPrimaryWallet("USD")
+        protocol.mapSecondaryCashAccount(adminId, secondaryId, "remote-wallet-disabled", primaryWalletId)
+        database.writableDatabase.execSQL(
+            "UPDATE sync_cash_account_mappings SET is_active=0 WHERE device_id=? AND remote_cash_account_id=?",
+            arrayOf(secondaryId, "remote-wallet-disabled")
+        )
+        val operationId = receiveInvoice(
+            "POST_SALES_INVOICE", "sale-cash-disabled-map", null, "CASH",
+            "remote-wallet-disabled", "WALLET", "USD"
+        )
+
+        var rejected = false
+        try { SyncDomainApplier(context).applyReceivedInvoice(operationId) }
+        catch (e: IllegalArgumentException) { rejected = e.message?.contains("لم يتم ربط حساب قبض") == true }
+
+        assertTrue(rejected)
+        assertEquals("RECEIVED", inboxStatus(operationId))
+        assertEquals(10.0, stock(), 0.000001)
+        assertEquals(0, database.readableDatabase.rawQuery(
+            "SELECT COUNT(*) FROM cash_transactions WHERE source_id='sale-cash-disabled-map'", null
+        ).use { it.moveToFirst(); it.getInt(0) })
+    }
+
+    @Test fun rejectsCashSaleWhenRemoteAccountTypeOrCurrencyDoesNotMatchMapping() {
+        val primaryWalletId = createPrimaryWallet("USD")
+        protocol.mapSecondaryCashAccount(adminId, secondaryId, "remote-wallet-metadata", primaryWalletId)
+        val operationId = receiveInvoice(
+            "POST_SALES_INVOICE", "sale-cash-metadata-mismatch", null, "CASH",
+            "remote-wallet-metadata", "CASH_BOX", "USD"
+        )
+
+        var rejected = false
+        try { SyncDomainApplier(context).applyReceivedInvoice(operationId) }
+        catch (e: IllegalArgumentException) { rejected = e.message?.contains("نوع أو عملة حساب القبض") == true }
+
+        assertTrue(rejected)
+        assertEquals("RECEIVED", inboxStatus(operationId))
+        assertEquals(10.0, stock(), 0.000001)
+    }
+
     @Test fun rejectsMalformedInvoicePayloadWithoutCreatingInvoice() {
         val operationId = receiveRaw(
             "POST_PURCHASE_INVOICE", "purchase-malformed",
@@ -223,10 +287,20 @@ class SyncDomainApplierTest {
             throw AssertionError("Incoming invoice apply failed: ${e.message}", e)
         }
 
+    private fun createPrimaryWallet(currency: String): String {
+        val id = UUID.randomUUID().toString()
+        database.writableDatabase.execSQL(
+            """INSERT INTO cash_accounts(id,name,account_type,currency_code,opening_balance_minor,is_active,created_at)
+               VALUES(?,?,?,?,0,1,?)""",
+            arrayOf(id, "محفظة اختبار $currency", "WALLET", currency, "2026-11-03T11:00:00Z")
+        )
+        return id
+    }
+
     private fun receiveInvoice(
         operation: String, invoiceId: String, partyId: String?, saleType: String,
         remoteCashAccountId: String? = null, remoteAccountType: String? = null,
-        remoteCurrency: String? = null
+        remoteCurrency: String? = null, receiptAmountMinor: Long = 300L
     ): String {
         val payload = JSONObject().apply {
             put("business_operation", operation)
@@ -249,7 +323,7 @@ class SyncDomainApplierTest {
                 put("cash_account_currency_code", remoteCurrency)
                 put("cash_receipts", JSONArray().put(JSONObject().apply {
                     put("cash_transaction_id", "remote-cash-receipt-$invoiceId")
-                    put("amount_minor", 300L)
+                    put("amount_minor", receiptAmountMinor)
                     put("currency_code", remoteCurrency)
                     put("exchange_rate_syp_per_usd_milli", 10_000_000L)
                 }))
