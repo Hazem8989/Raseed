@@ -542,6 +542,113 @@ class SyncDomainApplierTest {
         assertEquals(outboxBefore, protocol.pendingOutbox().size)
     }
 
+
+    @Test fun appliesIncomingSalesReturnOncePreservesEventTimeAndDoesNotEcho() {
+        val customer=CustomerRepository(context).create(adminId,"زبون مرتجع مزامنة").id
+        val invoices=InvoiceRepository(context)
+        val draft=invoices.saveSalesDraft(adminId,"sync-return-sale-draft",null,customer,"2026-11-03",0L,null,
+            listOf(InvoiceLineInput(productId,BigDecimal("2"),250L)),saleType="CREDIT")
+        invoices.postSale(adminId,draft.invoiceId,"sync-return-sale-post")
+        val itemId=database.readableDatabase.rawQuery("SELECT id FROM sales_items WHERE sales_invoice_id=?",
+            arrayOf(draft.invoiceId)).use { it.moveToFirst();it.getString(0) }
+        val outboxBefore=protocol.pendingOutbox().size
+        val payload=JSONObject().put("business_operation","POST_SALES_RETURN")
+            .put("original_invoice_id",draft.invoiceId).put("return_date","2026-11-03")
+            .put("reason","مرتجع وارد").put("occurred_at","2026-11-03T12:00:00Z")
+            .put("operating_date","2026-11-03")
+            .put("items",JSONArray().put(JSONObject().put("original_sales_item_id",itemId).put("quantity","1")))
+            .put("refund_allocations",JSONArray())
+        val operationId=receiveRaw("POST_SALES_RETURN","pending-return-"+UUID.randomUUID(),payload)
+        // The inbox entity ID is operation-scoped and must match the command contract.
+        database.writableDatabase.execSQL("UPDATE sync_inbox SET entity_id=? WHERE operation_id=?",
+            arrayOf("pending-return-$operationId",operationId))
+        val applier=SyncDomainApplier(context)
+        assertTrue(applier.applyReceivedOperation(operationId).applied)
+        assertEquals("APPLIED",inboxStatus(operationId))
+        assertEquals(9.0,stock(),0.000001)
+        assertEquals(1,database.readableDatabase.rawQuery(
+            "SELECT COUNT(*) FROM returns WHERE operation_id=?",arrayOf(operationId)
+        ).use { it.moveToFirst();it.getInt(0) })
+        assertEquals("2026-11-03T12:00:00Z",database.readableDatabase.rawQuery(
+            "SELECT created_at FROM returns WHERE operation_id=?",arrayOf(operationId)
+        ).use { it.moveToFirst();it.getString(0) })
+        assertEquals(outboxBefore,protocol.pendingOutbox().size)
+        database.writableDatabase.execSQL("UPDATE sync_inbox SET status='RECEIVED',applied_at=NULL WHERE operation_id=?",
+            arrayOf(operationId))
+        assertTrue(applier.applyReceivedOperation(operationId).applied)
+        assertEquals(1,database.readableDatabase.rawQuery(
+            "SELECT COUNT(*) FROM returns WHERE operation_id=?",arrayOf(operationId)
+        ).use { it.moveToFirst();it.getInt(0) })
+        assertEquals(9.0,stock(),0.000001)
+    }
+
+    @Test fun appliesIncomingPurchaseReturnOnceWithoutDuplicateStockMovement() {
+        val supplier=SupplierRepository(context).create(adminId,"مورد مرتجع مزامنة").id
+        val invoices=InvoiceRepository(context)
+        val draft=invoices.savePurchaseDraft(adminId,"sync-return-purchase-draft",null,supplier,"2026-11-03",0L,null,
+            listOf(InvoiceLineInput(productId,BigDecimal("2"),100L)))
+        invoices.postPurchase(adminId,draft.invoiceId,"sync-return-purchase-post")
+        val itemId=database.readableDatabase.rawQuery("SELECT id FROM purchase_items WHERE purchase_invoice_id=?",
+            arrayOf(draft.invoiceId)).use { it.moveToFirst();it.getString(0) }
+        val outboxBefore=protocol.pendingOutbox().size
+        val payload=JSONObject().put("business_operation","POST_PURCHASE_RETURN")
+            .put("original_invoice_id",draft.invoiceId).put("return_date","2026-11-03")
+            .put("reason","مرتجع مورد وارد").put("occurred_at","2026-11-03T13:00:00Z")
+            .put("operating_date","2026-11-03")
+            .put("items",JSONArray().put(JSONObject().put("original_purchase_item_id",itemId).put("quantity","1")))
+            .put("refund_allocations",JSONArray())
+        val operationId=receiveRaw("POST_PURCHASE_RETURN","unused",payload)
+        database.writableDatabase.execSQL("UPDATE sync_inbox SET entity_id=? WHERE operation_id=?",
+            arrayOf("pending-return-$operationId",operationId))
+        val applier=SyncDomainApplier(context)
+        assertTrue(applier.applyReceivedOperation(operationId).applied)
+        assertEquals("APPLIED",inboxStatus(operationId))
+        assertEquals(1,database.readableDatabase.rawQuery(
+            "SELECT COUNT(*) FROM returns WHERE operation_id=?",arrayOf(operationId)
+        ).use { it.moveToFirst();it.getInt(0) })
+        assertEquals("2026-11-03T13:00:00Z",database.readableDatabase.rawQuery(
+            "SELECT created_at FROM returns WHERE operation_id=?",arrayOf(operationId)
+        ).use { it.moveToFirst();it.getString(0) })
+        assertEquals(outboxBefore,protocol.pendingOutbox().size)
+        database.writableDatabase.execSQL("UPDATE sync_inbox SET status='RECEIVED',applied_at=NULL WHERE operation_id=?",
+            arrayOf(operationId))
+        assertTrue(applier.applyReceivedOperation(operationId).applied)
+        assertEquals(1,database.readableDatabase.rawQuery(
+            "SELECT COUNT(*) FROM returns WHERE operation_id=?",arrayOf(operationId)
+        ).use { it.moveToFirst();it.getInt(0) })
+    }
+
+    @Test fun appliesIncomingInventoryAdjustmentOnceUsingPrimaryFifoAndNoEcho() {
+        val outboxBefore=protocol.pendingOutbox().size
+        val payload=JSONObject().put("business_operation","POST_INVENTORY_ADJUSTMENT")
+            .put("product_id",productId).put("warehouse_id",database.readableDatabase.rawQuery(
+                "SELECT id FROM warehouses WHERE is_active=1 ORDER BY is_default DESC LIMIT 1",null
+            ).use { it.moveToFirst();it.getString(0) })
+            .put("quantity_delta","1").put("unit_cost_usd_cents",200L).put("reason","تسوية واردة")
+            .put("occurred_at","2026-11-03T14:00:00Z").put("operating_date","2026-11-03")
+        val operationId=receiveRaw("POST_INVENTORY_ADJUSTMENT","unused",payload)
+        database.writableDatabase.execSQL("UPDATE sync_inbox SET entity_id=? WHERE operation_id=?",
+            arrayOf("pending-adjustment-$operationId",operationId))
+        val applier=SyncDomainApplier(context)
+        assertTrue(applier.applyReceivedOperation(operationId).applied)
+        assertEquals("APPLIED",inboxStatus(operationId))
+        assertEquals(11.0,stock(),0.000001)
+        assertEquals(1,database.readableDatabase.rawQuery(
+            "SELECT COUNT(*) FROM inventory_adjustments WHERE operation_id=?",arrayOf(operationId)
+        ).use { it.moveToFirst();it.getInt(0) })
+        assertEquals("2026-11-03T14:00:00Z",database.readableDatabase.rawQuery(
+            "SELECT created_at FROM inventory_adjustments WHERE operation_id=?",arrayOf(operationId)
+        ).use { it.moveToFirst();it.getString(0) })
+        assertEquals(outboxBefore,protocol.pendingOutbox().size)
+        database.writableDatabase.execSQL("UPDATE sync_inbox SET status='RECEIVED',applied_at=NULL WHERE operation_id=?",
+            arrayOf(operationId))
+        assertTrue(applier.applyReceivedOperation(operationId).applied)
+        assertEquals(11.0,stock(),0.000001)
+        assertEquals(1,database.readableDatabase.rawQuery(
+            "SELECT COUNT(*) FROM inventory_adjustments WHERE operation_id=?",arrayOf(operationId)
+        ).use { it.moveToFirst();it.getInt(0) })
+    }
+
     private fun receiveRaw(operation: String, entityId: String, payload: JSONObject): String {
         val db = database.readableDatabase
         val storeId = db.rawQuery(
@@ -551,6 +658,9 @@ class SyncDomainApplierTest {
         val entityType = when(operation) {
             "POST_PURCHASE_INVOICE" -> "PURCHASE_INVOICE"
             "COLLECT_CUSTOMER_PAYMENT" -> "CUSTOMER_PAYMENT"
+            "POST_SALES_RETURN" -> "SALES_RETURN"
+            "POST_PURCHASE_RETURN" -> "PURCHASE_RETURN"
+            "POST_INVENTORY_ADJUSTMENT" -> "INVENTORY_ADJUSTMENT"
             else -> "SALES_INVOICE"
         }
         val envelope = SyncEnvelopeSecurity.create(
