@@ -80,13 +80,22 @@ Therefore:
 - Verify exactly-once financial effect under retries, offline periods, primary unavailability, and app restarts.
 - Only then enable multi-device production use.
 
-## 6. Current verified baseline (audited 2026-11-02)
+## 6. Current verified baseline (revalidated 2026-11-03)
 
-- AppDatabase.DATABASE_VERSION is 11.
-- The schema contains operation_registry, sync_queue, sync_conflicts, and audit_log.
+- AppDatabase.DATABASE_VERSION is 23. Version 23 adds store-zone operating dates to service-transfer and service-wallet ledgers and backfills existing rows.
+- The schema contains operation_registry, sync_queue, sync_conflicts, audit_log, and device-protocol tables. Schema presence does not mean live synchronization is implemented.
 - A per-installation stable device UUID helper exists, but it is not a pairing credential and does not implement device enrollment or authentication.
 - The existing queue/conflict schema does not yet provide the full device enrollment, authoritative sequencing, acknowledgement/cursor, or transport engine described above.
 - AndroidManifest.xml has no INTERNET/network-state permissions and declares no sync service.
 - app/build.gradle.kts has no networking, coroutine, or WorkManager dependency.
 - Therefore live synchronization is not implemented and no network listener is enabled. This is intentional until the approved security gates are completed.
 - The current comprehensive source/CI audit is recorded in COMPREHENSIVE_AUDIT_2026-11-02.md.
+
+
+## 7. Store calendar integrity
+
+- The store owns an IANA time zone (default `Asia/Damascus`); device-local time zones must not determine operating dates.
+- UTC instants remain immutable. Operating dates are stored explicitly where reports group financial movements by business day.
+- Database v23 adds `operating_date` to `service_transfers` and `service_wallet_transactions`, backfills legacy rows using the configured store zone, and indexes those report fields for upgraded databases.
+- Service transfer daily summaries now filter by the stored operating date. Daily cash movement list timestamps are formatted using the store zone.
+- A future store-zone change must not rewrite already-recorded operating dates; historical rows retain the business date assigned when the movement occurred.
