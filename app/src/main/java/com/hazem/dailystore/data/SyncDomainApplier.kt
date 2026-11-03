@@ -13,8 +13,7 @@ import java.math.BigDecimal
  * posting use deterministic operation IDs so a process death between those
  * steps can safely resume without posting stock or cash twice.
  *
- * Cash-sale receipt accounts are intentionally not guessed: until cash-account
- * identity mapping is implemented, those commands remain unapplied.
+ * Cash-sale receipt accounts must have an explicit per-device mapping on the primary.
  */
 class SyncDomainApplier(context: Context) {
     private val appContext = context.applicationContext
@@ -74,12 +73,9 @@ class SyncDomainApplier(context: Context) {
         require(invoiceId == row.entityId) { "معرّف الفاتورة لا يطابق معرّف الكيان في الظرف" }
         val invoiceType = if (businessOperation == "POST_PURCHASE_INVOICE") "PURCHASE" else "SALE"
         val saleType = payload.optString("sale_type", "CASH")
-        if (invoiceType == "SALE" && saleType != "CREDIT") {
-            throw IllegalArgumentException(
-                "بيع نقدي وارد مؤجل: يلزم أولاً ربط حسابات الصناديق والمحافظ بين الجهازين؛ لم يتم ترحيل أي حركة نقدية"
-            )
+        require(invoiceType != "SALE" || saleType == "CREDIT" || saleType == "CASH") {
+            "نوع البيع الوارد غير مدعوم"
         }
-
         val items = payload.getJSONArray("items")
         require(items.length() in 1..500) { "عدد أصناف الفاتورة غير صالح" }
         val lines = parseLines(items)
@@ -98,6 +94,57 @@ class SyncDomainApplier(context: Context) {
         val sourceOperatingDate = payload.optString("posted_operating_date")
             .takeIf { it.matches(Regex("\\d{4}-\\d{2}-\\d{2}")) }
             ?: sourceEventAt.substring(0, 10)
+
+        var mappedCashAccountId: String? = null
+        if (invoiceType == "SALE" && saleType == "CASH") {
+            val remoteCashAccountId = payload.optString("cash_account_id")
+                .takeIf { it.isNotBlank() && it != "null" }
+                ?: throw IllegalArgumentException("البيع النقدي الوارد لا يحدد حساب القبض الأصلي")
+            val remoteAccountType = payload.optString("cash_account_type")
+            val remoteCurrency = payload.optString("cash_account_currency_code")
+            require(remoteAccountType in setOf("CASH_BOX", "WALLET") &&
+                remoteCurrency in setOf("USD", "SYP")) {
+                "بيانات حساب القبض الأصلي غير مكتملة أو غير مدعومة"
+            }
+            mappedCashAccountId = db.rawQuery(
+                """SELECT m.primary_cash_account_id,a.account_type,a.currency_code
+                   FROM sync_cash_account_mappings m
+                   JOIN cash_accounts a ON a.id=m.primary_cash_account_id
+                   WHERE m.device_id=? AND m.remote_cash_account_id=? AND m.is_active=1
+                     AND a.is_active=1""".trimIndent(),
+                arrayOf(row.originDeviceId, remoteCashAccountId)
+            ).use { c ->
+                require(c.moveToFirst()) { "لم يتم ربط حساب قبض الجهاز الثانوي بحساب على الجهاز الأساسي" }
+                require(c.getString(1) == remoteAccountType && c.getString(2) == remoteCurrency) {
+                    "نوع أو عملة حساب القبض المرتبط لا يطابق الحساب الأصلي"
+                }
+                c.getString(0)
+            }
+            val receipts = payload.optJSONArray("cash_receipts")
+                ?: throw IllegalArgumentException("البيع النقدي الوارد لا يحتوي تفاصيل القبض")
+            require(receipts.length() == 1) { "يجب أن يحتوي البيع النقدي على قيد قبض واحد مطابق" }
+            val receipt = receipts.getJSONObject(0)
+            require(receipt.optString("cash_transaction_id").isNotBlank()) {
+                "معرّف قيد القبض الأصلي مفقود"
+            }
+            val expectedCurrency = remoteCurrency
+            require(receipt.optString("currency_code") == expectedCurrency) {
+                "عملة قيد القبض لا تطابق عملة الحساب الأصلي"
+            }
+            val expectedAmount = when (expectedCurrency) {
+                "USD" -> payload.getLong("total_usd_cents")
+                "SYP" -> CurrencyConverter.usdCentsToSyp(
+                    payload.getLong("total_usd_cents"), rate
+                )
+                else -> error("عملة قبض غير مدعومة")
+            }
+            require(receipt.getLong("amount_minor") == expectedAmount) {
+                "قيمة قيد القبض الأصلي لا تطابق إجمالي الفاتورة وسعر صرفها"
+            }
+            val receiptRate = if (receipt.isNull("exchange_rate_syp_per_usd_milli")) 0L
+                else receipt.getLong("exchange_rate_syp_per_usd_milli")
+            require(receiptRate == rate) { "سعر صرف قيد القبض لا يطابق سعر الفاتورة" }
+        }
 
         val invoices = InvoiceRepository(appContext)
         val draftOperationId = "${operationId}:IMPORT_DRAFT"
@@ -134,6 +181,11 @@ class SyncDomainApplier(context: Context) {
 
         if (invoiceType == "PURCHASE") {
             invoices.postPurchase(row.primaryUserId, invoiceId, postOperationId, sourceEventAt, sourceOperatingDate)
+        } else if (saleType == "CASH") {
+            invoices.postCashSale(
+                row.primaryUserId, invoiceId, postOperationId,
+                requireNotNull(mappedCashAccountId), sourceEventAt, sourceOperatingDate
+            )
         } else {
             invoices.postSale(row.primaryUserId, invoiceId, postOperationId, sourceEventAt, sourceOperatingDate)
         }
