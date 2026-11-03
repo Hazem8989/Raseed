@@ -319,11 +319,8 @@ class CustomerPaymentRepositoryTest {
         val context = RuntimeEnvironment.getApplication()
         val invoiceId = createCreditInvoice()
         val sync = SyncProtocolRepository(context)
-        // Establish the primary store identity before provisioning the secondary test peer.
-        sync.configureAsPrimary(adminId, "جهاز أساسي اختباري")
-        val storeId = database.readableDatabase.rawQuery(
-            "SELECT state_value FROM sync_protocol_state WHERE state_key='store_id'", null
-        ).use { c -> assertTrue(c.moveToFirst()); c.getString(0) }
+        // Give this isolated secondary fixture a store identity without changing its local role to PRIMARY.
+        val storeId = UUID.randomUUID().toString()
         val primaryDeviceId = UUID.randomUUID().toString()
         val credential = android.util.Base64.encodeToString(
             ByteArray(32) { 11 },
