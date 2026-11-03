@@ -42,6 +42,7 @@ import com.hazem.dailystore.data.SecureSessionStore
 import com.hazem.dailystore.data.CurrencyConverter
 import com.hazem.dailystore.data.StoreRepository
 import com.hazem.dailystore.data.StoreTime
+import com.hazem.dailystore.data.SyncProtocolRepository
 import com.hazem.dailystore.data.InvoiceRepository
 import com.hazem.dailystore.data.InvoiceLineInput
 import com.hazem.dailystore.data.SupplierRepository
