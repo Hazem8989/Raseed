@@ -136,9 +136,6 @@ class OperatingExpenseRepository(context: Context) {
                     ?.takeIf { it.matches(Regex("\\d{4}-\\d{2}-\\d{2}T.*")) } ?: timestamp()
                 val eventDate = priorPayload?.optString("expense_date")
                     ?.takeIf { it.matches(Regex("\\d{4}-\\d{2}-\\d{2}")) } ?: expenseDate
-                val movementDate = priorPayload?.optString("operating_date")
-                    ?.takeIf { it.matches(Regex("\\d{4}-\\d{2}-\\d{2}")) }
-                    ?: StoreTime.operatingDate(db, occurredAt)
                 val recordedRate = priorPayload?.optLong("exchange_rate_syp_per_usd_milli", rate) ?: rate
                 val recordedUsd = if (account.second == "USD") amountMinor else CurrencyConverter.sypToUsdCents(amountMinor, recordedRate)
                 val expenseId = "pending-expense-$operationId"
@@ -150,7 +147,7 @@ class OperatingExpenseRepository(context: Context) {
                     .put("amount_minor", amountMinor).put("currency_code", account.second)
                     .put("exchange_rate_syp_per_usd_milli", recordedRate)
                     .put("amount_usd_cents", recordedUsd).put("expense_date", eventDate)
-                    .put("operating_date", movementDate).put("occurred_at", occurredAt)
+                    .put("operating_date", eventDate).put("occurred_at", occurredAt)
                     .put("reference", cleanReference ?: JSONObject.NULL)
                     .put("notes", cleanNotes ?: JSONObject.NULL)
                 sync.enqueueSecondaryCommand(
