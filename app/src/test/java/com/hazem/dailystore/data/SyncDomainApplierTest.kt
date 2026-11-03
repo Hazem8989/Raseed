@@ -668,6 +668,36 @@ class SyncDomainApplierTest {
         assertEquals(18_000L, wallet.listWallets().single { it.serviceKey == ServiceTransferRepository.SYRIATEL_SHARED }.balanceMinor)
     }
 
+    @Test fun appliesIncomingSupplierRolloverOnceWithMappedAccountAndOriginalBusinessDate() {
+        val source = CashAccountRepository(context).create(adminId, "صندوق الموردين المزامن", "CASH_BOX", "SYP", 50_000L)
+        protocol.mapSecondaryCashAccount(adminId, secondaryId, "remote-supplier-box", source.id)
+        val beforeOutbox = protocol.pendingOutbox().size
+        val payload = JSONObject().put("business_operation","SET_SUPPLIER_ROLLOVER")
+            .put("cash_account_id","remote-supplier-box").put("cash_account_type","CASH_BOX")
+            .put("cash_account_currency_code","SYP").put("amount_minor",12_000L)
+            .put("note","تخصيص تجريبي").put("occurred_at","2026-11-03T15:20:00Z")
+            .put("operating_date","2026-11-03")
+        val operationId = receiveRaw("SET_SUPPLIER_ROLLOVER","unused",payload)
+        val applier = SyncDomainApplier(context)
+        assertTrue(applier.applyReceivedOperation(operationId).applied)
+        assertEquals("APPLIED",inboxStatus(operationId))
+        assertEquals(12_000L,database.readableDatabase.rawQuery(
+            "SELECT allocated_minor FROM daily_supplier_rollovers WHERE operating_date='2026-11-03'",null
+        ).use { it.moveToFirst();it.getLong(0) })
+        assertEquals(source.id,database.readableDatabase.rawQuery(
+            "SELECT account_id FROM daily_supplier_rollovers WHERE operating_date='2026-11-03'",null
+        ).use { it.moveToFirst();it.getString(0) })
+        assertEquals("2026-11-03T15:20:00Z",database.readableDatabase.rawQuery(
+            "SELECT created_at FROM daily_supplier_rollovers WHERE operating_date='2026-11-03'",null
+        ).use { it.moveToFirst();it.getString(0) })
+        assertEquals(beforeOutbox,protocol.pendingOutbox().size)
+        database.writableDatabase.execSQL("UPDATE sync_inbox SET status='RECEIVED',applied_at=NULL WHERE operation_id=?",arrayOf(operationId))
+        assertTrue(applier.applyReceivedOperation(operationId).applied)
+        assertEquals(1,database.readableDatabase.rawQuery(
+            "SELECT COUNT(*) FROM daily_supplier_rollovers WHERE operating_date='2026-11-03'",null
+        ).use { it.moveToFirst();it.getInt(0) })
+    }
+
     private fun receiveRaw(operation: String, entityId: String, payload: JSONObject): String {
         val db = database.readableDatabase
         val storeId = db.rawQuery(
@@ -678,6 +708,7 @@ class SyncDomainApplierTest {
             "POST_SALES_RETURN", "POST_PURCHASE_RETURN" -> "pending-return-$operationId"
             "POST_INVENTORY_ADJUSTMENT" -> "pending-adjustment-$operationId"
             "EXECUTE_SERVICE_TRANSFER" -> "pending-service-transfer-$operationId"
+            "SET_SUPPLIER_ROLLOVER" -> "pending-rollover-$operationId"
             else -> entityId
         }
         val entityType = when(operation) {
@@ -687,6 +718,7 @@ class SyncDomainApplierTest {
             "POST_PURCHASE_RETURN" -> "PURCHASE_RETURN"
             "POST_INVENTORY_ADJUSTMENT" -> "INVENTORY_ADJUSTMENT"
             "EXECUTE_SERVICE_TRANSFER" -> "SERVICE_TRANSFER"
+            "SET_SUPPLIER_ROLLOVER" -> "DAILY_SUPPLIER_ROLLOVER"
             else -> "SALES_INVOICE"
         }
         val envelope = SyncEnvelopeSecurity.create(

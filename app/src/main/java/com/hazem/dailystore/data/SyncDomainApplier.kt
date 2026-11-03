@@ -50,6 +50,7 @@ class SyncDomainApplier(context: Context) {
             "POST_PURCHASE_RETURN" -> applyReceivedPurchaseReturn(operationId)
             "POST_INVENTORY_ADJUSTMENT" -> applyReceivedInventoryAdjustment(operationId)
             "EXECUTE_SERVICE_TRANSFER" -> applyReceivedServiceTransfer(operationId)
+            "SET_SUPPLIER_ROLLOVER" -> applyReceivedSupplierRollover(operationId)
             else -> throw IllegalArgumentException(
                 "نوع العملية الواردة غير مدعوم بعد؛ بقي الأمر محفوظاً دون تطبيق"
             )
@@ -990,6 +991,73 @@ class SyncDomainApplier(context: Context) {
         } finally { db.endTransaction() }
     }
 
+
+
+    /** Applies a secondary's daily supplier-cash allocation on the primary only. */
+    fun applyReceivedSupplierRollover(operationId: String): ApplyResult = synchronized(APPLY_LOCK) {
+        require(operationId.isNotBlank()) { "معرّف العملية مطلوب" }
+        val db = database.writableDatabase
+        val localId = SyncDeviceIdentity.getOrCreate(appContext)
+        val role = db.rawQuery("SELECT state_value FROM sync_protocol_state WHERE state_key='local_device_role'", null).use { if(it.moveToFirst()) it.getString(0) else null }
+        val authority = db.rawQuery("SELECT state_value FROM sync_protocol_state WHERE state_key='authority_device_id'", null).use { if(it.moveToFirst()) it.getString(0) else null }
+        require(role == "PRIMARY" && authority == localId) { "اعتماد النقد المدور الوارد مسموح على الجهاز الأساسي فقط" }
+        db.beginTransaction()
+        try {
+            val row = db.rawQuery(
+                """SELECT i.origin_device_id,i.entity_type,i.entity_id,i.payload_json,i.status,m.primary_user_id,i.payload_sha256
+                   FROM sync_inbox i JOIN sync_actor_mappings m ON m.device_id=i.origin_device_id AND m.is_active=1
+                   JOIN users u ON u.id=m.primary_user_id JOIN sync_devices d ON d.device_id=i.origin_device_id
+                   WHERE i.operation_id=? AND d.device_role='SECONDARY' AND d.status='ACTIVE'
+                     AND u.is_active=1 AND u.must_change_password=0 ORDER BY m.mapped_at DESC LIMIT 1""".trimIndent(),
+                arrayOf(operationId)
+            ).use { c ->
+                require(c.moveToFirst()) { "أمر تخصيص النقد المدور غير موجود أو الجهاز/المستخدم غير مفعل أو غير مربوط" }
+                Array(7) { i -> c.getString(i) }
+            }
+            if (row[4] == "APPLIED") { db.setTransactionSuccessful(); return@synchronized ApplyResult(operationId, true) }
+            require(row[4] == "RECEIVED" && row[1] == "DAILY_SUPPLIER_ROLLOVER") { "نوع أو حالة أمر النقد المدور غير صالح" }
+            val payload = JSONObject(row[3]!!)
+            require(payload.optString("business_operation") == "SET_SUPPLIER_ROLLOVER") { "نوع العملية الواردة غير صالح" }
+            val actor = row[5]!!
+            PermissionPolicy.require(db, actor, PermissionPolicy.DAILY_CASH_MANAGE)
+            val existing = db.rawQuery("SELECT operation_type,payload_hash,result_reference FROM operation_registry WHERE operation_id=?", arrayOf(operationId)).use {
+                if(it.moveToFirst()) arrayOf(it.getString(0),it.getString(1),if(it.isNull(2)) "" else it.getString(2)) else null
+            }
+            if(existing != null) {
+                require(existing[0] == "SET_SUPPLIER_ROLLOVER" && existing[1] == row[6] && existing[2].isNotBlank()) { "تعارض في سجل النقد المدور" }
+                db.update("sync_inbox", ContentValues().apply { put("status","APPLIED"); put("applied_at",timestamp()); putNull("rejection_reason") }, "operation_id=? AND status='RECEIVED'", arrayOf(operationId))
+                db.setTransactionSuccessful()
+                return@synchronized ApplyResult(operationId, true)
+            }
+            val remoteAccount = payload.getString("cash_account_id")
+            require(payload.getString("cash_account_type") == "CASH_BOX" && payload.getString("cash_account_currency_code") == "SYP") { "حساب النقد المدور يجب أن يكون صندوقاً بالليرة السورية" }
+            val mappedAccount = db.rawQuery(
+                """SELECT m.primary_cash_account_id,a.account_type,a.currency_code,a.is_active
+                   FROM sync_cash_account_mappings m JOIN cash_accounts a ON a.id=m.primary_cash_account_id
+                   WHERE m.device_id=? AND m.remote_cash_account_id=? AND m.is_active=1""".trimIndent(),
+                arrayOf(row[0], remoteAccount)
+            ).use { c ->
+                require(c.moveToFirst() && c.getInt(3)==1) { "صندوق الجهاز الثانوي غير مربوط أو موقوف" }
+                require(c.getString(1)=="CASH_BOX" && c.getString(2)=="SYP") { "الصندوق المرتبط لا يطابق نوع أو عملة الصندوق الأصلي" }
+                c.getString(0)
+            }
+            val occurredAt = payload.getString("occurred_at")
+            val operatingDate = payload.getString("operating_date")
+            require(occurredAt.matches(Regex("\\d{4}-\\d{2}-\\d{2}T.*")) && operatingDate.matches(Regex("\\d{4}-\\d{2}-\\d{2}"))) { "تاريخ تخصيص النقد المدور غير صالح" }
+            val amount = payload.getLong("amount_minor")
+            require(amount >= 0L) { "مبلغ النقد المدور غير صالح" }
+            val note = if(payload.isNull("note")) null else payload.getString("note").take(500)
+            DailyBalanceRepository(appContext).setSupplierRollover(actor,mappedAccount,amount,note,operationId,occurredAt,operatingDate,true)
+            db.insertOrThrow("operation_registry", null, ContentValues().apply {
+                put("operation_id",operationId); put("operation_type","SET_SUPPLIER_ROLLOVER"); put("payload_hash",row[6])
+                put("status","COMPLETED"); put("result_reference",operatingDate); put("created_at",timestamp()); put("completed_at",timestamp())
+            })
+            db.update("sync_inbox", ContentValues().apply { put("status","APPLIED"); put("applied_at",timestamp()); putNull("rejection_reason") },
+                "operation_id=? AND status='RECEIVED'", arrayOf(operationId)).also { require(it==1) { "تعذر تثبيت حالة تخصيص النقد المدور" } }
+            db.setTransactionSuccessful()
+            ApplyResult(operationId,true)
+        } finally { db.endTransaction() }
+    }
 
     /** Applies an authenticated service-wallet transfer on the primary exactly once. */
     fun applyReceivedServiceTransfer(operationId: String): ApplyResult = synchronized(APPLY_LOCK) {

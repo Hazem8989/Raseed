@@ -446,6 +446,7 @@ class SyncProtocolRepository(private val context: Context, private val credentia
             "POST_SUPPLIER_PAYMENT" -> PermissionPolicy.SUPPLIER_PAYMENTS_MANAGE
             "POST_OPERATING_EXPENSE" -> PermissionPolicy.EXPENSES_MANAGE
             "EXECUTE_SERVICE_TRANSFER" -> PermissionPolicy.SERVICE_TRANSFERS_EXECUTE
+            "SET_SUPPLIER_ROLLOVER" -> PermissionPolicy.DAILY_CASH_MANAGE
             "POST_SALES_RETURN", "POST_PURCHASE_RETURN" -> PermissionPolicy.RETURNS_PROCESS
             "POST_INVENTORY_ADJUSTMENT", "ADJUST_INVENTORY" -> PermissionPolicy.INVENTORY_ADJUST
             else -> throw IllegalArgumentException("نوع العملية غير مدعوم للاعتماد عن بعد")

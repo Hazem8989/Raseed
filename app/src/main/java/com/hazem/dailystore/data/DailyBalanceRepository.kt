@@ -24,18 +24,47 @@ data class SupplierRolloverSummary(
 data class AccountTransferResult(val transferId:String,val replayed:Boolean)
 
 class DailyBalanceRepository(context:Context) {
+    private val appContext=context.applicationContext
     private val database=AppDatabase.getInstance(context)
 
-    fun setSupplierRollover(actor:String,accountId:String,amount:Long,note:String?=null):SupplierRolloverSummary {
+    fun setSupplierRollover(
+        actor:String, accountId:String, amount:Long, note:String?=null,
+        operationId:String=UUID.randomUUID().toString(), occurredAt:String?=null,
+        operatingDate:String?=null, syncOrigin:Boolean=false
+    ):SupplierRolloverSummary {
         require(amount>=0L){"مبلغ النقد المدور لا يمكن أن يكون سالباً"}
-        val db=database.writableDatabase; manager(db,actor); db.beginTransaction()
+        require(accountId.isNotBlank() && operationId.isNotBlank())
+        val db=database.writableDatabase
+        val role=db.rawQuery("SELECT state_value FROM sync_protocol_state WHERE state_key='local_device_role'",null).use{if(it.moveToFirst())it.getString(0)else null}
+        val eventAt=occurredAt ?: stamp()
+        val date=operatingDate ?: today()
+        require(eventAt.matches(Regex("\\d{4}-\\d{2}-\\d{2}T.*")) && date.matches(Regex("\\d{4}-\\d{2}-\\d{2}"))) {"تاريخ تخصيص النقد المدور غير صالح"}
+        if(role=="SECONDARY") {
+            PermissionPolicy.requireAssigned(db,actor,PermissionPolicy.DAILY_CASH_MANAGE)
+            val name=db.rawQuery("SELECT name FROM cash_accounts WHERE id=? AND account_type='CASH_BOX' AND currency_code='SYP' AND is_active=1",arrayOf(accountId)).use{
+                require(it.moveToFirst()){"اختر صندوقاً نقدياً نشطاً بالليرة السورية"};it.getString(0)
+            }
+            val payload=org.json.JSONObject().put("business_operation","SET_SUPPLIER_ROLLOVER")
+                .put("cash_account_id",accountId).put("cash_account_type","CASH_BOX").put("cash_account_currency_code","SYP")
+                .put("amount_minor",amount).put("note",note ?: org.json.JSONObject.NULL)
+                .put("occurred_at",eventAt).put("operating_date",date)
+            db.beginTransaction()
+            try {
+                SyncProtocolRepository(appContext).enqueueSecondaryCommand(
+                    db,actor,operationId,"SET_SUPPLIER_ROLLOVER","DAILY_SUPPLIER_ROLLOVER","pending-rollover-$operationId",payload.toString()
+                )
+                db.setTransactionSuccessful()
+            } finally { db.endTransaction() }
+            return SupplierRolloverSummary(date,accountId,name,amount,0L,0L)
+        }
+        manager(db,actor); db.beginTransaction()
         try {
             val name=db.rawQuery("SELECT name FROM cash_accounts WHERE id=? AND account_type='CASH_BOX' AND currency_code='SYP' AND is_active=1",arrayOf(accountId)).use {
                 require(it.moveToFirst()){"اختر صندوقاً نقدياً نشطاً بالليرة السورية"};it.getString(0)
             }
             val isRechargeAccount=db.rawQuery("SELECT 1 FROM app_settings WHERE setting_key='service_recharge_cash_account_id' AND setting_value=?",arrayOf(accountId)).use{it.moveToFirst()}
             require(!isRechargeAccount){"هذا الصندوق مخصص لشراء رصيد الخدمات ولا يمكن تخصيصه للموردين"}
-            val date=today();val used=usage(db,date,accountId)
+            val used=usage(db,date,accountId)
             val unrelatedMovements=db.rawQuery(
                 "SELECT COUNT(*) FROM cash_transactions WHERE account_id=? AND COALESCE(operating_date,substr(created_at,1,10))=? AND transaction_type NOT IN ('PURCHASE_PAYMENT','PERSONAL_WITHDRAWAL','ACCOUNT_TRANSFER_IN')",
                 arrayOf(accountId,date)
@@ -59,7 +88,7 @@ class DailyBalanceRepository(context:Context) {
             require(balance(db, accountId) >= amount) {
                 "المبلغ المخصص يتجاوز الرصيد الفعلي الموجود في صندوق الموردين"
             }
-            val now=stamp();val v=ContentValues().apply {
+            val now=eventAt;val v=ContentValues().apply {
                 put("operating_date",date);put("account_id",accountId);put("allocated_minor",amount)
                 put("note",note?.trim()?.takeIf { x->x.isNotEmpty() });put("updated_by",actor)
                 if(old==null)put("created_at",now);put("updated_at",now)
@@ -71,6 +100,15 @@ class DailyBalanceRepository(context:Context) {
             audit(db,actor,if(old==null)"CREATE_DAILY_SUPPLIER_ROLLOVER" else "UPDATE_DAILY_SUPPLIER_ROLLOVER",
                 "DAILY_SUPPLIER_ROLLOVER",date,old?.let { "{\"account_id\":\""+esc(it.first)+"\",\"allocated_minor\":"+it.second+"}" },
                 "{\"account_id\":\""+esc(accountId)+"\",\"account_name\":\""+esc(name)+"\",\"allocated_minor\":"+amount+",\"note\":\""+esc(note.orEmpty())+"\"}",now)
+            if(!syncOrigin) {
+                val payload=org.json.JSONObject().put("business_operation","SET_SUPPLIER_ROLLOVER")
+                    .put("cash_account_id",accountId).put("cash_account_type","CASH_BOX").put("cash_account_currency_code","SYP")
+                    .put("amount_minor",amount).put("note",note ?: org.json.JSONObject.NULL)
+                    .put("occurred_at",eventAt).put("operating_date",date)
+                SyncProtocolRepository(appContext).enqueueLocalOperation(
+                    db,actor,operationId,"SET_SUPPLIER_ROLLOVER","DAILY_SUPPLIER_ROLLOVER",date,"UPSERT",payload.toString()
+                )
+            }
             db.setTransactionSuccessful()
             return SupplierRolloverSummary(date,accountId,name,amount,used.first,used.second)
         } finally { db.endTransaction() }
