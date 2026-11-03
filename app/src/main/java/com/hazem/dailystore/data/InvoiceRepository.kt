@@ -112,13 +112,17 @@ class InvoiceRepository(context: Context) {
             val warehouseId = defaultWarehouseId(db)
             val now = timestamp()
             val resolvedId = invoiceId ?: UUID.randomUUID().toString()
+            // An explicit ID may belong to a new invoice arriving from another
+            // device. Treat it as an insert when it is not present locally; only
+            // an existing DRAFT may be edited. Posted/cancelled IDs remain fenced.
             val current = if (invoiceId != null) invoiceStatus(db, table, invoiceId) else null
-            if (invoiceId != null) require(current == "DRAFT") { "يمكن تعديل المسودات فقط" }
+            require(current == null || current == "DRAFT") { "يمكن تعديل المسودات فقط" }
+            val isNewInvoice = current == null
             val subtotal = lines.fold(0L) { sum, line -> Math.addExact(sum, lineTotal(line)) }
             require(discountUsdCents <= subtotal) { "الخصم أكبر من إجمالي الفاتورة" }
             val total = Math.subtractExact(subtotal, discountUsdCents)
             val rate = currentRate(db)
-            val number = if (invoiceId == null) nextInvoiceNumber(db, table, type, invoiceDate) else invoiceNumber(db, table, invoiceId)
+            val number = if (isNewInvoice) nextInvoiceNumber(db, table, type, invoiceDate) else invoiceNumber(db, table, resolvedId)
             val header = ContentValues().apply {
                 put("id", resolvedId)
                 put("invoice_number", number)
@@ -133,9 +137,9 @@ class InvoiceRepository(context: Context) {
                 put("exchange_rate_syp_per_usd_milli", rate)
                 if (notes == null) putNull("notes") else put("notes", notes)
                 put("updated_at", now)
-                if (invoiceId == null) put("created_at", now)
+                if (isNewInvoice) put("created_at", now)
             }
-            if (invoiceId == null) db.insertOrThrow(table, null, header)
+            if (isNewInvoice) db.insertOrThrow(table, null, header)
             else {
                 db.update(table, header, "id=? AND status='DRAFT'", arrayOf(resolvedId)).also {
                     require(it == 1) { "تعذر تحديث مسودة الفاتورة" }
