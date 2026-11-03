@@ -99,6 +99,67 @@ class OperatingExpenseRepository(context: Context) {
         val db=database.writableDatabase
         db.beginTransaction()
         try {
+            val localRole = db.rawQuery(
+                "SELECT state_value FROM sync_protocol_state WHERE state_key='local_device_role'", null
+            ).use { c -> if (c.moveToFirst()) c.getString(0) else null }
+            if (localRole == "SECONDARY") {
+                PermissionPolicy.requireAssigned(db, actorUserId, PermissionPolicy.EXPENSES_MANAGE)
+                require(db.rawQuery(
+                    "SELECT 1 FROM expense_categories WHERE id=? AND is_active=1",
+                    arrayOf(categoryId)
+                ).use { it.moveToFirst() }) { "تصنيف المصروف غير موجود أو موقوف على هذا الجهاز" }
+                val account = db.rawQuery(
+                    "SELECT account_type,currency_code,is_active FROM cash_accounts WHERE id=?",
+                    arrayOf(cashAccountId)
+                ).use { c ->
+                    require(c.moveToFirst() && c.getInt(2) == 1) { "الحساب المالي غير موجود أو موقوف" }
+                    c.getString(0) to c.getString(1)
+                }
+                require(account.first in setOf("CASH_BOX", "WALLET") && account.second in setOf("USD", "SYP")) {
+                    "نوع أو عملة حساب المصروف غير مدعومين"
+                }
+                require(!db.rawQuery(
+                    "SELECT 1 FROM system_cash_account_roles WHERE role_key='SUPPLIER_ROLLOVER' AND account_id=?",
+                    arrayOf(cashAccountId)
+                ).use { it.moveToFirst() }) { "لا يمكن تسجيل مصروف من مخصص دفعات الموردين اليومي" }
+                val rate = currentRate(db)
+                if (account.second == "SYP") require(rate > 0L) {
+                    "يجب تحديد سعر الصرف قبل تسجيل مصروف بالليرة السورية"
+                }
+                val amountUsd = if (account.second == "USD") amountMinor else CurrencyConverter.sypToUsdCents(amountMinor, rate)
+                val sync = SyncProtocolRepository(context)
+                val priorPayload = db.rawQuery(
+                    "SELECT payload_json FROM sync_operation_envelopes WHERE operation_id=?",
+                    arrayOf(operationId)
+                ).use { c -> if (c.moveToFirst()) JSONObject(c.getString(0)) else null }
+                val occurredAt = priorPayload?.optString("occurred_at")
+                    ?.takeIf { it.matches(Regex("\\d{4}-\\d{2}-\\d{2}T.*")) } ?: timestamp()
+                val eventDate = priorPayload?.optString("expense_date")
+                    ?.takeIf { it.matches(Regex("\\d{4}-\\d{2}-\\d{2}")) } ?: expenseDate
+                val movementDate = priorPayload?.optString("operating_date")
+                    ?.takeIf { it.matches(Regex("\\d{4}-\\d{2}-\\d{2}")) }
+                    ?: StoreTime.operatingDate(db, occurredAt)
+                val recordedRate = priorPayload?.optLong("exchange_rate_syp_per_usd_milli", rate) ?: rate
+                val recordedUsd = if (account.second == "USD") amountMinor else CurrencyConverter.sypToUsdCents(amountMinor, recordedRate)
+                val expenseId = "pending-expense-$operationId"
+                val cashId = "pending-cash-$operationId"
+                val payload = JSONObject()
+                    .put("expense_id", expenseId).put("cash_transaction_id", cashId)
+                    .put("category_id", categoryId).put("cash_account_id", cashAccountId)
+                    .put("cash_account_type", account.first).put("cash_account_currency_code", account.second)
+                    .put("amount_minor", amountMinor).put("currency_code", account.second)
+                    .put("exchange_rate_syp_per_usd_milli", recordedRate)
+                    .put("amount_usd_cents", recordedUsd).put("expense_date", eventDate)
+                    .put("operating_date", movementDate).put("occurred_at", occurredAt)
+                    .put("reference", cleanReference ?: JSONObject.NULL)
+                    .put("notes", cleanNotes ?: JSONObject.NULL)
+                sync.enqueueSecondaryCommand(
+                    db, actorUserId, operationId, "POST_OPERATING_EXPENSE",
+                    "OPERATING_EXPENSE", expenseId, payload.toString()
+                )
+                db.setTransactionSuccessful()
+                return OperatingExpenseResult(expenseId, cashId, amountMinor, account.second, recordedUsd, false)
+            }
             PermissionPolicy.require(db,actorUserId,PermissionPolicy.EXPENSES_MANAGE)
             val existing=db.rawQuery(
                 "SELECT operation_type,payload_hash,result_reference FROM operation_registry WHERE operation_id=?",
