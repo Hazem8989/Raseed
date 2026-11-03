@@ -511,7 +511,7 @@ class CustomerPaymentRepository(context: Context) {
         ).use { if (it.moveToFirst()) it.getLong(0) else 0L }
 
     private fun operatingDate(): String = SimpleDateFormat("yyyy-MM-dd", Locale.US).apply {
-        timeZone = TimeZone.getTimeZone("Asia/Damascus")
+        timeZone = java.util.SimpleTimeZone(3 * 60 * 60 * 1000, "UTC+03:00")
     }.format(Date())
     private fun timestamp(): String = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss.SSS'Z'", Locale.US)
         .apply { timeZone = TimeZone.getTimeZone("UTC") }.format(Date())
