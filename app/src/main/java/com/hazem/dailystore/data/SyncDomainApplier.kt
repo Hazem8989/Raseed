@@ -46,6 +46,9 @@ class SyncDomainApplier(context: Context) {
             "POST_OPERATING_EXPENSE" -> applyReceivedOperatingExpense(operationId)
             "POST_SUPPLIER_PAYMENT" -> applyReceivedSupplierPayment(operationId)
             "COLLECT_CUSTOMER_PAYMENT" -> applyReceivedCustomerCollection(operationId)
+            "POST_SALES_RETURN" -> applyReceivedSalesReturn(operationId)
+            "POST_PURCHASE_RETURN" -> applyReceivedPurchaseReturn(operationId)
+            "POST_INVENTORY_ADJUSTMENT" -> applyReceivedInventoryAdjustment(operationId)
             else -> throw IllegalArgumentException(
                 "نوع العملية الواردة غير مدعوم بعد؛ بقي الأمر محفوظاً دون تطبيق"
             )
@@ -985,6 +988,167 @@ class SyncDomainApplier(context: Context) {
             ApplyResult(operationId,true)
         } finally { db.endTransaction() }
     }
+
+
+    fun applyReceivedSalesReturn(operationId: String): ApplyResult =
+        applyReceivedReturn(operationId, "POST_SALES_RETURN", "SALES_RETURN")
+
+    fun applyReceivedPurchaseReturn(operationId: String): ApplyResult =
+        applyReceivedReturn(operationId, "POST_PURCHASE_RETURN", "PURCHASE_RETURN")
+
+    private fun applyReceivedReturn(operationId: String, businessOperation: String, entityType: String): ApplyResult =
+        synchronized(APPLY_LOCK) {
+            require(operationId.isNotBlank()) { "معرّف الأمر مطلوب" }
+            val db=database.writableDatabase
+            val localId=SyncDeviceIdentity.getOrCreate(appContext)
+            val role=db.rawQuery("SELECT state_value FROM sync_protocol_state WHERE state_key='local_device_role'",null)
+                .use { c -> if(c.moveToFirst()) c.getString(0) else null }
+            val authority=db.rawQuery("SELECT state_value FROM sync_protocol_state WHERE state_key='authority_device_id'",null)
+                .use { c -> if(c.moveToFirst()) c.getString(0) else null }
+            require(role=="PRIMARY" && authority==localId) { "تطبيق المرتجعات الواردة مسموح على الجهاز الأساسي فقط" }
+            db.beginTransaction()
+            try {
+                val row=db.rawQuery(
+                    """SELECT i.origin_device_id,i.entity_type,i.entity_id,i.payload_json,i.status,m.primary_user_id
+                       FROM sync_inbox i JOIN sync_actor_mappings m ON m.device_id=i.origin_device_id AND m.is_active=1
+                       JOIN users u ON u.id=m.primary_user_id JOIN sync_devices d ON d.device_id=i.origin_device_id
+                       WHERE i.operation_id=? AND d.device_role='SECONDARY' AND d.status='ACTIVE'
+                         AND u.is_active=1 AND u.must_change_password=0
+                       ORDER BY m.mapped_at DESC LIMIT 1""".trimIndent(),arrayOf(operationId)
+                ).use { c ->
+                    require(c.moveToFirst()) { "أمر المرتجع غير موجود أو الجهاز/المستخدم غير مربوط أو موقوف" }
+                    arrayOf(c.getString(0),c.getString(1),c.getString(2),c.getString(3),c.getString(4),c.getString(5))
+                }
+                if(row[4]=="APPLIED") { db.setTransactionSuccessful(); return@synchronized ApplyResult(operationId,true) }
+                require(row[4]=="RECEIVED" && row[1]==entityType && row[2]=="pending-return-$operationId") {
+                    "نوع أو حالة كيان المرتجع الوارد غير صالحة"
+                }
+                val payload=JSONObject(row[3])
+                require(payload.optString("business_operation")==businessOperation) { "نوع عملية المرتجع الوارد غير صالح" }
+                PermissionPolicy.require(db,row[5],PermissionPolicy.RETURNS_PROCESS)
+                val invoiceId=payload.getString("original_invoice_id")
+                val returnDate=payload.getString("return_date")
+                val reason=payload.getString("reason")
+                val occurredAt=payload.getString("occurred_at")
+                val operatingDate=payload.getString("operating_date")
+                require(invoiceId.isNotBlank() && returnDate.matches(Regex("\\d{4}-\\d{2}-\\d{2}")) &&
+                    occurredAt.matches(Regex("\\d{4}-\\d{2}-\\d{2}T.*")) &&
+                    operatingDate.matches(Regex("\\d{4}-\\d{2}-\\d{2}"))) { "تاريخ أو بيانات المرتجع غير صالحة" }
+                require(StoreTime.operatingDate(db,occurredAt)==operatingDate) {
+                    "تاريخ التشغيل لا يطابق لحظة الحركة الأصلية وفق منطقة المتجر"
+                }
+                val itemsJson=payload.getJSONArray("items")
+                require(itemsJson.length()>0) { "المرتجع الوارد بلا أصناف" }
+                val allocationsJson=payload.getJSONArray("refund_allocations")
+                val mapped=mutableListOf<Pair<String,Long>>()
+                for(i in 0 until allocationsJson.length()) {
+                    val item=allocationsJson.getJSONObject(i)
+                    val remoteId=item.getString("cash_account_id")
+                    val remoteType=item.getString("cash_account_type")
+                    val remoteCurrency=item.getString("cash_account_currency_code")
+                    val amount=item.getLong("amount_minor")
+                    require(remoteId.isNotBlank() && remoteType in setOf("CASH_BOX","WALLET") &&
+                        remoteCurrency in setOf("USD","SYP") && amount>0L) { "حساب رد المبلغ غير صالح" }
+                    val primaryAccount=db.rawQuery(
+                        """SELECT m.primary_cash_account_id,a.account_type,a.currency_code
+                           FROM sync_cash_account_mappings m JOIN cash_accounts a ON a.id=m.primary_cash_account_id
+                           WHERE m.device_id=? AND m.remote_cash_account_id=? AND m.is_active=1 AND a.is_active=1""".trimIndent(),
+                        arrayOf(row[0],remoteId)
+                    ).use { c ->
+                        require(c.moveToFirst()) { "حساب رد المبلغ غير مربوط أو موقوف" }
+                        require(c.getString(1)==remoteType && c.getString(2)==remoteCurrency) {
+                            "نوع أو عملة حساب رد المبلغ المرتبط غير متطابقين"
+                        }
+                        c.getString(0)
+                    }
+                    mapped.add(primaryAccount to amount)
+                }
+                if(businessOperation=="POST_SALES_RETURN") {
+                    val inputs=(0 until itemsJson.length()).map { i ->
+                        val item=itemsJson.getJSONObject(i)
+                        SalesReturnItemInput(item.getString("original_sales_item_id"),BigDecimal(item.getString("quantity")))
+                    }
+                    SalesReturnRepository(appContext).postSalesReturn(
+                        row[5],invoiceId,operationId,returnDate,reason,inputs,
+                        mapped.map { SalesRefundAllocationInput(it.first,it.second) },occurredAt,true
+                    )
+                    resultReference(db,operationId,"POST_SALES_RETURN")
+                } else {
+                    val inputs=(0 until itemsJson.length()).map { i ->
+                        val item=itemsJson.getJSONObject(i)
+                        PurchaseReturnItemInput(item.getString("original_purchase_item_id"),BigDecimal(item.getString("quantity")))
+                    }
+                    PurchaseReturnRepository(appContext).postPurchaseReturn(
+                        row[5],invoiceId,operationId,returnDate,reason,inputs,
+                        mapped.map { SupplierRefundAllocationInput(it.first,it.second) },occurredAt,true
+                    )
+                    resultReference(db,operationId,"POST_PURCHASE_RETURN")
+                }.also { require(!it.isNullOrBlank()) { "لم يُنشأ سجل المرتجع على الجهاز الأساسي" } }
+                db.update("sync_inbox",ContentValues().apply {
+                    put("status","APPLIED");put("applied_at",timestamp());putNull("rejection_reason")
+                },"operation_id=? AND status='RECEIVED'",arrayOf(operationId)).also {
+                    require(it==1) { "تعذر تثبيت تطبيق المرتجع الوارد" }
+                }
+                db.setTransactionSuccessful()
+                ApplyResult(operationId,true)
+            } finally { db.endTransaction() }
+        }
+
+    fun applyReceivedInventoryAdjustment(operationId: String): ApplyResult = synchronized(APPLY_LOCK) {
+        require(operationId.isNotBlank()) { "معرّف الأمر مطلوب" }
+        val db=database.writableDatabase
+        val localId=SyncDeviceIdentity.getOrCreate(appContext)
+        val role=db.rawQuery("SELECT state_value FROM sync_protocol_state WHERE state_key='local_device_role'",null)
+            .use { c -> if(c.moveToFirst()) c.getString(0) else null }
+        val authority=db.rawQuery("SELECT state_value FROM sync_protocol_state WHERE state_key='authority_device_id'",null)
+            .use { c -> if(c.moveToFirst()) c.getString(0) else null }
+        require(role=="PRIMARY" && authority==localId) { "تطبيق تسوية المخزون الواردة مسموح على الجهاز الأساسي فقط" }
+        db.beginTransaction()
+        try {
+            val row=db.rawQuery(
+                """SELECT i.origin_device_id,i.entity_type,i.entity_id,i.payload_json,i.status,m.primary_user_id
+                   FROM sync_inbox i JOIN sync_actor_mappings m ON m.device_id=i.origin_device_id AND m.is_active=1
+                   JOIN users u ON u.id=m.primary_user_id JOIN sync_devices d ON d.device_id=i.origin_device_id
+                   WHERE i.operation_id=? AND d.device_role='SECONDARY' AND d.status='ACTIVE'
+                     AND u.is_active=1 AND u.must_change_password=0
+                   ORDER BY m.mapped_at DESC LIMIT 1""".trimIndent(),arrayOf(operationId)
+            ).use { c ->
+                require(c.moveToFirst()) { "أمر تسوية المخزون غير موجود أو الجهاز/المستخدم غير مربوط" }
+                arrayOf(c.getString(0),c.getString(1),c.getString(2),c.getString(3),c.getString(4),c.getString(5))
+            }
+            if(row[4]=="APPLIED") { db.setTransactionSuccessful(); return@synchronized ApplyResult(operationId,true) }
+            require(row[4]=="RECEIVED" && row[1]=="INVENTORY_ADJUSTMENT" &&
+                row[2]=="pending-adjustment-$operationId") { "نوع أو حالة تسوية المخزون الواردة غير صالحة" }
+            val payload=JSONObject(row[3])
+            require(payload.optString("business_operation")=="POST_INVENTORY_ADJUSTMENT") {
+                "نوع عملية تسوية المخزون الواردة غير صالح"
+            }
+            PermissionPolicy.require(db,row[5],PermissionPolicy.INVENTORY_ADJUST)
+            val occurredAt=payload.getString("occurred_at")
+            val operatingDate=payload.getString("operating_date")
+            require(occurredAt.matches(Regex("\\d{4}-\\d{2}-\\d{2}T.*")) &&
+                operatingDate.matches(Regex("\\d{4}-\\d{2}-\\d{2}")) &&
+                StoreTime.operatingDate(db,occurredAt)==operatingDate) { "تاريخ حركة التسوية غير صالح" }
+            val delta=BigDecimal(payload.getString("quantity_delta"))
+            require(delta.signum()!=0) { "فرق كمية التسوية لا يمكن أن يكون صفراً" }
+            val cost=if(payload.isNull("unit_cost_usd_cents")) null else payload.getLong("unit_cost_usd_cents")
+            InventoryAdjustmentRepository(appContext).postAdjustment(
+                row[5],payload.getString("product_id"),delta,payload.getString("reason"),
+                operationId,cost,payload.getString("warehouse_id"),occurredAt,true
+            )
+            db.update("sync_inbox",ContentValues().apply {
+                put("status","APPLIED");put("applied_at",timestamp());putNull("rejection_reason")
+            },"operation_id=? AND status='RECEIVED'",arrayOf(operationId)).also {
+                require(it==1) { "تعذر تثبيت تطبيق تسوية المخزون" }
+            }
+            db.setTransactionSuccessful()
+            ApplyResult(operationId,true)
+        } finally { db.endTransaction() }
+    }
+
+    private fun resultReference(db: android.database.sqlite.SQLiteDatabase, operationId: String, type: String): String? =
+        db.rawQuery("SELECT result_reference FROM operation_registry WHERE operation_id=? AND operation_type=?",
+            arrayOf(operationId,type)).use { c -> if(c.moveToFirst() && !c.isNull(0)) c.getString(0) else null }
 
     private fun parseLines(items: JSONArray): List<InvoiceLineInput> =
         (0 until items.length()).map { index ->
