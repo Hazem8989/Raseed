@@ -718,6 +718,62 @@ class SyncDomainApplierTest {
         ).use { it.moveToFirst();it.getInt(0) })
     }
 
+    @Test fun rejectsIncomingServiceTransferWithoutCashMappingAndLeavesBothLedgersUntouched() {
+        val wallet = ServiceTransferRepository(context)
+        wallet.setOpeningBalance(adminId, ServiceTransferRepository.SYRIATEL_SHARED, 20_000L)
+        val beforeFloat = wallet.listWallets().single { it.serviceKey == ServiceTransferRepository.SYRIATEL_SHARED }.balanceMinor
+        val payload = JSONObject().put("business_operation", "EXECUTE_SERVICE_TRANSFER")
+            .put("service_type", ServiceTransferRepository.SYRIATEL_BALANCE)
+            .put("service_key", ServiceTransferRepository.SYRIATEL_SHARED)
+            .put("delivered_minor", 2_000L).put("provider_fee_minor", 0L)
+            .put("profit_minor", 400L).put("customer_charge_minor", 2_400L)
+            .put("cash_account_id", "unmapped-service-receipt").put("cash_account_type", "WALLET")
+            .put("cash_account_currency_code", "SYP").put("occurred_at", "2026-11-03T14:15:00Z")
+            .put("operating_date", "2026-11-03")
+        val operationId = receiveRaw("EXECUTE_SERVICE_TRANSFER", "unused", payload)
+        var rejected = false
+        try {
+            SyncDomainApplier(context).applyReceivedOperation(operationId)
+        } catch (expected: IllegalArgumentException) {
+            rejected = expected.message?.contains("غير مربوط أو موقوف") == true
+        }
+        assertTrue(rejected)
+        assertEquals("RECEIVED", inboxStatus(operationId))
+        assertEquals(beforeFloat, wallet.listWallets().single { it.serviceKey == ServiceTransferRepository.SYRIATEL_SHARED }.balanceMinor)
+        assertEquals(0, database.readableDatabase.rawQuery(
+            "SELECT COUNT(*) FROM service_transfers WHERE operation_id=?", arrayOf(operationId)
+        ).use { it.moveToFirst(); it.getInt(0) })
+    }
+
+    @Test fun rejectsIncomingServiceTransferWhenPrimaryFloatIsInsufficientWithoutPartialPosting() {
+        val wallet = ServiceTransferRepository(context)
+        wallet.setOpeningBalance(adminId, ServiceTransferRepository.SYRIATEL_SHARED, 500L)
+        val receipt = CashAccountRepository(context).create(adminId, "قبض تحويل رصيد غير كاف", "WALLET", "SYP", 0L)
+        protocol.mapSecondaryCashAccount(adminId, secondaryId, "remote-low-float-receipt", receipt.id)
+        val beforeReceipt = CashAccountRepository(context).balance(receipt.id)
+        val payload = JSONObject().put("business_operation", "EXECUTE_SERVICE_TRANSFER")
+            .put("service_type", ServiceTransferRepository.SYRIATEL_BALANCE)
+            .put("service_key", ServiceTransferRepository.SYRIATEL_SHARED)
+            .put("delivered_minor", 2_000L).put("provider_fee_minor", 0L)
+            .put("profit_minor", 400L).put("customer_charge_minor", 2_400L)
+            .put("cash_account_id", "remote-low-float-receipt").put("cash_account_type", "WALLET")
+            .put("cash_account_currency_code", "SYP").put("occurred_at", "2026-11-03T14:15:00Z")
+            .put("operating_date", "2026-11-03")
+        val operationId = receiveRaw("EXECUTE_SERVICE_TRANSFER", "unused", payload)
+        var rejected = false
+        try {
+            SyncDomainApplier(context).applyReceivedOperation(operationId)
+        } catch (expected: IllegalArgumentException) {
+            rejected = expected.message?.contains("غير كافٍ") == true
+        }
+        assertTrue(rejected)
+        assertEquals("RECEIVED", inboxStatus(operationId))
+        assertEquals(beforeReceipt, CashAccountRepository(context).balance(receipt.id))
+        assertEquals(0, database.readableDatabase.rawQuery(
+            "SELECT COUNT(*) FROM service_transfers WHERE operation_id=?", arrayOf(operationId)
+        ).use { it.moveToFirst(); it.getInt(0) })
+    }
+
     @Test fun appliesIncomingServiceTransferOnceAndPreservesOriginalEventDateWithoutEcho() {
         val wallet = ServiceTransferRepository(context)
         wallet.setOpeningBalance(adminId, ServiceTransferRepository.SYRIATEL_SHARED, 20_000L)
