@@ -314,6 +314,34 @@ class CustomerPaymentRepositoryTest {
         ).use { it.moveToFirst(); it.getInt(0) }
 
     @Test
+    fun secondaryCustomerCollectionIsQueuedWithoutLocalFinancialPosting() {
+        val context = RuntimeEnvironment.getApplication()
+        val sync = SyncProtocolRepository(context)
+        val storeId = database.readableDatabase.rawQuery(
+            "SELECT state_value FROM sync_protocol_state WHERE state_key='store_id'", null
+        ).use { c -> assertTrue(c.moveToFirst()); c.getString(0) }
+        val primaryDeviceId = UUID.randomUUID().toString()
+        val credential = android.util.Base64.encodeToString(
+            ByteArray(32) { 11 },
+            android.util.Base64.URL_SAFE or android.util.Base64.NO_WRAP or android.util.Base64.NO_PADDING
+        )
+        sync.configureAsSecondary(adminId, storeId, primaryDeviceId, credential, "جهاز ثانوي اختباري")
+
+        val invoiceId = createCreditInvoice()
+        val operationId = "secondary-customer-collection-" + UUID.randomUUID()
+        val result = payments.addPayment(adminId, invoiceId, operationId, cashDrawerId, 15_000L)
+
+        assertFalse(result.replayed)
+        assertTrue(payments.listPayments(invoiceId).isEmpty())
+        assertEquals(0, database.readableDatabase.rawQuery(
+            "SELECT COUNT(*) FROM cash_transactions WHERE operation_id=?", arrayOf(operationId)
+        ).use { c -> c.moveToFirst(); c.getInt(0) })
+        val queued = sync.pendingOutbox().single { it.operationId == operationId }
+        assertEquals("CUSTOMER_PAYMENT", queued.entityType)
+        assertTrue(queued.payloadJson.contains("\"usd_reference_reduction_cents\":100"))
+    }
+
+    @Test
     fun primaryCustomerCollectionIsAddedToOutboxAtomically() {
         val context = RuntimeEnvironment.getApplication()
         val sync = SyncProtocolRepository(context)
