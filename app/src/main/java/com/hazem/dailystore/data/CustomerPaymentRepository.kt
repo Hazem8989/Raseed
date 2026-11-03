@@ -225,6 +225,52 @@ class CustomerPaymentRepository(context: Context) {
                 else -> throw IllegalArgumentException("يجب اختيار الدرج اليومي الرئيسي أو محفظة إلكترونية نشطة")
             }
 
+            val localRole = db.rawQuery(
+                "SELECT state_value FROM sync_protocol_state WHERE state_key='local_device_role'", null
+            ).use { c -> if (c.moveToFirst()) c.getString(0) else null }
+            if (localRole == "SECONDARY") {
+                val state = invoicePaymentState(db, invoiceId, invoice.totalUsdCents, invoice.originalRateMilli)
+                require(state.outstandingUsdCents > 0L) { "الفاتورة مسددة بالكامل" }
+                require(amountSypMinor <= state.outstandingSypMinor) {
+                    "مبلغ التحصيل يتجاوز المتبقي المستحق بالليرة السورية"
+                }
+                val usdReduction = CurrencyConverter.sypToUsdCents(amountSypMinor, effectiveRate)
+                require(usdReduction > 0L && usdReduction <= state.outstandingUsdCents) {
+                    "مبلغ التحصيل لا يقابل رصيداً مرجعياً صالحاً"
+                }
+                val occurredAt = timestamp()
+                val movementDate = operatingDate()
+                val paymentId = "pending-payment-$operationId"
+                val remoteCashTransactionId = "pending-cash-$operationId"
+                val payload = org.json.JSONObject()
+                    .put("invoice_id", invoiceId)
+                    .put("payment_id", paymentId)
+                    .put("cash_transaction_id", remoteCashTransactionId)
+                    .put("cash_account_id", cashAccountId)
+                    .put("cash_account_type", account.accountType)
+                    .put("cash_account_currency_code", account.currencyCode)
+                    .put("amount_minor", amountSypMinor)
+                    .put("currency_code", "SYP")
+                    .put("collection_rate_milli", collectionRate)
+                    .put("effective_rate_milli", effectiveRate)
+                    .put("usd_reference_reduction_cents", usdReduction)
+                    .put("note", cleanNote ?: org.json.JSONObject.NULL)
+                    .put("occurred_at", occurredAt)
+                    .put("operating_date", movementDate)
+                SyncProtocolRepository(context).enqueueSecondaryCommand(
+                    db, actorUserId, operationId, "COLLECT_CUSTOMER_PAYMENT",
+                    "CUSTOMER_PAYMENT", paymentId, payload.toString()
+                )
+                db.setTransactionSuccessful()
+                return CustomerPaymentResult(
+                    paymentId, state.paidUsdCents, state.outstandingUsdCents,
+                    state.status, false, state.outstandingSypMinor
+                )
+            }
+            require(localRole == null || localRole == "PRIMARY") {
+                "دور الجهاز غير صالح لتنفيذ تحصيل الديون"
+            }
+
             val now = timestamp()
             recordRevaluation(db, invoiceId, invoice.customerId, invoice.totalUsdCents,
                 invoice.originalRateMilli, collectionRate, now)
