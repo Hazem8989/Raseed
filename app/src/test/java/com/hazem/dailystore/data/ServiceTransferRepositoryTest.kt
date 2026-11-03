@@ -113,11 +113,23 @@ class ServiceTransferRepositoryTest {
     @Test fun rechargeDeductsFromDedicatedCashBoxAndAppliesTwoPercentOnlyOnExternalRecharge() {
         val source = accounts.create(actor, "صندوق شراء رصيد " + UUID.randomUUID(), "CASH_BOX", "SYP", 100_000L)
         repo.setRechargeAccount(actor, source.id)
+        val syriatelOperation = "recharge-syr-" + UUID.randomUUID()
         val syriatelFee = repo.recharge(actor, ServiceTransferRepository.SYRIATEL_SHARED, source.id,
-            50_000L, "recharge-syr-" + UUID.randomUUID())
+            50_000L, syriatelOperation)
         assertEquals(1_000L, syriatelFee)
         assertEquals(49_000L, accounts.balance(source.id))
         assertEquals(50_000L, repo.listWallets().single { it.serviceKey == ServiceTransferRepository.SYRIATEL_SHARED }.balanceMinor)
+        assertEquals(1_000L, repo.recharge(actor, ServiceTransferRepository.SYRIATEL_SHARED, source.id,
+            50_000L, syriatelOperation))
+        assertEquals(49_000L, accounts.balance(source.id))
+        assertEquals(50_000L, repo.listWallets().single { it.serviceKey == ServiceTransferRepository.SYRIATEL_SHARED }.balanceMinor)
+        try {
+            repo.recharge(actor, ServiceTransferRepository.SYRIATEL_SHARED, source.id,
+                51_000L, syriatelOperation)
+            throw AssertionError("Conflicting service recharge replay must be rejected")
+        } catch (expected: IllegalArgumentException) {
+            assertTrue(expected.message!!.contains("مختلفة"))
+        }
         val shamFee = repo.recharge(actor, ServiceTransferRepository.SHAM_CASH, source.id,
             20_000L, "recharge-sham-" + UUID.randomUUID())
         assertEquals(400L, shamFee)
