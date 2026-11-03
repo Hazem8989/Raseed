@@ -228,6 +228,15 @@ class InvoiceRepository(context: Context) {
                 return false
             }
             require(status == "DRAFT") { "لا يمكن اعتماد فاتورة بهذه الحالة: $status" }
+            val now = timestamp()
+            val movementAt = occurredAt ?: now
+            require(movementAt.matches(Regex("\\d{4}-\\d{2}-\\d{2}T.*"))) {
+                "وقت الحركة الأصلي غير صالح"
+            }
+            val movementOperatingDate = operatingDate ?: movementAt.substring(0, 10)
+            require(movementOperatingDate.matches(Regex("\\d{4}-\\d{2}-\\d{2}"))) {
+                "تاريخ الحركة التشغيلي غير صالح"
+            }
             var cashReceipt: CashSaleReceipt? = null
             if (type == "PURCHASE") {
                 val purchaseRate = db.rawQuery(
@@ -272,7 +281,7 @@ class InvoiceRepository(context: Context) {
                     val accountCurrency=account.second
                     require(accountCurrency == "USD" || accountCurrency == "SYP") { "عملة حساب القبض غير مدعومة" }
                     if(accountType=="CASH_BOX" && accountCurrency=="SYP") {
-                        val date=SimpleDateFormat("yyyy-MM-dd",Locale.US).format(Date())
+                        val date = movementOperatingDate
                         val primary=db.rawQuery("SELECT primary_cash_account_id FROM daily_cash_sessions WHERE operating_date=?",arrayOf(date)).use {
                             if(it.moveToFirst())it.getString(0)else null
                         }
@@ -300,15 +309,6 @@ class InvoiceRepository(context: Context) {
                 }
             }
             val warehouseId = invoiceWarehouse(db, table, invoiceId)
-            val now = timestamp()
-            val movementAt = occurredAt ?: now
-            require(movementAt.matches(Regex("\\d{4}-\\d{2}-\\d{2}T.*"))) {
-                "وقت الحركة الأصلي غير صالح"
-            }
-            val movementOperatingDate = operatingDate ?: movementAt.substring(0, 10)
-            require(movementOperatingDate.matches(Regex("\\d{4}-\\d{2}-\\d{2}"))) {
-                "تاريخ الحركة التشغيلي غير صالح"
-            }
             db.rawQuery(
                 "SELECT id,product_id,quantity,unit_cost_usd_cents FROM $itemTable WHERE $invoiceForeignKey=?",
                 arrayOf(invoiceId)
