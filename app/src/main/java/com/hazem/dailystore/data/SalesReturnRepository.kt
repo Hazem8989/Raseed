@@ -137,7 +137,7 @@ class SalesReturnRepository(context: Context) {
         actorUserId: String, originalInvoiceId: String, operationId: String,
         returnDate: String, reason: String, items: List<SalesReturnItemInput>,
         refundAllocations: List<SalesRefundAllocationInput>,
-        occurredAt: String? = null, syncOrigin: Boolean = false
+        occurredAt: String? = null, syncOrigin: Boolean = false, operatingDate: String? = null
     ): SalesReturnResult {
         require(originalInvoiceId.isNotBlank() && operationId.isNotBlank()) { "بيانات المرتجع غير مكتملة" }
         require(returnDate.matches(Regex("\\d{4}-\\d{2}-\\d{2}"))) { "تاريخ المرتجع غير صالح" }
@@ -308,7 +308,7 @@ class SalesReturnRepository(context: Context) {
 
             refundAllocations.forEachIndexed { index, allocation ->
                 postRefundAllocation(db, actorUserId, returnId, operationId, index,
-                    invoice.rateMilli, returnDate, now, allocation)
+                    invoice.rateMilli, operatingDate ?: returnDate, now, allocation)
             }
             db.insertOrThrow("audit_log", null, ContentValues().apply {
                 put("id", UUID.randomUUID().toString()); put("user_id", actorUserId)
