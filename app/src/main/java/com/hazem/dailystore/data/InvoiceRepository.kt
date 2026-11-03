@@ -331,8 +331,20 @@ class InvoiceRepository(context: Context) {
                     }
                 }
                 val pendingOperationId = "secondary-invoice-post:$invoiceId"
+                val priorPendingPayload = db.rawQuery(
+                    "SELECT payload_json FROM sync_operation_envelopes WHERE operation_id=?",
+                    arrayOf(pendingOperationId)
+                ).use { cursor ->
+                    if (cursor.moveToFirst()) JSONObject(cursor.getString(0)) else null
+                }
+                val queuedEventAt = priorPendingPayload?.optString("posted_at")
+                    ?.takeIf { it.isNotBlank() && it != "null" } ?: movementAt
+                val queuedOperatingDate = priorPendingPayload?.optString("posted_operating_date")
+                    ?.takeIf { it.matches(Regex("\\d{4}-\\d{2}-\\d{2}")) }
+                    ?: movementOperatingDate
                 syncRepository.enqueueInvoicePosting(
-                    db, actorUserId, pendingOperationId, type, invoiceId, cashAccountId
+                    db, actorUserId, pendingOperationId, type, invoiceId, cashAccountId,
+                    queuedEventAt, queuedOperatingDate
                 )
                 db.setTransactionSuccessful()
                 return true
