@@ -127,11 +127,68 @@ class SyncDomainApplierTest {
         assertEquals("APPLIED", inboxStatus(operationId))
     }
 
+    @Test fun appliesMappedCashSaleOnceWithOriginalReceiptTimestamp() {
+        val primaryWalletId = UUID.randomUUID().toString()
+        database.writableDatabase.execSQL(
+            """INSERT INTO cash_accounts(id,name,account_type,currency_code,opening_balance_minor,is_active,created_at)
+               VALUES(?,?,?,?,0,1,?)""",
+            arrayOf(primaryWalletId, "محفظة الاختبار الأساسية", "WALLET", "USD", "2026-11-03T11:00:00Z")
+        )
+        protocol.mapSecondaryCashAccount(adminId, secondaryId, "remote-wallet-usd", primaryWalletId)
+        val operationId = receiveInvoice(
+            "POST_SALES_INVOICE", "sale-cash-mapped", null, "CASH",
+            "remote-wallet-usd", "WALLET", "USD"
+        )
+        val applier = SyncDomainApplier(context)
+
+        assertTrue(applyWithDiagnostic(applier, operationId).applied)
+        assertEquals("PAID", invoiceStatus("sales_invoices", "sale-cash-mapped"))
+        assertEquals(8.0, stock(), 0.000001)
+        assertEquals(1, database.readableDatabase.rawQuery(
+            "SELECT COUNT(*) FROM cash_transactions WHERE source_type='SALES_INVOICE' AND source_id=?",
+            arrayOf("sale-cash-mapped")
+        ).use { it.moveToFirst(); it.getInt(0) })
+        assertEquals(primaryWalletId, database.readableDatabase.rawQuery(
+            "SELECT account_id FROM cash_transactions WHERE source_type='SALES_INVOICE' AND source_id=?",
+            arrayOf("sale-cash-mapped")
+        ).use { it.moveToFirst(); it.getString(0) })
+        assertEquals(300L, database.readableDatabase.rawQuery(
+            "SELECT amount_minor FROM cash_transactions WHERE source_type='SALES_INVOICE' AND source_id=?",
+            arrayOf("sale-cash-mapped")
+        ).use { it.moveToFirst(); it.getLong(0) })
+        assertEquals("2026-11-03T12:00:00Z", database.readableDatabase.rawQuery(
+            "SELECT created_at FROM cash_transactions WHERE source_type='SALES_INVOICE' AND source_id=?",
+            arrayOf("sale-cash-mapped")
+        ).use { it.moveToFirst(); it.getString(0) })
+        assertEquals("2026-11-03T12:00:00Z", database.readableDatabase.rawQuery(
+            "SELECT created_at FROM invoice_payments WHERE invoice_id=?",
+            arrayOf("sale-cash-mapped")
+        ).use { it.moveToFirst(); it.getString(0) })
+
+        // Replaying after the ledger transaction committed must not duplicate cash or stock.
+        database.writableDatabase.execSQL(
+            "UPDATE sync_inbox SET status='RECEIVED',applied_at=NULL WHERE operation_id=?",
+            arrayOf(operationId)
+        )
+        assertTrue(applyWithDiagnostic(applier, operationId).applied)
+        assertEquals(1, database.readableDatabase.rawQuery(
+            "SELECT COUNT(*) FROM cash_transactions WHERE source_type='SALES_INVOICE' AND source_id=?",
+            arrayOf("sale-cash-mapped")
+        ).use { it.moveToFirst(); it.getInt(0) })
+        assertEquals(1, database.readableDatabase.rawQuery(
+            "SELECT COUNT(*) FROM inventory_movements WHERE source_id=? AND movement_type='SALE'",
+            arrayOf("sale-cash-mapped")
+        ).use { it.moveToFirst(); it.getInt(0) })
+    }
+
     @Test fun rejectsCashSaleWithoutApplyingOrChangingInventory() {
-        val operationId = receiveInvoice("POST_SALES_INVOICE", "sale-cash-remote", null, "CASH")
+        val operationId = receiveInvoice(
+            "POST_SALES_INVOICE", "sale-cash-remote", null, "CASH",
+            "remote-wallet-unmapped", "WALLET", "USD"
+        )
         var rejected = false
         try { SyncDomainApplier(context).applyReceivedInvoice(operationId) }
-        catch (e: IllegalArgumentException) { rejected = e.message?.contains("بيع نقدي وارد مؤجل") == true }
+        catch (e: IllegalArgumentException) { rejected = e.message?.contains("لم يتم ربط حساب قبض") == true }
 
         assertTrue(rejected)
         assertEquals(0, database.readableDatabase.rawQuery(
@@ -167,7 +224,9 @@ class SyncDomainApplierTest {
         }
 
     private fun receiveInvoice(
-        operation: String, invoiceId: String, partyId: String?, saleType: String
+        operation: String, invoiceId: String, partyId: String?, saleType: String,
+        remoteCashAccountId: String? = null, remoteAccountType: String? = null,
+        remoteCurrency: String? = null
     ): String {
         val payload = JSONObject().apply {
             put("business_operation", operation)
@@ -176,6 +235,7 @@ class SyncDomainApplierTest {
             put("sale_type", saleType)
             put("invoice_date", "2026-11-03")
             put("discount_usd_cents", 0)
+            put("total_usd_cents", 300L)
             put("notes", JSONObject.NULL)
             put("exchange_rate_syp_per_usd_milli", 10_000_000L)
             put("items", JSONArray().put(JSONObject().apply {
@@ -183,6 +243,17 @@ class SyncDomainApplierTest {
                 put("quantity", BigDecimal("2").toPlainString())
                 put("unit_price_or_cost_usd_cents", 150L)
             }))
+            if (remoteCashAccountId != null) {
+                put("cash_account_id", remoteCashAccountId)
+                put("cash_account_type", remoteAccountType)
+                put("cash_account_currency_code", remoteCurrency)
+                put("cash_receipts", JSONArray().put(JSONObject().apply {
+                    put("cash_transaction_id", "remote-cash-receipt-$invoiceId")
+                    put("amount_minor", 300L)
+                    put("currency_code", remoteCurrency)
+                    put("exchange_rate_syp_per_usd_milli", 10_000_000L)
+                }))
+            }
         }
         return receiveRaw(operation, invoiceId, payload)
     }
