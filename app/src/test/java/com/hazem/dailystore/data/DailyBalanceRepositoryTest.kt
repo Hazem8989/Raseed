@@ -132,7 +132,16 @@ class DailyBalanceRepositoryTest {
         accounts.setCurrentDayPrimaryDrawer("ADMIN", actorId, drawer.id)
         val initial = daily.setSupplierRollover(actorId, supplierCash.id, 80_000L, "من كشف أمس")
         assertEquals(80_000L, initial.availableMinor)
-        daily.addPersonalWithdrawal(actorId, supplierCash.id, 15_000L, "personal-" + UUID.randomUUID(), "سحب شخصي")
+        val withdrawalOperation = "personal-" + UUID.randomUUID()
+        daily.addPersonalWithdrawal(actorId, supplierCash.id, 15_000L, withdrawalOperation, "سحب شخصي")
+        daily.addPersonalWithdrawal(actorId, supplierCash.id, 15_000L, withdrawalOperation, "سحب شخصي")
+        assertEquals(85_000L, accounts.balance(supplierCash.id))
+        try {
+            daily.addPersonalWithdrawal(actorId, supplierCash.id, 15_000L, withdrawalOperation, "سبب مختلف")
+            throw AssertionError("Conflicting withdrawal replay must be rejected")
+        } catch (expected: IllegalArgumentException) {
+            assertTrue(expected.message!!.contains("مختلفة"))
+        }
         val updated = daily.currentSupplierRollover()!!
         assertEquals(65_000L, updated.availableMinor)
         assertEquals(0L, accounts.balance(drawer.id))
