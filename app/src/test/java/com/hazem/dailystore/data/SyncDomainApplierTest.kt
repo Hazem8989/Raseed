@@ -297,16 +297,6 @@ class SyncDomainApplierTest {
         return id
     }
 
-    private fun createPrimaryWallet(currency: String): String {
-        val id=UUID.randomUUID().toString()
-        database.writableDatabase.execSQL(
-            """INSERT INTO cash_accounts(id,name,account_type,currency_code,opening_balance_minor,is_active,created_at)
-               VALUES(?,?,?,?,0,1,?)""",
-            arrayOf(id,"محفظة مزامنة $currency","WALLET",currency,"2026-11-03T11:00:00Z")
-        )
-        return id
-    }
-
     private fun receiveInvoice(
         operation: String, invoiceId: String, partyId: String?, saleType: String,
         remoteCashAccountId: String? = null, remoteAccountType: String? = null,
