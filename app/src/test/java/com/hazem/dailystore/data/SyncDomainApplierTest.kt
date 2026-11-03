@@ -77,6 +77,13 @@ class SyncDomainApplierTest {
         assertEquals("POSTED", invoiceStatus("purchase_invoices", "purchase-remote-1"))
         assertEquals(12.0, stock(), 0.000001)
         assertEquals("APPLIED", inboxStatus(operationId))
+        assertEquals("2026-11-03T12:00:00Z", database.readableDatabase.rawQuery(
+            "SELECT origin_created_at FROM sync_inbox WHERE operation_id=?", arrayOf(operationId)
+        ).use { it.moveToFirst(); it.getString(0) })
+        assertEquals("2026-11-03T12:00:00Z", database.readableDatabase.rawQuery(
+            "SELECT created_at FROM inventory_movements WHERE source_id=? AND movement_type='PURCHASE' LIMIT 1",
+            arrayOf("purchase-remote-1")
+        ).use { it.moveToFirst(); it.getString(0) })
         assertEquals(1, database.readableDatabase.rawQuery(
             "SELECT COUNT(*) FROM inventory_movements WHERE source_id=? AND movement_type='PURCHASE'",
             arrayOf("purchase-remote-1")
