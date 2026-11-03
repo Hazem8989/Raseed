@@ -58,6 +58,19 @@ class SyncDomainApplier(context: Context) {
                 return@synchronized ApplyResult(operationId, true)
             }
             require(row[5] == "RECEIVED") { "حالة تحديث المنطقة الزمنية لا تسمح بالتطبيق" }
+            val currentSequence = db.rawQuery(
+                "SELECT sequence_number FROM sync_inbox WHERE operation_id=?",
+                arrayOf(operationId)
+            ).use { c -> require(c.moveToFirst()); c.getLong(0) }
+            val earlierPending = db.rawQuery(
+                """SELECT COUNT(*) FROM sync_inbox
+                   WHERE entity_type='STORE_SETTINGS' AND entity_id='store_time_zone'
+                     AND status='RECEIVED' AND sequence_number<?""".trimIndent(),
+                arrayOf(currentSequence.toString())
+            ).use { c -> c.moveToFirst(); c.getInt(0) }
+            require(earlierPending == 0) {
+                "يجب تطبيق تحديثات المنطقة الزمنية حسب ترتيب وصولها"
+            }
             val payload = JSONObject(row[4])
             require(payload.optString("business_operation") == "UPDATE_STORE_TIME_ZONE") {
                 "نوع عملية إعداد المتجر غير صالح"
