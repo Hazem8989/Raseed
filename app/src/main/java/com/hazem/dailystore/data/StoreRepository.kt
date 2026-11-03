@@ -106,15 +106,29 @@ class StoreRepository(context: Context) {
         require(StoreTime.isValidZoneId(clean)) { "معرّف المنطقة الزمنية غير صالح" }
         val db = helper.writableDatabase
         requireManager(db, actorUserId)
+        val sync = SyncProtocolRepository(context)
+        require(!sync.isConfiguredSecondary()) {
+            "تغيير المنطقة الزمنية مسموح من الجهاز الأساسي فقط"
+        }
         db.beginTransaction()
         try {
             val old = StoreTime.zoneId(db)
+            if (old == clean) {
+                db.setTransactionSuccessful()
+                return clean
+            }
             val now = timestamp()
             StoreTime.setZoneId(db, clean, now)
             insertAudit(
                 db, actorUserId, "UPDATE_STORE_TIME_ZONE", "STORE_SETTINGS", "store_time_zone",
                 """{"time_zone":"${jsonEscape(old)}"}""",
                 """{"time_zone":"${jsonEscape(clean)}"}""", now
+            )
+            // The setting and its durable replication event commit atomically.
+            sync.enqueueLocalOperation(
+                db, actorUserId, UUID.randomUUID().toString(),
+                "UPDATE_STORE_TIME_ZONE", "STORE_SETTINGS", "store_time_zone", "UPDATE",
+                """{"time_zone":"${jsonEscape(clean)}"}"""
             )
             db.setTransactionSuccessful()
         } finally { db.endTransaction() }
