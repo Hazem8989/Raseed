@@ -51,6 +51,7 @@ class AppDatabase private constructor(context: Context) :
             ensureOperatingExpenseSchema(db)
             ensureSyncProtocolSchema(db)
             ensureSyncActorMappingSchema(db)
+            ensureSyncCashAccountMappingSchema(db)
             db.execSQL(
                 """INSERT INTO app_settings(setting_key, setting_value, updated_at)
                    VALUES('base_currency', 'USD', strftime('%Y-%m-%dT%H:%M:%fZ','now'))"""
@@ -444,9 +445,38 @@ class AppDatabase private constructor(context: Context) :
                 version = 20
             } finally { db.endTransaction() }
         }
+        if (version < 21) {
+            db.beginTransaction()
+            try {
+                ensureSyncCashAccountMappingSchema(db)
+                db.setTransactionSuccessful()
+                version = 21
+            } finally { db.endTransaction() }
+        }
         if (version != newVersion) {
             throw IllegalStateException("Missing database migration from version $version to $newVersion")
         }
+    }
+
+    private fun ensureSyncCashAccountMappingSchema(db: SQLiteDatabase) {
+        db.execSQL("""
+            CREATE TABLE IF NOT EXISTS sync_cash_account_mappings (
+                device_id TEXT NOT NULL,
+                remote_cash_account_id TEXT NOT NULL,
+                primary_cash_account_id TEXT NOT NULL,
+                is_active INTEGER NOT NULL DEFAULT 1 CHECK(is_active IN (0,1)),
+                mapped_by TEXT NOT NULL,
+                mapped_at TEXT NOT NULL,
+                PRIMARY KEY(device_id, remote_cash_account_id),
+                FOREIGN KEY(device_id) REFERENCES sync_devices(device_id)
+                    ON UPDATE RESTRICT ON DELETE RESTRICT,
+                FOREIGN KEY(primary_cash_account_id) REFERENCES cash_accounts(id)
+                    ON UPDATE RESTRICT ON DELETE RESTRICT,
+                FOREIGN KEY(mapped_by) REFERENCES users(id)
+                    ON UPDATE RESTRICT ON DELETE RESTRICT
+            )
+        """.trimIndent())
+        db.execSQL("CREATE INDEX IF NOT EXISTS idx_sync_cash_account_mappings_primary ON sync_cash_account_mappings(primary_cash_account_id,is_active)")
     }
 
     private fun ensureSyncInboxOriginTimestampColumn(db: SQLiteDatabase) {
@@ -847,7 +877,7 @@ class AppDatabase private constructor(context: Context) :
 
     companion object {
         const val DATABASE_NAME = "the_daily_shop.db"
-        const val DATABASE_VERSION = 20
+        const val DATABASE_VERSION = 21
 
         @Volatile
         private var INSTANCE: AppDatabase? = null
