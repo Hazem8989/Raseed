@@ -3,7 +3,8 @@
   "private": true,
   "version": "1.0.0",
   "scripts": {
-    "check": "tsc --noEmit"
+    "check": "tsc --noEmit",
+    "test:integration": "node --test tests/*.test.mjs"
   },
   "devDependencies": {
     "@cloudflare/workers-types": "^5.20261103.1",
