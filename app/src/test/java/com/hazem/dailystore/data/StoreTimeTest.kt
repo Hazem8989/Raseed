@@ -27,6 +27,17 @@ class StoreTimeTest {
         assertEquals(StoreTime.DEFAULT_ZONE_ID, StoreTime.zoneId(database.readableDatabase))
     }
 
+    @Test fun serviceLedgersPersistStoreOperatingDate() {
+        fun hasColumn(table: String, column: String): Boolean =
+            database.readableDatabase.rawQuery("PRAGMA table_info($table)", null).use { c ->
+                var found = false
+                while (c.moveToNext()) if (c.getString(1) == column) found = true
+                found
+            }
+        assertTrue(hasColumn("service_transfers", "operating_date"))
+        assertTrue(hasColumn("service_wallet_transactions", "operating_date"))
+    }
+
     @Test fun operatingDateUsesStoreZoneRatherThanUtcOrDeviceZone() {
         StoreTime.setZoneId(database.writableDatabase, "America/Los_Angeles", "2026-11-03T00:00:00.000Z")
         assertEquals(
