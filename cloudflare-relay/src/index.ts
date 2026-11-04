@@ -30,7 +30,7 @@ function decodeBase64(value: string): Uint8Array {
 function encodeBase64Url(value: Uint8Array): string {
   let binary = "";
   for (const byte of value) binary += String.fromCharCode(byte);
-  return btoa(binary).replace(/=/g, "").replace(/\\+/g, "-").replace(/\\//g, "_");
+  return btoa(binary).replace(/=/g, "").replace(/\+/g, "-").replace(/\//g, "_");
 }
 function fromBase64Url(value: string): Uint8Array {
   if (!/^[A-Za-z0-9_-]{20,128}$/.test(value)) throw new Error("invalid challenge");
@@ -127,7 +127,7 @@ export default {
     if (request.method === "GET" && url.pathname === "/healthz") {
       return Response.json({ service: "the-daily-shop-relay", status: "ok", protocol: 2 });
     }
-    const register = url.pathname.match(/^\\/v1\\/devices\\/([^/]+)\\/([^/]+)\\/certificate$/);
+    const register = url.pathname.match(/^\/v1\/devices\/([^/]+)\/([^/]+)\/certificate$/);
     if (request.method === "POST" && register) {
       const [, storeId, deviceId] = register;
       if (!UUID.test(storeId) || !UUID.test(deviceId)) return new Response("Invalid identity", { status: 400 });
@@ -140,7 +140,7 @@ export default {
         { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(cert) }
       ));
     }
-    const revoke = url.pathname.match(/^\\/v1\\/devices\\/([^/]+)\\/([^/]+)\\/revoke$/);
+    const revoke = url.pathname.match(/^\/v1\/devices\/([^/]+)\/([^/]+)\/revoke$/);
     if (request.method === "POST" && revoke) {
       const [, storeId, deviceId] = revoke;
       if (!UUID.test(storeId) || !UUID.test(deviceId)) return new Response("Invalid identity", { status: 400 });
@@ -155,7 +155,7 @@ export default {
       ));
     }
 
-    const match = url.pathname.match(/^\\/v1\\/ws\\/([^/]+)\\/([^/]+)$/);
+    const match = url.pathname.match(/^\/v1\/ws\/([^/]+)\/([^/]+)$/);
     if (!match) return new Response("Not found", { status: 404 });
     if (request.headers.get("Upgrade")?.toLowerCase() !== "websocket") {
       return new Response("WebSocket upgrade required", { status: 426 });
@@ -181,7 +181,7 @@ export class SyncRoom implements DurableObject {
 
   async fetch(request: Request): Promise<Response> {
     const url = new URL(request.url);
-    const certMatch = url.pathname.match(/^\\/registry\\/certificate\\/([^/]+)$/);
+    const certMatch = url.pathname.match(/^\/registry\/certificate\/([^/]+)$/);
     if (request.method === "PUT" && certMatch) {
       const deviceId = certMatch[1];
       const cert = await request.json() as DeviceCertificate;
@@ -193,7 +193,7 @@ export class SyncRoom implements DurableObject {
       await this.state.storage.put(`cert:${deviceId}`, cert);
       return Response.json({ registered: true, serial: cert.serial });
     }
-    const revokeMatch = url.pathname.match(/^\\/registry\\/revoke\\/([^/]+)$/);
+    const revokeMatch = url.pathname.match(/^\/registry\/revoke\/([^/]+)$/);
     if (request.method === "POST" && revokeMatch) {
       const deviceId = revokeMatch[1];
       const value = await request.json() as Revocation;
@@ -208,7 +208,7 @@ export class SyncRoom implements DurableObject {
       return Response.json({ revoked: true, device_id: deviceId, serial: value.serial });
     }
 
-    const match = url.pathname.match(/^\\/connect\\/([^/]+)\\/([^/]+)$/);
+    const match = url.pathname.match(/^\/connect\/([^/]+)\/([^/]+)$/);
     if (!match || request.headers.get("Upgrade")?.toLowerCase() !== "websocket") {
       return new Response("Not found", { status: 404 });
     }
