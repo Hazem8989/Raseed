@@ -137,6 +137,7 @@ class ServiceTransferRepository(context:Context) {
     }
     /** Both service floats incur 2% only on actual external recharge; customer transfers incur no recharge fee. */
     fun recharge(actor:String,serviceKey:String,sourceAccountId:String,floatAmount:Long,operationId:String,reference:String?=null,note:String?=null):Long {
+        require(!SyncProtocolRepository(appContext).isConfiguredSecondary()) { "شحن محافظ الخدمات متاح من الجهاز الأساسي فقط حتى يكتمل مسار مزامنته المالية" }
         require(floatAmount>0L&&operationId.isNotBlank()){"أدخل مبلغ شحن ومعرّف عملية صحيحين"}
         require(serviceKey==SYRIATEL_SHARED||serviceKey==SHAM_CASH){"محفظة الخدمة غير معروفة"}
         val fee=percent(floatAmount,2) // 2% is charged only when either service float is recharged externally.
