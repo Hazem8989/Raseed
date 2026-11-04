@@ -119,7 +119,7 @@ class AppDatabaseTest {
                 "return_cost_allocations", "inventory_adjustments", "supplier_return_refund_allocations",
                 "supplier_return_cost_allocations", "expense_categories", "operating_expenses", "sync_devices", "sync_pairing_invitations",
                 "sync_protocol_state", "sync_operation_envelopes", "sync_inbox",
-                "sync_acknowledgements", "sync_cursors"
+                "sync_acknowledgements", "sync_cursors", "sync_category_mappings"
             ).forEach { table ->
                 upgraded.rawQuery(
                     "SELECT 1 FROM sqlite_master WHERE type='table' AND name=?",
