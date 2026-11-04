@@ -1243,13 +1243,15 @@ class SyncProtocolRepository(private val context: Context, private val credentia
         }
         val db = database.readableDatabase
         val localId = SyncDeviceIdentity.getOrCreate(context)
-        require(state(db, "local_device_role") == "PRIMARY" &&
-            state(db, "authority_device_id") == localId) {
-            "إقرار التطبيق يصدر من الجهاز الأساسي المعتمد فقط"
-        }
+        val role = state(db, "local_device_role")
+        val authorityId = state(db, "authority_device_id")
+        require(
+            (role == "PRIMARY" && authorityId == localId) ||
+                (role == "SECONDARY" && authorityId == recipientDeviceId)
+        ) { "إقرار التطبيق يصدر فقط بين الجهاز الأساسي والجهاز الثانوي المعتمد" }
         val peerActive = db.rawQuery(
-            "SELECT 1 FROM sync_devices WHERE device_id=? AND device_role='SECONDARY' AND status='ACTIVE'",
-            arrayOf(recipientDeviceId)
+            "SELECT 1 FROM sync_devices WHERE device_id=? AND status='ACTIVE' AND device_role=?",
+            arrayOf(recipientDeviceId, if (role == "PRIMARY") "SECONDARY" else "PRIMARY")
         ).use { it.moveToFirst() }
         require(peerActive) { "الجهاز المستلم غير مسجل أو موقوف" }
         val row = db.rawQuery(
@@ -1258,15 +1260,15 @@ class SyncProtocolRepository(private val context: Context, private val credentia
                        WHERE r.operation_id=i.operation_id ORDER BY r.created_at DESC LIMIT 1)
                FROM sync_inbox i WHERE i.operation_id=?""".trimIndent(),
             arrayOf(operationId)
-        ).use { c ->
-            require(c.moveToFirst()) { "عملية الإقرار غير موجودة في صندوق الوارد" }
+        ).use { cursor ->
+            require(cursor.moveToFirst()) { "عملية الإقرار غير موجودة في صندوق الوارد" }
             arrayOf(
-                c.getLong(0).toString(), c.getString(1), c.getString(2), c.getString(3),
-                if (c.isNull(4)) "" else c.getString(4)
+                cursor.getLong(0).toString(), cursor.getString(1), cursor.getString(2),
+                cursor.getString(3), if (cursor.isNull(4)) "" else cursor.getString(4)
             )
         }
         require(row[2] == "APPLIED" && row[3] == recipientDeviceId) {
-            "لا يمكن إصدار إقرار تطبيق قبل نجاح المعالجة على الجهاز الأساسي"
+            "لا يمكن إصدار إقرار تطبيق قبل نجاح المعالجة على الجهاز المستلم"
         }
         val storeId = state(db, "store_id") ?: error("معرّف المتجر غير مهيأ")
         val acknowledgedAt = timestamp()
@@ -1280,7 +1282,8 @@ class SyncProtocolRepository(private val context: Context, private val credentia
             .put("payload_sha256", row[1])
             .put("result_reference", if (row[4].isBlank()) JSONObject.NULL else row[4])
             .put("acknowledged_at", acknowledgedAt)
-        val secret = credentialVault.load(recipientDeviceId)
+        val secretOwner = if (role == "PRIMARY") recipientDeviceId else localId
+        val secret = credentialVault.load(secretOwner)
             ?: throw IllegalArgumentException("بيانات اعتماد الجهاز المستلم غير متوفرة")
         try {
             val peerContext = SyncEnvelopeCipher.PeerContext(
@@ -1318,28 +1321,39 @@ class SyncProtocolRepository(private val context: Context, private val credentia
     }
 
     /**
-     * Accepts only a primary-signed APPLIED ACK matching the exact locally queued
-     * operation, sequence and payload hash. The queue is marked SYNCED atomically
-     * with the durable ACK receipt; forwarded/not_delivered relay events cannot call this.
+     * Accepts an APPLIED ACK only from the paired peer and only for a local
+     * operation whose exact sequence/hash match. Primary-origin operations are
+     * acknowledged per secondary; one secondary cannot complete another's queue.
      */
     fun acceptEncryptedApplicationAck(frameJson: String): SyncApplicationAckDisposition {
         require(frameJson.length in 2..700_000) { "حجم إقرار المزامنة غير صالح" }
         val frame = JSONObject(frameJson)
-        require(frame.getInt("frame_version") == 1 && frame.getString("frame_type") == "APPLICATION_ACK") { "إصدار إقرار المزامنة غير مدعوم" }
+        require(frame.getInt("frame_version") == 1 &&
+            frame.getString("frame_type") == "APPLICATION_ACK") {
+            "نوع أو إصدار إقرار المزامنة غير مدعوم"
+        }
         val storeId = frame.getString("store_id")
         val senderId = frame.getString("sender_device_id")
         val recipientId = frame.getString("recipient_device_id")
         val operationId = frame.getString("operation_id")
         val localId = SyncDeviceIdentity.getOrCreate(context)
         val db = database.writableDatabase
-        require(state(db, "local_device_role") == "SECONDARY" &&
-            senderId == state(db, "authority_device_id") && recipientId == localId &&
-            storeId == state(db, "store_id")) {
+        val role = state(db, "local_device_role")
+        val authorityId = state(db, "authority_device_id")
+        require(storeId == state(db, "store_id") && recipientId == localId &&
+            ((role == "SECONDARY" && senderId == authorityId) ||
+                (role == "PRIMARY" && authorityId == localId && senderId != localId))) {
             "هوية مرسل أو مستلم إقرار التطبيق لا تطابق إعدادات الجهاز"
         }
+        val activePeer = db.rawQuery(
+            "SELECT 1 FROM sync_devices WHERE device_id=? AND status='ACTIVE' AND device_role=?",
+            arrayOf(senderId, if (role == "PRIMARY") "SECONDARY" else "PRIMARY")
+        ).use { it.moveToFirst() }
+        require(activePeer) { "الجهاز المقر غير مسجل أو موقوف" }
         verifyPeerFrameSignature(frame, storeId, senderId, recipientId, operationId)
-        val secret = credentialVault.load(localId)
-            ?: throw IllegalArgumentException("بيانات اعتماد الجهاز الثانوي غير متوفرة")
+        val secretOwner = if (role == "SECONDARY") localId else senderId
+        val secret = credentialVault.load(secretOwner)
+            ?: throw IllegalArgumentException("بيانات اعتماد الجهاز المقابل غير متوفرة")
         try {
             val peerContext = SyncEnvelopeCipher.PeerContext(storeId, senderId, recipientId, operationId)
             val ciphertext = Base64.decode(
@@ -1366,9 +1380,10 @@ class SyncProtocolRepository(private val context: Context, private val credentia
                     """SELECT e.sequence_number,e.payload_sha256,e.origin_device_id,q.status
                        FROM sync_operation_envelopes e JOIN sync_queue q ON q.operation_id=e.operation_id
                        WHERE e.operation_id=?""".trimIndent(), arrayOf(operationId)
-                ).use { c ->
-                    require(c.moveToFirst()) { "لا يوجد أمر محلي مطابق لإقرار التطبيق" }
-                    arrayOf(c.getLong(0).toString(), c.getString(1), c.getString(2), c.getString(3))
+                ).use { cursor ->
+                    require(cursor.moveToFirst()) { "لا يوجد أمر محلي مطابق لإقرار التطبيق" }
+                    arrayOf(cursor.getLong(0).toString(), cursor.getString(1),
+                        cursor.getString(2), cursor.getString(3))
                 }
                 require(local[0].toLong() == sequence && local[1] == payloadHash &&
                     local[2] == localId) {
@@ -1380,8 +1395,9 @@ class SyncProtocolRepository(private val context: Context, private val credentia
                 val prior = db.rawQuery(
                     "SELECT sequence_number,status FROM sync_acknowledgements WHERE operation_id=? AND device_id=?",
                     arrayOf(operationId, senderId)
-                ).use { c ->
-                    if (c.moveToFirst()) arrayOf(c.getLong(0).toString(), c.getString(1)) else null
+                ).use { cursor ->
+                    if (cursor.moveToFirst()) arrayOf(cursor.getLong(0).toString(), cursor.getString(1))
+                    else null
                 }
                 if (prior != null) {
                     require(prior[0].toLong() == sequence && prior[1] == "APPLIED") {
@@ -1396,13 +1412,34 @@ class SyncProtocolRepository(private val context: Context, private val credentia
                         put("acknowledged_at", ack.getString("acknowledged_at"))
                     })
                 }
-                if (local[3] != "SYNCED") {
-                    val changed = db.update("sync_queue", ContentValues().apply {
-                        put("status", "SYNCED")
-                        putNull("last_error")
-                        put("updated_at", timestamp())
-                    }, "operation_id=? AND status IN ('PENDING','FAILED','IN_PROGRESS')", arrayOf(operationId))
-                    require(changed == 1) { "تعذر تثبيت إقرار التطبيق في صندوق الإرسال" }
+                if (role == "SECONDARY") {
+                    if (local[3] != "SYNCED") {
+                        val changed = db.update("sync_queue", ContentValues().apply {
+                            put("status", "SYNCED")
+                            putNull("last_error")
+                            put("updated_at", timestamp())
+                        }, "operation_id=? AND status IN ('PENDING','FAILED','IN_PROGRESS')",
+                            arrayOf(operationId))
+                        require(changed == 1) { "تعذر تثبيت إقرار التطبيق في صندوق الإرسال" }
+                    }
+                } else {
+                    val awaiting = db.rawQuery(
+                        """SELECT COUNT(*) FROM sync_devices d
+                           WHERE d.device_role='SECONDARY' AND d.status='ACTIVE'
+                             AND NOT EXISTS (
+                               SELECT 1 FROM sync_acknowledgements a
+                               WHERE a.operation_id=? AND a.device_id=d.device_id AND a.status='APPLIED'
+                             )""".trimIndent(), arrayOf(operationId)
+                    ).use { cursor -> cursor.moveToFirst(); cursor.getInt(0) }
+                    if (awaiting == 0 && local[3] != "SYNCED") {
+                        val changed = db.update("sync_queue", ContentValues().apply {
+                            put("status", "SYNCED")
+                            putNull("last_error")
+                            put("updated_at", timestamp())
+                        }, "operation_id=? AND status IN ('PENDING','FAILED','IN_PROGRESS')",
+                            arrayOf(operationId))
+                        require(changed == 1) { "تعذر تثبيت اكتمال توزيع العملية على الأجهزة" }
+                    }
                 }
                 db.setTransactionSuccessful()
                 return if (prior == null) SyncApplicationAckDisposition.APPLIED
@@ -1415,27 +1452,130 @@ class SyncProtocolRepository(private val context: Context, private val credentia
         }
     }
 
-    /** Lists durable APPLIED commands whose application ACK can safely be retransmitted. */
-    fun appliedOperationsAwaitingAckForDevice(deviceId: String, limit: Int = 100): List<String> {
-        require(limit in 1..500)
-        val db = database.readableDatabase
-        require(state(db, "local_device_role") == "PRIMARY" &&
-            state(db, "authority_device_id") == SyncDeviceIdentity.getOrCreate(context)) {
-            "قائمة إقرارات التطبيق متاحة على الجهاز الأساسي فقط"
+    fun localDeviceRole(): String? = state(database.readableDatabase, "local_device_role")
+
+    fun localDeviceId(): String = SyncDeviceIdentity.getOrCreate(context)
+
+    fun authorityDeviceId(): String? = state(database.readableDatabase, "authority_device_id")
+
+    fun activeSecondaryDeviceIds(): List<String> {
+        require(localDeviceRole() == "PRIMARY" && authorityDeviceId() == localDeviceId()) {
+            "قائمة الأجهزة الثانوية متاحة على الجهاز الأساسي فقط"
         }
-        val result = mutableListOf<String>()
-        db.rawQuery(
-            """SELECT i.operation_id FROM sync_inbox i
-               JOIN sync_devices d ON d.device_id=i.origin_device_id
-               WHERE i.origin_device_id=? AND i.status='APPLIED'
-                 AND d.device_role='SECONDARY' AND d.status='ACTIVE'
-               ORDER BY i.sequence_number LIMIT ?""".trimIndent(),
-            arrayOf(deviceId, limit.toString())
-        ).use { c -> while (c.moveToNext()) result.add(c.getString(0)) }
+        val ids = mutableListOf<String>()
+        database.readableDatabase.rawQuery(
+            "SELECT device_id FROM sync_devices WHERE device_role='SECONDARY' AND status='ACTIVE' ORDER BY created_at",
+            null
+        ).use { cursor -> while (cursor.moveToNext()) ids.add(cursor.getString(0)) }
+        return ids
+    }
+
+    fun pendingOutboxForDevice(deviceId: String, limit: Int = 100): List<SyncOutboxItem> {
+        require(limit in 1..500 && runCatching { UUID.fromString(deviceId) }.isSuccess)
+        val db = database.readableDatabase
+        val role = state(db, "local_device_role")
+        val localId = SyncDeviceIdentity.getOrCreate(context)
+        val sql = if (role == "PRIMARY" && state(db, "authority_device_id") == localId) {
+            require(db.rawQuery(
+                "SELECT 1 FROM sync_devices WHERE device_id=? AND device_role='SECONDARY' AND status='ACTIVE'",
+                arrayOf(deviceId)
+            ).use { it.moveToFirst() }) { "الجهاز المستلم غير مسجل أو موقوف" }
+            """SELECT e.operation_id,e.sequence_number,e.operation_type,e.entity_type,e.entity_id,
+                      e.payload_json,e.payload_sha256,e.created_at,q.retry_count
+               FROM sync_operation_envelopes e JOIN sync_queue q ON q.operation_id=e.operation_id
+               WHERE e.origin_device_id=? AND q.status IN ('PENDING','FAILED')
+                 AND NOT EXISTS (SELECT 1 FROM sync_acknowledgements a
+                   WHERE a.operation_id=e.operation_id AND a.device_id=? AND a.status='APPLIED')
+               ORDER BY e.sequence_number LIMIT ?""".trimIndent()
+        } else {
+            require(role == "SECONDARY" && deviceId == state(db, "authority_device_id")) {
+                "الجهاز الثانوي يرسل إلى الجهاز الأساسي المعتمد فقط"
+            }
+            """SELECT e.operation_id,e.sequence_number,e.operation_type,e.entity_type,e.entity_id,
+                      e.payload_json,e.payload_sha256,e.created_at,q.retry_count
+               FROM sync_operation_envelopes e JOIN sync_queue q ON q.operation_id=e.operation_id
+               WHERE e.origin_device_id=? AND q.status IN ('PENDING','FAILED')
+               ORDER BY e.sequence_number LIMIT ?""".trimIndent()
+        }
+        val args = if (role == "PRIMARY") arrayOf(localId, deviceId, limit.toString())
+            else arrayOf(localId, limit.toString())
+        val result = mutableListOf<SyncOutboxItem>()
+        db.rawQuery(sql, args).use { cursor ->
+            while (cursor.moveToNext()) result.add(SyncOutboxItem(
+                cursor.getString(0), cursor.getLong(1), cursor.getString(2), cursor.getString(3),
+                cursor.getString(4), cursor.getString(5), cursor.getString(6), cursor.getString(7),
+                cursor.getInt(8)
+            ))
+        }
         return result
     }
 
-    fun pendingOutbox(limit: Int = 100): List<SyncOutboxItem> {
+    fun incomingOperationStatus(operationId: String): String? =
+        database.readableDatabase.rawQuery(
+            "SELECT status FROM sync_inbox WHERE operation_id=?", arrayOf(operationId)
+        ).use { cursor -> if (cursor.moveToFirst()) cursor.getString(0) else null }
+
+    fun recordIncomingFromPrimary(encodedEnvelope: String): SyncInboxDisposition {
+        val envelope = verifyIncomingFromPrimary(encodedEnvelope)
+        val db = database.writableDatabase
+        db.beginTransaction()
+        try {
+            val primaryId = state(db, "authority_device_id")
+                ?: throw IllegalArgumentException("الجهاز الأساسي غير محدد")
+            val active = db.rawQuery(
+                "SELECT 1 FROM sync_devices WHERE device_id=? AND device_role='PRIMARY' AND status='ACTIVE'",
+                arrayOf(primaryId)
+            ).use { it.moveToFirst() }
+            require(active && envelope.originDeviceId == primaryId) {
+                "مصدر العملية ليس الجهاز الأساسي النشط"
+            }
+            val existing = db.rawQuery(
+                "SELECT payload_sha256,status FROM sync_inbox WHERE operation_id=?",
+                arrayOf(envelope.operationId)
+            ).use { cursor ->
+                if (cursor.moveToFirst()) arrayOf(cursor.getString(0), cursor.getString(1)) else null
+            }
+            if (existing != null) {
+                if (existing[0] == envelope.payloadSha256) {
+                    db.setTransactionSuccessful()
+                    return SyncInboxDisposition.DUPLICATE
+                }
+                db.insertOrThrow("sync_conflicts", null, ContentValues().apply {
+                    put("id", UUID.randomUUID().toString()); put("operation_id", envelope.operationId)
+                    put("entity_type", envelope.entityType); put("entity_id", envelope.entityId)
+                    put("local_payload_json", "{}"); put("remote_payload_json", envelope.payloadJson)
+                    put("created_at", timestamp())
+                })
+                db.setTransactionSuccessful()
+                return SyncInboxDisposition.CONFLICT
+            }
+            val last = db.rawQuery(
+                "SELECT last_sequence FROM sync_cursors WHERE device_id=?",
+                arrayOf(primaryId)
+            ).use { cursor -> if (cursor.moveToFirst()) cursor.getLong(0) else 0L }
+            require(envelope.sequenceNumber == last + 1L) {
+                if (envelope.sequenceNumber <= last) "تم رفض إعادة تشغيل تسلسل قديم"
+                else "فجوة في تسلسل أوامر الجهاز الأساسي؛ انتظر الأمر السابق"
+            }
+            val now = timestamp()
+            db.insertOrThrow("sync_inbox", null, ContentValues().apply {
+                put("operation_id", envelope.operationId); put("origin_device_id", primaryId)
+                put("sequence_number", envelope.sequenceNumber); put("operation_type", envelope.operationType)
+                put("entity_type", envelope.entityType); put("entity_id", envelope.entityId)
+                put("payload_json", envelope.payloadJson); put("payload_sha256", envelope.payloadSha256)
+                put("status", "RECEIVED"); put("received_at", now); put("origin_created_at", envelope.createdAt)
+            })
+            db.update("sync_cursors", ContentValues().apply {
+                put("last_sequence", envelope.sequenceNumber); put("updated_at", now)
+            }, "device_id=?", arrayOf(primaryId))
+            db.setTransactionSuccessful()
+            return SyncInboxDisposition.RECEIVED
+        } finally {
+            db.endTransaction()
+        }
+    }
+
+    fun pendingOutbox(limit: Int = 100): List<SyncOutboxItem> {    fun pendingOutbox(limit: Int = 100): List<SyncOutboxItem> {
         require(limit in 1..500)
         val items = mutableListOf<SyncOutboxItem>()
         database.readableDatabase.rawQuery(
