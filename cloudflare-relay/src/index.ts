@@ -6,7 +6,7 @@ export interface Env {
 
 type RootTrust = { device_id: string; public_key: string };
 type DeviceCertificate = {
-  version: 1; store_id: string; device_id: string; public_key: string;
+  version: 1; store_id: string; issuer_device_id: string; device_id: string; public_key: string;
   serial: string; issued_at: number; expires_at: number; signature: string;
 };
 type Revocation = {
@@ -39,7 +39,7 @@ function fromBase64Url(value: string): Uint8Array {
 }
 function certPayload(cert: DeviceCertificate): string {
   return JSON.stringify({
-    version: cert.version, store_id: cert.store_id, device_id: cert.device_id,
+    version: cert.version, store_id: cert.store_id, issuer_device_id: cert.issuer_device_id, device_id: cert.device_id,
     public_key: cert.public_key, serial: cert.serial,
     issued_at: cert.issued_at, expires_at: cert.expires_at,
   });
@@ -96,7 +96,7 @@ function rootTrust(env: Env, storeId: string): RootTrust | null {
 }
 async function verifyCertificate(env: Env, storeId: string, deviceId: string, cert: DeviceCertificate): Promise<boolean> {
   const root = rootTrust(env, storeId);
-  if (!root || cert.version !== 1 || cert.store_id !== storeId || cert.device_id !== deviceId ||
+  if (!root || cert.version !== 1 || cert.store_id !== storeId || cert.issuer_device_id !== root.device_id || cert.device_id !== deviceId ||
       !UUID.test(cert.serial) || !UUID.test(cert.device_id) ||
       typeof cert.public_key !== "string" || typeof cert.signature !== "string") return false;
   const now = Date.now();
@@ -126,6 +126,14 @@ export default {
     const url = new URL(request.url);
     if (request.method === "GET" && url.pathname === "/healthz") {
       return Response.json({ service: "the-daily-shop-relay", status: "ok", protocol: 2 });
+    }
+    const trustMatch = url.pathname.match(/^\/v1\/trust\/([^/]+)$/);
+    if (request.method === "GET" && trustMatch) {
+      const storeId = trustMatch[1];
+      if (!UUID.test(storeId)) return new Response("Invalid store identifier", { status: 400 });
+      const root = rootTrust(env, storeId);
+      if (!root) return new Response("Trust root is not provisioned", { status: 404 });
+      return Response.json({ store_id: storeId, device_id: root.device_id, public_key: root.public_key, algorithm: "EC_P256_SHA256" });
     }
     const register = url.pathname.match(/^\/v1\/devices\/([^/]+)\/([^/]+)\/certificate$/);
     if (request.method === "POST" && register) {
@@ -172,7 +180,7 @@ export default {
 } satisfies ExportedHandler<Env>;
 
 type SocketAttachment = {
-  storeId: string; deviceId: string; serial: string; challenge: string;
+  storeId: string; deviceId: string; serial: string; publicKeyBase64: string; challenge: string;
   challengeExpiresAt: number; authenticated: boolean;
 };
 
@@ -185,10 +193,18 @@ export class SyncRoom implements DurableObject {
     if (request.method === "PUT" && certMatch) {
       const deviceId = certMatch[1];
       const cert = await request.json() as DeviceCertificate;
+      const revokedIncoming = await this.state.storage.get<boolean>(`revoked:${deviceId}:${cert.serial}`);
+      if (revokedIncoming) return new Response("Certificate serial has been revoked", { status: 410 });
       const existing = await this.state.storage.get<DeviceCertificate>(`cert:${deviceId}`);
-      if (existing && existing.serial !== cert.serial) {
-        const revoked = await this.state.storage.get<boolean>(`revoked:${deviceId}:${existing.serial}`);
-        if (!revoked) return new Response("Active certificate already exists", { status: 409 });
+      if (existing) {
+        if (existing.serial === cert.serial) {
+          if (JSON.stringify(existing) !== JSON.stringify(cert)) {
+            return new Response("Certificate serial collision", { status: 409 });
+          }
+          return Response.json({ registered: true, serial: cert.serial, duplicate: true });
+        }
+        const revokedExisting = await this.state.storage.get<boolean>(`revoked:${deviceId}:${existing.serial}`);
+        if (!revokedExisting) return new Response("Active certificate already exists", { status: 409 });
       }
       await this.state.storage.put(`cert:${deviceId}`, cert);
       return Response.json({ registered: true, serial: cert.serial });
@@ -197,9 +213,13 @@ export class SyncRoom implements DurableObject {
     if (request.method === "POST" && revokeMatch) {
       const deviceId = revokeMatch[1];
       const value = await request.json() as Revocation;
+      const revokedKey = `revoked:${deviceId}:${value.serial}`;
+      if (await this.state.storage.get<boolean>(revokedKey)) {
+        return Response.json({ revoked: true, duplicate: true, device_id: deviceId, serial: value.serial });
+      }
       const cert = await this.state.storage.get<DeviceCertificate>(`cert:${deviceId}`);
       if (!cert || cert.serial !== value.serial) return new Response("Certificate not found", { status: 404 });
-      await this.state.storage.put(`revoked:${deviceId}:${value.serial}`, true);
+      await this.state.storage.put(revokedKey, true);
       await this.state.storage.delete(`cert:${deviceId}`);
       for (const socket of this.state.getWebSockets(deviceId)) {
         try { socket.send(JSON.stringify({ type: "error", code: "DEVICE_REVOKED" })); socket.close(1008, "device revoked"); }
@@ -226,7 +246,8 @@ export class SyncRoom implements DurableObject {
       const cert = await this.state.storage.get<DeviceCertificate>(`cert:${deviceId}`);
       if (!cert || cert.store_id !== storeId || cert.device_id !== deviceId ||
           cert.expires_at <= Date.now() ||
-          await this.state.storage.get<boolean>(`revoked:${deviceId}:${cert.serial}`)) {
+          await this.state.storage.get<boolean>(`revoked:${deviceId}:${cert.serial}`) ||
+          !await verifyCertificate(this.env, storeId, deviceId, cert)) {
         return new Response("Device is not enrolled or has been revoked", { status: 403 });
       }
       publicKey = cert.public_key;
@@ -242,7 +263,7 @@ export class SyncRoom implements DurableObject {
     crypto.getRandomValues(challenge);
     const challengeText = encodeBase64Url(challenge);
     const attachment: SocketAttachment = {
-      storeId, deviceId, serial, challenge: challengeText,
+      storeId, deviceId, serial, publicKeyBase64: publicKey, challenge: challengeText,
       challengeExpiresAt: Date.now() + CHALLENGE_TTL_MS, authenticated: false,
     };
     this.state.acceptWebSocket(server, [deviceId]);
@@ -268,12 +289,14 @@ export class SyncRoom implements DurableObject {
       }
       const root = rootTrust(this.env, attachment.storeId);
       let publicKey: string | null = null;
-      if (attachment.serial === "ROOT" && root?.device_id === attachment.deviceId) {
+      if (attachment.serial === "ROOT" && root?.device_id === attachment.deviceId &&
+          root.public_key === attachment.publicKeyBase64) {
         publicKey = root.public_key;
       } else {
         const cert = await this.state.storage.get<DeviceCertificate>(`cert:${attachment.deviceId}`);
         if (cert && cert.serial === attachment.serial && cert.expires_at > Date.now() &&
-            !(await this.state.storage.get<boolean>(`revoked:${attachment.deviceId}:${cert.serial}`))) {
+            !(await this.state.storage.get<boolean>(`revoked:${attachment.deviceId}:${cert.serial}`)) &&
+            await verifyCertificate(this.env, attachment.storeId, attachment.deviceId, cert)) {
           publicKey = cert.public_key;
         }
       }
@@ -292,6 +315,23 @@ export class SyncRoom implements DurableObject {
       sender.send(JSON.stringify({ type: "ready", protocol: 2, device_id: attachment.deviceId }));
       void challengeBytes;
       return;
+    }
+
+    if (attachment.serial === "ROOT") {
+      const root = rootTrust(this.env, attachment.storeId);
+      if (!root || root.device_id !== attachment.deviceId || root.public_key !== attachment.publicKeyBase64) {
+        this.failSocket(sender, "TRUST_ROOT_CHANGED");
+        return;
+      }
+    } else {
+      const currentCert = await this.state.storage.get<DeviceCertificate>(`cert:${attachment.deviceId}`);
+      if (!currentCert || currentCert.serial !== attachment.serial ||
+          currentCert.expires_at <= Date.now() ||
+          await this.state.storage.get<boolean>(`revoked:${attachment.deviceId}:${attachment.serial}`) ||
+          !await verifyCertificate(this.env, attachment.storeId, attachment.deviceId, currentCert)) {
+        this.failSocket(sender, "DEVICE_REVOKED");
+        return;
+      }
     }
 
     const now = Date.now();

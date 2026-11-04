@@ -48,7 +48,7 @@ class SyncRelayFrameCodecTest {
     }
 
     @Test fun acceptsReadyOnlyForThisDeviceAndProtocol() {
-        val ready = JSONObject().put("type", "ready").put("protocol", 1).put("device_id", recipient)
+        val ready = JSONObject().put("type", "ready").put("protocol", 2).put("device_id", recipient)
         assertSame(SyncRelayFrameCodec.ServerMessage.Ready,
             SyncRelayFrameCodec.decodeServerMessage(ready.toString(), recipient))
         ready.put("device_id", sender)

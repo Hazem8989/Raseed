@@ -1,7 +1,7 @@
 import { after, before, test } from "node:test";
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
-import { webcrypto } from "node:crypto";
+import { webcrypto, createPrivateKey, sign as signDer } from "node:crypto";
 import { writeFileSync, unlinkSync, existsSync } from "node:fs";
 
 const crypto = webcrypto;
@@ -21,15 +21,15 @@ async function keyPair() {
 async function publicKeyBase64(pair) {
   return b64(await crypto.subtle.exportKey("spki", pair.publicKey));
 }
-async function sign(pair, value) {
-  return b64(await crypto.subtle.sign(
-    { name: "ECDSA", hash: "SHA-256" }, pair.privateKey,
-    new TextEncoder().encode(value)
-  ));
+async function sign(pairOrPrivateKey, value) {
+  const privateKey = pairOrPrivateKey.privateKey ?? pairOrPrivateKey;
+  const pkcs8 = await crypto.subtle.exportKey("pkcs8", privateKey);
+  const nodeKey = createPrivateKey({ key: Buffer.from(pkcs8), format: "der", type: "pkcs8" });
+  return signDer("sha256", Buffer.from(value), { key: nodeKey, dsaEncoding: "der" }).toString("base64");
 }
 function certificatePayload(cert) {
   return json({
-    version: cert.version, store_id: cert.store_id, device_id: cert.device_id,
+    version: cert.version, store_id: cert.store_id, issuer_device_id: cert.issuer_device_id, device_id: cert.device_id,
     public_key: cert.public_key, serial: cert.serial,
     issued_at: cert.issued_at, expires_at: cert.expires_at,
   });
@@ -43,7 +43,7 @@ function revokePayload(value) {
 async function makeCertificate(deviceId, deviceKeys = null) {
   const pair = deviceKeys ?? await keyPair();
   const cert = {
-    version: 1, store_id: storeId, device_id: deviceId,
+    version: 1, store_id: storeId, issuer_device_id: rootDeviceId, device_id: deviceId,
     public_key: await publicKeyBase64(pair),
     serial: crypto.randomUUID(), issued_at: Date.now(),
     expires_at: Date.now() + 30 * 24 * 60 * 60 * 1000,
@@ -151,6 +151,11 @@ before(async () => {
 after(async () => { await stopWorker(); if (devVarsCreated && existsSync(".dev.vars")) unlinkSync(".dev.vars"); });
 
 test("root-pinned devices authenticate before relay; independent peers exchange frames", async () => {
+  const trustResponse = await fetch(`${baseUrl}/v1/trust/${storeId}`);
+  assert.equal(trustResponse.status, 200);
+  const trust = await trustResponse.json();
+  assert.equal(trust.device_id, rootDeviceId);
+  assert.equal(trust.public_key, await publicKeyBase64(rootKeys));
   const { cert, pair } = await makeCertificate(crypto.randomUUID());
   assert.equal((await registerCertificate(cert)).status, 200);
   const primary = await authenticate(rootDeviceId, rootKeys);
@@ -221,6 +226,7 @@ test("root-signed revocation closes an active session and blocks reconnection", 
   const revokedEvent = await nextMessage(socket, m => m.type === "error");
   assert.equal(revokedEvent.code, "DEVICE_REVOKED");
   await close(socket);
+  assert.equal((await registerCertificate(cert)).status, 410);
   await assert.rejects(openChallenge(cert.device_id), /not enrolled|WebSocket connection failed/);
 });
 

@@ -8,6 +8,7 @@ import okhttp3.Response
 import okhttp3.WebSocket
 import okhttp3.WebSocketListener
 import org.json.JSONObject
+import java.security.PrivateKey
 import java.util.UUID
 import java.util.concurrent.TimeUnit
 
@@ -19,13 +20,18 @@ import java.util.concurrent.TimeUnit
  * This class intentionally has no automatic retry or durable queue; those must
  * be driven by the persistent outbox and a verified primary application ACK.
  */
+data class SyncRelayDeviceAuthentication(val serial: String, val privateKey: PrivateKey)
+
 class SyncRelayWebSocketClient(
     relayBaseUrl: String,
     private val storeId: String,
     private val deviceId: String,
     private val listener: Listener,
-    private val client: OkHttpClient = defaultClient()
+    private val client: OkHttpClient = defaultClient(),
+    private val authentication: SyncRelayDeviceAuthentication? = null
 ) {
+    data class DeviceAuthentication(val serial: String, val privateKey: PrivateKey)
+
     interface Listener {
         fun onReady()
         fun onEncryptedFrame(fromDeviceId: String, frameId: String, encryptedFrameJson: String)
@@ -37,15 +43,48 @@ class SyncRelayWebSocketClient(
     private val endpoint: HttpUrl = buildEndpoint(relayBaseUrl, storeId, deviceId)
     @Volatile private var socket: WebSocket? = null
     @Volatile private var ready = false
+    @Volatile private var challengeAnswered = false
 
     @Synchronized
     fun connect() {
         check(socket == null) { "اتصال المزامنة مفتوح أو قيد الفتح بالفعل" }
         ready = false
+        challengeAnswered = false
         val request = Request.Builder().url(endpoint).build()
         socket = client.newWebSocket(request, object : WebSocketListener() {
             override fun onMessage(webSocket: WebSocket, text: String) {
                 try {
+                    val rawMessage = JSONObject(text)
+                    if (rawMessage.optString("type") == "challenge") {
+                        val credentials = authentication
+                        if (credentials == null) {
+                            listener.onRelayError("AUTHENTICATION_REQUIRED")
+                            webSocket.close(1008, "authentication required")
+                            return
+                        }
+                        val challenge = rawMessage.getString("challenge")
+                        val expiresAt = rawMessage.getLong("expires_at")
+                        val signature = SyncDeviceCertificate.challengeSignature(
+                            storeId, deviceId, credentials.serial, challenge, expiresAt, credentials.privateKey
+                        )
+                        challengeAnswered = true
+                        val sent = webSocket.send(JSONObject()
+                            .put("type", "authenticate")
+                            .put("serial", credentials.serial)
+                            .put("challenge", challenge)
+                            .put("signature", signature)
+                            .toString())
+                        if (!sent) {
+                            challengeAnswered = false
+                            listener.onRelayError("AUTHENTICATION_SEND_FAILED")
+                            webSocket.close(1011, "authentication send failed")
+                            return
+                        }
+                        return
+                    }
+                    if (rawMessage.optString("type") == "ready" && !challengeAnswered) {
+                        listener.onRelayError("UNSOLICITED_READY"); webSocket.close(1008, "challenge required"); return
+                    }
                     when (val event = SyncRelayFrameCodec.decodeServerMessage(text, deviceId)) {
                         SyncRelayFrameCodec.ServerMessage.Ready -> {
                             ready = true
@@ -96,6 +135,7 @@ class SyncRelayWebSocketClient(
     @Synchronized
     fun disconnect() {
         ready = false
+        challengeAnswered = false
         val active = socket
         socket = null
         active?.close(1000, "client disconnect")
@@ -190,7 +230,7 @@ internal object SyncRelayFrameCodec {
         val json = JSONObject(encoded)
         return when (json.getString("type")) {
             "ready" -> {
-                require(json.getInt("protocol") == 1 && json.getString("device_id") == localDeviceId)
+                require(json.getInt("protocol") == 2 && json.getString("device_id") == localDeviceId)
                 ServerMessage.Ready
             }
             "relay" -> {

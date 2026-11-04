@@ -51,6 +51,7 @@ class AppDatabase private constructor(context: Context) :
             ensureOperatingExpenseSchema(db)
             ensureSyncProtocolSchema(db)
             ensureSyncDeviceIdentitySchema(db)
+            ensureSyncDeviceRevocationSchema(db)
             ensureSyncActorMappingSchema(db)
             ensureSyncCashAccountMappingSchema(db)
             db.execSQL(
@@ -534,6 +535,22 @@ class AppDatabase private constructor(context: Context) :
                 version = 24
             } finally { db.endTransaction() }
         }
+        if (version < 25) {
+            db.beginTransaction()
+            try {
+                ensureSyncDeviceIdentitySchema(db)
+                db.setTransactionSuccessful()
+                version = 25
+            } finally { db.endTransaction() }
+        }
+        if (version < 26) {
+            db.beginTransaction()
+            try {
+                ensureSyncDeviceRevocationSchema(db)
+                db.setTransactionSuccessful()
+                version = 26
+            } finally { db.endTransaction() }
+        }
         if (version != newVersion) {
             throw IllegalStateException("Missing database migration from version $version to $newVersion")
         }
@@ -586,7 +603,31 @@ class AppDatabase private constructor(context: Context) :
                     ON UPDATE RESTRICT ON DELETE RESTRICT
             )
         """.trimIndent())
+        var certificateColumnExists = false
+        db.rawQuery("PRAGMA table_info(sync_device_public_keys)", null).use { c ->
+            while (c.moveToNext()) if (c.getString(1) == "certificate_json") certificateColumnExists = true
+        }
+        if (!certificateColumnExists) {
+            db.execSQL("ALTER TABLE sync_device_public_keys ADD COLUMN certificate_json TEXT")
+        }
         db.execSQL("CREATE INDEX IF NOT EXISTS idx_sync_device_public_keys_status ON sync_device_public_keys(status,device_id)")
+    }
+
+    private fun ensureSyncDeviceRevocationSchema(db: SQLiteDatabase) {
+        db.execSQL("""
+            CREATE TABLE IF NOT EXISTS sync_device_revocations (
+                device_id TEXT NOT NULL,
+                certificate_serial TEXT NOT NULL,
+                revocation_json TEXT NOT NULL,
+                status TEXT NOT NULL CHECK(status IN ('PENDING','SYNCED')),
+                created_at TEXT NOT NULL,
+                sent_at TEXT,
+                PRIMARY KEY(device_id,certificate_serial),
+                FOREIGN KEY(device_id) REFERENCES sync_devices(device_id)
+                    ON UPDATE RESTRICT ON DELETE RESTRICT
+            )
+        """.trimIndent())
+        db.execSQL("CREATE INDEX IF NOT EXISTS idx_sync_device_revocations_status ON sync_device_revocations(status,created_at)")
     }
 
     private fun ensureSyncActorMappingSchema(db: SQLiteDatabase) {
@@ -979,7 +1020,7 @@ class AppDatabase private constructor(context: Context) :
 
     companion object {
         const val DATABASE_NAME = "the_daily_shop.db"
-        const val DATABASE_VERSION = 24
+        const val DATABASE_VERSION = 26
 
         @Volatile
         private var INSTANCE: AppDatabase? = null

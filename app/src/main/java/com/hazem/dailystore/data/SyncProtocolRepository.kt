@@ -14,7 +14,8 @@ import java.util.UUID
 import android.util.Base64
 
 data class SyncPairingInvitation(val invitationId: String, val token: String, val expiresAt: String)
-data class SyncEnrollment(val deviceId: String, val credential: String, val storeId: String, val primaryDeviceId: String, val storeTimeZoneId: String, val primaryPublicKeyBase64: String? = null)
+data class SyncEnrollment(val deviceId: String, val credential: String, val storeId: String, val primaryDeviceId: String, val storeTimeZoneId: String, val primaryPublicKeyBase64: String? = null, val deviceCertificateJson: String? = null)
+data class SyncRelayRegistrySyncResult(val certificatesRegistered: Int, val revocationsSent: Int)
 data class SyncOutboxItem(
     val operationId: String, val sequence: Long, val operationType: String,
     val entityType: String, val entityId: String, val payloadJson: String,
@@ -99,16 +100,17 @@ class SyncProtocolRepository(private val context: Context, private val credentia
         } finally { db.endTransaction() }
     }
 
-    /** Called by the primary after a future authenticated pairing handshake. */
+    /** Called by the primary after the secondary public key has been received through the one-time pairing flow. */
     fun enrollSecondaryDevice(
         actorUserId: String, invitationToken: String, remoteDeviceId: String, displayName: String,
-        remotePublicKeyBase64: String? = null
+        remotePublicKeyBase64: String
     ): SyncEnrollment {
         val cleanName = displayName.trim()
         require(cleanName.isNotEmpty() && cleanName.length <= 80) { "اسم الجهاز غير صالح" }
         require(runCatching { UUID.fromString(remoteDeviceId) }.isSuccess) { "معرّف الجهاز غير صالح" }
         require(remoteDeviceId != SyncDeviceIdentity.getOrCreate(context)) { "لا يمكن تسجيل الجهاز الأساسي كجهاز ثانوي" }
         require(invitationToken.length in 32..128) { "رمز الاقتران غير صالح" }
+        require(remotePublicKeyBase64.isNotBlank()) { "يجب استلام المفتاح العام للجهاز قبل تسجيله" }
         val db = database.writableDatabase
         val secretBytes = ByteArray(32)
         var credentialSaved = false
@@ -149,14 +151,22 @@ class SyncProtocolRepository(private val context: Context, private val credentia
             }, "device_id=?", arrayOf(remoteDeviceId))
             db.update("sync_pairing_invitations", ContentValues().apply { put("consumed_at", now) },
                 "invitation_id=?", arrayOf(invitation))
-            if (remotePublicKeyBase64 != null) {
-                storeDevicePublicKey(db, remoteDeviceId, remotePublicKeyBase64, now)
-            }
+            val remotePublicKeyBytes = Base64.decode(remotePublicKeyBase64, Base64.DEFAULT)
+            require(remotePublicKeyBytes.size in 64..256) { "مفتاح الجهاز الثانوي غير صالح" }
+            val canonicalRemotePublicKey = Base64.encodeToString(remotePublicKeyBytes, Base64.NO_WRAP)
+            storeDevicePublicKey(db, remoteDeviceId, canonicalRemotePublicKey, now)
             val localIdentity = SyncDeviceAuthenticator.getOrCreate(context, SyncDeviceIdentity.getOrCreate(context))
             storeDevicePublicKey(
                 db, SyncDeviceIdentity.getOrCreate(context),
                 Base64.encodeToString(localIdentity.public.encoded, Base64.NO_WRAP), now
             )
+            val storeId = state(db, "store_id") ?: error("معرّف المتجر غير مهيأ")
+            val certificateJson = SyncDeviceCertificate.issue(
+                storeId, SyncDeviceIdentity.getOrCreate(context), remoteDeviceId, canonicalRemotePublicKey, localIdentity.private
+            )
+            db.update("sync_device_public_keys", ContentValues().apply {
+                put("certificate_json", certificateJson)
+            }, "device_id=?", arrayOf(remoteDeviceId))
             db.insertWithOnConflict("sync_cursors", null, ContentValues().apply {
                 put("device_id", remoteDeviceId); put("last_sequence", 0L); put("updated_at", now)
             }, SQLiteDatabase.CONFLICT_REPLACE)
@@ -170,7 +180,8 @@ class SyncProtocolRepository(private val context: Context, private val credentia
                 state(db, "store_id") ?: error("معرّف المتجر غير مهيأ"),
                 SyncDeviceIdentity.getOrCreate(context),
                 StoreTime.zoneId(db),
-                Base64.encodeToString(localIdentity.public.encoded, Base64.NO_WRAP)
+                Base64.encodeToString(localIdentity.public.encoded, Base64.NO_WRAP),
+                certificateJson
             )
         } catch (error: Exception) {
             if (credentialSaved) credentialVault.remove(remoteDeviceId)
@@ -189,7 +200,8 @@ class SyncProtocolRepository(private val context: Context, private val credentia
         actorUserId: String, storeId: String, primaryDeviceId: String,
         credential: String, displayName: String,
         storeTimeZoneId: String = StoreTime.DEFAULT_ZONE_ID,
-        primaryPublicKeyBase64: String? = null
+        primaryPublicKeyBase64: String,
+        deviceCertificateJson: String
     ) {
         require(storeId.isNotBlank() && displayName.trim().isNotEmpty() && displayName.length <= 80)
         require(StoreTime.isValidZoneId(storeTimeZoneId)) { "منطقة المتجر الزمنية غير صالحة" }
@@ -200,6 +212,13 @@ class SyncProtocolRepository(private val context: Context, private val credentia
         require(secret.size == 32) { "بيانات اعتماد الجهاز يجب أن تكون 256 بت" }
         val localDeviceId = SyncDeviceIdentity.getOrCreate(context)
         require(localDeviceId != primaryDeviceId) { "هذا الهاتف هو الجهاز الأساسي بالفعل" }
+        val localIdentity = SyncDeviceAuthenticator.getOrCreate(context, localDeviceId)
+        val localPublicKeyBase64 = Base64.encodeToString(localIdentity.public.encoded, Base64.NO_WRAP)
+        require(SyncDeviceCertificate.verify(
+            deviceCertificateJson, storeId, localDeviceId, primaryDeviceId,
+            primaryPublicKeyBase64, localPublicKeyBase64
+        )) { "شهادة الجهاز غير موقعة من جذر الثقة أو لا تخص هذا الجهاز" }
+
         val db = database.writableDatabase
         var credentialSaved = false
         db.beginTransaction()
@@ -229,14 +248,11 @@ class SyncProtocolRepository(private val context: Context, private val credentia
             db.insertWithOnConflict("sync_cursors", null, ContentValues().apply {
                 put("device_id", primaryDeviceId); put("last_sequence", 0L); put("updated_at", now)
             }, SQLiteDatabase.CONFLICT_IGNORE)
-            if (primaryPublicKeyBase64 != null) {
-                storeDevicePublicKey(db, primaryDeviceId, primaryPublicKeyBase64, now)
-            }
-            val localIdentity = SyncDeviceAuthenticator.getOrCreate(context, localDeviceId)
-            storeDevicePublicKey(
-                db, localDeviceId,
-                Base64.encodeToString(localIdentity.public.encoded, Base64.NO_WRAP), now
-            )
+            storeDevicePublicKey(db, primaryDeviceId, primaryPublicKeyBase64, now)
+            storeDevicePublicKey(db, localDeviceId, localPublicKeyBase64, now)
+            db.update("sync_device_public_keys", ContentValues().apply {
+                put("certificate_json", deviceCertificateJson)
+            }, "device_id=?", arrayOf(localDeviceId))
             putState(db, "authority_device_id", primaryDeviceId, now)
             putState(db, "local_device_role", "SECONDARY", now)
             putState(db, "store_id", storeId, now)
@@ -318,6 +334,126 @@ class SyncProtocolRepository(private val context: Context, private val credentia
     fun isConfiguredSecondary(): Boolean =
         state(database.readableDatabase, "local_device_role") == "SECONDARY" &&
             !state(database.readableDatabase, "authority_device_id").isNullOrBlank()
+
+    /** Public root configuration to provision in the relay Worker after primary setup. */
+    fun primaryRelayTrustRootJson(): String {
+        require(localDeviceRole() == "PRIMARY" && authorityDeviceId() == localDeviceId()) {
+            "جذر الثقة متاح على الجهاز الأساسي فقط"
+        }
+        val storeId = state(database.readableDatabase, "store_id") ?: error("معرّف المتجر غير مهيأ")
+        val pair = SyncDeviceAuthenticator.getOrCreate(context, localDeviceId())
+        val root = JSONObject()
+            .put("device_id", localDeviceId())
+            .put("public_key", Base64.encodeToString(pair.public.encoded, Base64.NO_WRAP))
+        return JSONObject().put(storeId, root).toString()
+    }
+
+    fun deviceCertificateForRelay(deviceId: String): String? {
+        val db = database.readableDatabase
+        return db.rawQuery(
+            """SELECT k.certificate_json FROM sync_device_public_keys k
+               JOIN sync_devices d ON d.device_id=k.device_id
+               WHERE k.device_id=? AND k.status='ACTIVE' AND d.status='ACTIVE'""".trimIndent(),
+            arrayOf(deviceId)
+        ).use { c -> if (c.moveToFirst() && !c.isNull(0)) c.getString(0) else null }
+    }
+
+    fun relayAuthentication(): SyncRelayDeviceAuthentication {
+        val deviceId = localDeviceId()
+        val role = localDeviceRole()
+        val pair = SyncDeviceAuthenticator.getOrCreate(context, deviceId)
+        val serial = if (role == "PRIMARY" && authorityDeviceId() == deviceId) {
+            "ROOT"
+        } else {
+            require(role == "SECONDARY" && deviceId != authorityDeviceId()) {
+                "دور الجهاز غير مهيأ للمزامنة"
+            }
+            val cert = deviceCertificateForRelay(deviceId)
+                ?: throw IllegalStateException("شهادة الجهاز غير موجودة أو ملغاة")
+            SyncDeviceCertificate.serial(cert)
+        }
+        return SyncRelayDeviceAuthentication(serial, pair.private)
+    }
+
+    /** Fetches the relay's pinned root, registers active peers and retries durable revocations. */
+    fun syncDeviceRegistry(relayBaseUrl: String): SyncRelayRegistrySyncResult {
+        val localId = localDeviceId()
+        require(localDeviceRole() == "PRIMARY" && authorityDeviceId() == localId) {
+            "إدارة سجل شهادات الوسيط متاحة على الجهاز الأساسي فقط"
+        }
+        val db = database.writableDatabase
+        val storeId = state(db, "store_id") ?: error("معرّف المتجر غير مهيأ")
+        val identity = SyncDeviceAuthenticator.getOrCreate(context, localId)
+        val registry = SyncRelayRegistryClient(relayBaseUrl)
+        val trust = registry.fetchTrustRoot(storeId)
+        require(trust.deviceId == localId &&
+            SyncDeviceAuthenticator.fingerprint(Base64.decode(trust.publicKeyBase64, Base64.DEFAULT)) ==
+            SyncDeviceAuthenticator.fingerprint(identity.public.encoded)) {
+            "جذر الثقة المثبت في الوسيط لا يطابق هوية الجهاز الأساسي؛ أوقفنا المزامنة الآمنة"
+        }
+
+        var revocationsSent = 0
+        val pending = mutableListOf<Triple<String, String, String>>()
+        db.rawQuery(
+            """SELECT device_id,certificate_serial,revocation_json
+               FROM sync_device_revocations WHERE status='PENDING'
+               ORDER BY created_at""".trimIndent(), null
+        ).use { c ->
+            while (c.moveToNext()) pending.add(Triple(c.getString(0), c.getString(1), c.getString(2)))
+        }
+        pending.forEach { (deviceId, serial, _) ->
+            // Re-sign on each retry so an offline revocation does not expire before delivery.
+            val statement = SyncDeviceCertificate.signedRevocation(storeId, deviceId, serial, identity.private)
+            val delivered = registry.revokeCertificate(storeId, deviceId, statement)
+            if (delivered) {
+                db.beginTransaction()
+                try {
+                    db.update("sync_device_revocations", ContentValues().apply {
+                        put("revocation_json", statement)
+                        put("status", "SYNCED")
+                        put("sent_at", timestamp())
+                    }, "device_id=? AND certificate_serial=?", arrayOf(deviceId, serial))
+                    db.setTransactionSuccessful()
+                } finally { db.endTransaction() }
+                revocationsSent++
+            }
+        }
+
+        val activeCertificates = mutableListOf<Pair<String, String>>()
+        db.rawQuery(
+            """SELECT d.device_id,k.certificate_json
+               FROM sync_devices d JOIN sync_device_public_keys k ON k.device_id=d.device_id
+               WHERE d.device_role='SECONDARY' AND d.status='ACTIVE'
+                 AND k.status='ACTIVE' AND k.certificate_json IS NOT NULL
+               ORDER BY d.created_at""".trimIndent(), null
+        ).use { c -> while (c.moveToNext()) activeCertificates.add(c.getString(0) to c.getString(1)) }
+        var certificatesRegistered = 0
+        activeCertificates.forEach { (deviceId, certificate) ->
+            if (registry.registerCertificate(storeId, deviceId, certificate)) certificatesRegistered++
+        }
+        return SyncRelayRegistrySyncResult(certificatesRegistered, revocationsSent)
+    }
+
+    /** The secondary fetches its root from the HTTPS relay, never from an untrusted pairing payload. */
+    fun configureAsSecondaryFromRelay(
+        relayBaseUrl: String,
+        actorUserId: String,
+        storeId: String,
+        primaryDeviceId: String,
+        credential: String,
+        displayName: String,
+        deviceCertificateJson: String,
+        storeTimeZoneId: String = StoreTime.DEFAULT_ZONE_ID
+    ) {
+        val trust = SyncRelayRegistryClient(relayBaseUrl).fetchTrustRoot(storeId)
+        require(trust.deviceId == primaryDeviceId && trust.algorithm == "EC_P256_SHA256") {
+            "هوية الجهاز الأساسي لا تطابق جذر الثقة المنشور لدى وسيط المزامنة"
+        }
+        configureAsSecondary(
+            actorUserId, storeId, primaryDeviceId, credential, displayName,
+            storeTimeZoneId, trust.publicKeyBase64, deviceCertificateJson
+        )
+    }
 
     /**
      * Signs an outbox item with the correct direction-specific credential:
@@ -1026,8 +1162,9 @@ class SyncProtocolRepository(private val context: Context, private val credentia
         return MessageDigest.isEqual(stored.toByteArray(Charsets.US_ASCII), sha256(credential).toByteArray(Charsets.US_ASCII))
     }
 
-    fun revokeDevice(actorUserId: String, remoteDeviceId: String) {
+    fun revokeDevice(actorUserId: String, remoteDeviceId: String): String {
         val db = database.writableDatabase
+        var signedRevocation: String? = null
         db.beginTransaction()
         try {
             requirePrimaryManager(db, actorUserId)
@@ -1035,10 +1172,20 @@ class SyncProtocolRepository(private val context: Context, private val credentia
                 "لا يمكن إلغاء الجهاز الأساسي من هذه الشاشة"
             }
             val before = db.rawQuery(
-                "SELECT display_name,status FROM sync_devices WHERE device_id=? AND device_role='SECONDARY'",
+                """SELECT d.display_name,d.status,k.certificate_json
+                   FROM sync_devices d JOIN sync_device_public_keys k ON k.device_id=d.device_id
+                   WHERE d.device_id=? AND d.device_role='SECONDARY'""".trimIndent(),
                 arrayOf(remoteDeviceId)
             ).use {
-                require(it.moveToFirst()) { "الجهاز غير موجود" }
+                require(it.moveToFirst()) { "الجهاز غير موجود أو لا يملك شهادة" }
+                val certificate = it.getString(2)
+                require(certificate.isNotBlank()) { "شهادة الجهاز غير موجودة" }
+                val serial = SyncDeviceCertificate.serial(certificate)
+                val root = SyncDeviceAuthenticator.getOrCreate(context, SyncDeviceIdentity.getOrCreate(context))
+                val storeId = state(db, "store_id") ?: error("معرّف المتجر غير مهيأ")
+                signedRevocation = SyncDeviceCertificate.signedRevocation(
+                    storeId, remoteDeviceId, serial, root.private
+                )
                 JSONObject().put("display_name", it.getString(0)).put("status", it.getString(1)).toString()
             }
             val now = timestamp()
@@ -1053,6 +1200,7 @@ class SyncProtocolRepository(private val context: Context, private val credentia
             db.setTransactionSuccessful()
         } finally { db.endTransaction() }
         credentialVault.remove(remoteDeviceId)
+        return signedRevocation ?: error("تعذر إنشاء بيان إلغاء الشهادة")
     }
 
     /**

@@ -113,6 +113,30 @@ object SyncDeviceAuthenticator {
         }.getOrDefault(false)
     }
 
+    /** Signs protocol payload bytes with SHA-256/ECDSA for relay certificates and challenges. */
+    fun signBytes(privateKey: PrivateKey, payload: ByteArray): ByteArray {
+        require(payload.isNotEmpty())
+        return Signature.getInstance(SIGNATURE_ALGORITHM).run {
+            initSign(privateKey)
+            update(payload)
+            sign()
+        }
+    }
+
+    /** Verifies a root-signed certificate or a protocol-level signed statement. */
+    fun verifyBytes(encodedPublicKey: ByteArray, payload: ByteArray, signatureBytes: ByteArray): Boolean {
+        if (encodedPublicKey.isEmpty() || payload.isEmpty() || signatureBytes.isEmpty()) return false
+        return runCatching {
+            val publicKey = KeyFactory.getInstance("EC")
+                .generatePublic(X509EncodedKeySpec(encodedPublicKey))
+            Signature.getInstance(SIGNATURE_ALGORITHM).run {
+                initVerify(publicKey)
+                update(payload)
+                verify(signatureBytes)
+            }
+        }.getOrDefault(false)
+    }
+
     fun publicKeyBytes(keyPair: KeyPair): ByteArray = keyPair.public.encoded.copyOf()
 
     fun fingerprint(encodedPublicKey: ByteArray): String =

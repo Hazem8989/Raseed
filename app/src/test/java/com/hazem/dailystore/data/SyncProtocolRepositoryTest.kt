@@ -38,6 +38,68 @@ class SyncProtocolRepositoryTest {
 
     @After fun tearDown() { database.close() }
 
+    private fun enrollRemote(
+        invitation: SyncPairingInvitation, deviceId: String, displayName: String
+    ): SyncEnrollment {
+        val remote = SyncDeviceAuthenticator.getOrCreate(
+            RuntimeEnvironment.getApplication(), deviceId
+        )
+        val publicKey = android.util.Base64.encodeToString(remote.public.encoded, android.util.Base64.NO_WRAP)
+        return repository.enrollSecondaryDevice(adminId, invitation.token, deviceId, displayName, publicKey)
+    }
+
+    private fun configureSecondaryForTest(
+        storeId: String, primaryId: String, credential: String, displayName: String,
+        zoneId: String = StoreTime.DEFAULT_ZONE_ID
+    ) {
+        val context = RuntimeEnvironment.getApplication()
+        val localId = SyncDeviceIdentity.getOrCreate(context)
+        val local = SyncDeviceAuthenticator.getOrCreate(context, localId)
+        val primary = SyncDeviceAuthenticator.getOrCreate(context, primaryId)
+        val localPublic = android.util.Base64.encodeToString(local.public.encoded, android.util.Base64.NO_WRAP)
+        val primaryPublic = android.util.Base64.encodeToString(primary.public.encoded, android.util.Base64.NO_WRAP)
+        val certificate = SyncDeviceCertificate.issue(storeId, primaryId, localId, localPublic, primary.private)
+        repository.configureAsSecondary(
+            adminId, storeId, primaryId, credential, displayName, zoneId,
+            primaryPublicKeyBase64 = primaryPublic,
+            deviceCertificateJson = certificate
+        )
+    }
+
+
+    @Test fun primaryIssuesRootSignedDeviceCertificateAndRevocationStatement() {
+        repository.configureAsPrimary(adminId, "الرئيسي")
+        val remoteId = UUID.randomUUID().toString()
+        val invitation = repository.createPairingInvitation(adminId)
+        val enrollment = enrollRemote(invitation, remoteId, "الثانوي")
+        val certificate = enrollment.deviceCertificateJson!!
+        val trust = org.json.JSONObject(repository.primaryRelayTrustRootJson())
+        val storeId = enrollment.storeId
+        val root = trust.getJSONObject(storeId)
+        assertEquals(enrollment.primaryDeviceId, root.getString("device_id"))
+        assertTrue(SyncDeviceCertificate.verify(
+            certificate, storeId, remoteId, enrollment.primaryDeviceId, root.getString("public_key")
+        ))
+        val revocation = repository.revokeDevice(adminId, remoteId)
+        val revocationJson = org.json.JSONObject(revocation)
+        val canonical = org.json.JSONObject()
+            .put("version", revocationJson.getInt("version"))
+            .put("store_id", revocationJson.getString("store_id"))
+            .put("device_id", revocationJson.getString("device_id"))
+            .put("serial", revocationJson.getString("serial"))
+            .put("revoked_at", revocationJson.getLong("revoked_at"))
+            .toString()
+        val rootPublic = android.util.Base64.decode(root.getString("public_key"), android.util.Base64.DEFAULT)
+        assertTrue(SyncDeviceAuthenticator.verifyBytes(
+            rootPublic, canonical.toByteArray(Charsets.UTF_8),
+            android.util.Base64.decode(revocationJson.getString("signature"), android.util.Base64.DEFAULT)
+        ))
+        assertNull(repository.trustedPeerPublicKey(remoteId))
+        database.readableDatabase.rawQuery(
+            "SELECT status FROM sync_device_revocations WHERE device_id=? AND certificate_serial=?",
+            arrayOf(remoteId, revocationJson.getString("serial"))
+        ).use { c -> assertTrue(c.moveToFirst()); assertEquals("PENDING", c.getString(0)) }
+    }
 
     @Test fun primaryCreatesEncryptedSignedApplicationAckOnlyAfterDurableApply() {
         repository.configureAsPrimary(adminId, "الرئيسي")
@@ -112,7 +174,7 @@ class SyncProtocolRepositoryTest {
         repository.configureAsPrimary(adminId, "الرئيسي")
         val remoteId = UUID.randomUUID().toString()
         val invitation = repository.createPairingInvitation(adminId)
-        repository.enrollSecondaryDevice(adminId, invitation.token, remoteId, "الثانوي")
+        enrollRemote(invitation, remoteId, "الثانوي")
         val operationId = UUID.randomUUID().toString()
         val now = "2026-11-04T12:00:00.000Z"
         database.writableDatabase.insertOrThrow("sync_inbox", null, ContentValues().apply {
@@ -145,7 +207,7 @@ class SyncProtocolRepositoryTest {
         repository.configureAsPrimary(adminId, "الرئيسي")
         val invitation = repository.createPairingInvitation(adminId)
         val remoteId = UUID.randomUUID().toString()
-        val enrolled = repository.enrollSecondaryDevice(adminId, invitation.token, remoteId, "الهاتف الثاني")
+        val enrolled = enrollRemote(invitation, remoteId, "الهاتف الثاني")
         assertEquals(remoteId, enrolled.deviceId)
         assertEquals(StoreTime.DEFAULT_ZONE_ID, enrolled.storeTimeZoneId)
         assertTrue(repository.authenticateDevice(remoteId, enrolled.credential))
@@ -158,7 +220,7 @@ class SyncProtocolRepositoryTest {
             assertEquals(64, c.getString(0).length)
         }
         var rejected = false
-        try { repository.enrollSecondaryDevice(adminId, invitation.token, UUID.randomUUID().toString(), "جهاز آخر") }
+        try { enrollRemote(invitation, UUID.randomUUID().toString(), "جهاز آخر") }
         catch (_: IllegalArgumentException) { rejected = true }
         assertTrue(rejected)
     }
@@ -170,7 +232,7 @@ class SyncProtocolRepositoryTest {
             secretBytes,
             android.util.Base64.URL_SAFE or android.util.Base64.NO_WRAP or android.util.Base64.NO_PADDING
         )
-        repository.configureAsSecondary(adminId, "store-remote-01", primaryId, credential, "الهاتف الثاني", "America/Los_Angeles")
+        configureSecondaryForTest("store-remote-01", primaryId, credential, "الهاتف الثاني", "America/Los_Angeles")
         assertTrue(repository.isConfiguredSecondary())
         assertEquals("America/Los_Angeles", StoreTime.zoneId(database.readableDatabase))
         assertFalse(repository.hasConfiguredPrimary())
@@ -236,7 +298,7 @@ class SyncProtocolRepositoryTest {
         repository.configureAsPrimary(adminId, "الرئيسي")
         val invitation = repository.createPairingInvitation(adminId)
         val remoteId = UUID.randomUUID().toString()
-        repository.enrollSecondaryDevice(adminId, invitation.token, remoteId, "الثانوي")
+        enrollRemote(invitation, remoteId, "الثانوي")
         val operationId = UUID.randomUUID().toString()
         val db = database.writableDatabase
         db.beginTransaction()
@@ -259,7 +321,7 @@ class SyncProtocolRepositoryTest {
         repository.configureAsPrimary(adminId, "الرئيسي")
         val invitation = repository.createPairingInvitation(adminId)
         val secondaryId = UUID.randomUUID().toString()
-        repository.enrollSecondaryDevice(adminId, invitation.token, secondaryId, "الثانوي")
+        enrollRemote(invitation, secondaryId, "الثانوي")
 
         assertEquals("America/New_York",
             StoreRepository(RuntimeEnvironment.getApplication())
@@ -285,9 +347,7 @@ class SyncProtocolRepositoryTest {
         StoreRepository(RuntimeEnvironment.getApplication())
             .saveStoreTimeZoneId("Asia/Dubai", adminId)
         val invitation = repository.createPairingInvitation(adminId)
-        val enrollment = repository.enrollSecondaryDevice(
-            adminId, invitation.token, UUID.randomUUID().toString(), "جهاز جديد"
-        )
+        val enrollment = enrollRemote(invitation, UUID.randomUUID().toString(), "جهاز جديد")
         assertEquals("Asia/Dubai", enrollment.storeTimeZoneId)
     }
 
@@ -298,7 +358,7 @@ class SyncProtocolRepositoryTest {
             secret,
             android.util.Base64.URL_SAFE or android.util.Base64.NO_WRAP or android.util.Base64.NO_PADDING
         )
-        repository.configureAsSecondary(adminId, "store-time-zone-02", primaryId, credential, "الثانوي")
+        configureSecondaryForTest("store-time-zone-02", primaryId, credential, "الثانوي")
         var rejected = false
         try {
             StoreRepository(RuntimeEnvironment.getApplication())
@@ -318,9 +378,7 @@ class SyncProtocolRepositoryTest {
             secret,
             android.util.Base64.URL_SAFE or android.util.Base64.NO_WRAP or android.util.Base64.NO_PADDING
         )
-        repository.configureAsSecondary(
-            adminId, "store-time-zone-01", primaryId, credential, "الثانوي", "Asia/Damascus"
-        )
+        configureSecondaryForTest("store-time-zone-01", primaryId, credential, "الثانوي", "Asia/Damascus")
         val envelope = SyncEnvelopeSecurity.create(
             "store-time-zone-01", UUID.randomUUID().toString(), 9L,
             primaryId, adminId, "UPDATE", "STORE_SETTINGS", "store_time_zone", 0L,
@@ -351,7 +409,7 @@ class SyncProtocolRepositoryTest {
             secretBytes,
             android.util.Base64.URL_SAFE or android.util.Base64.NO_WRAP or android.util.Base64.NO_PADDING
         )
-        repository.configureAsSecondary(adminId, "store-command-01", primaryId, credential, "الثانوي")
+        configureSecondaryForTest("store-command-01", primaryId, credential, "الثانوي")
         val operationId = UUID.randomUUID().toString()
         val db = database.writableDatabase
         db.beginTransaction()
@@ -376,7 +434,7 @@ class SyncProtocolRepositoryTest {
         repository.configureAsPrimary(adminId, "الرئيسي")
         val invitation = repository.createPairingInvitation(adminId)
         val secondaryId = UUID.randomUUID().toString()
-        repository.enrollSecondaryDevice(adminId, invitation.token, secondaryId, "الثانوي")
+        enrollRemote(invitation, secondaryId, "الثانوي")
         repository.mapSecondaryActor(adminId, secondaryId, "remote-admin", adminId)
         val secret = vault.load(secondaryId)!!
         val operationId = UUID.randomUUID().toString()
@@ -411,7 +469,7 @@ class SyncProtocolRepositoryTest {
         repository.configureAsPrimary(adminId, "الرئيسي")
         val invitation = repository.createPairingInvitation(adminId)
         val secondaryId = UUID.randomUUID().toString()
-        repository.enrollSecondaryDevice(adminId, invitation.token, secondaryId, "الثانوي")
+        enrollRemote(invitation, secondaryId, "الثانوي")
         repository.mapSecondaryActor(adminId, secondaryId, "remote-admin", adminId)
         val secret = vault.load(secondaryId)!!
         val storeId = database.readableDatabase.rawQuery(
