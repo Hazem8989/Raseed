@@ -7,11 +7,13 @@ This Worker is a transport relay only. It does not store a store database, ledge
 The relay does not trust store/device UUIDs or public keys supplied during a WebSocket connection.
 
 - `STORE_ROOT_PUBLIC_KEYS` is a JSON map keyed by store UUID. Each value contains `device_id` and `public_key` (base64 X.509/SPKI P-256 public key) for the store's primary/root device.
-- The primary's public key is provisioned out-of-band in Cloudflare Worker variables. The matching private key remains in Android Keystore on the primary device.
+- In the app, an administrator opens the sidebar's **مزامنة الأجهزة** screen, initializes the primary once, and copies the generated trust-root JSON. The matching private key remains in Android Keystore on the primary device.
+- The public trust-root JSON is provisioned out-of-band as the Worker's `STORE_ROOT_PUBLIC_KEYS` variable before any real connection. Never upload the private key.
+- Pairing uses a one-time invitation from the primary. The secondary generates its key locally and signs its pairing request; the primary verifies proof of possession before issuing a certificate and shared transport credential. The response bundle must be transferred directly to the intended secondary device.
 - The primary signs each secondary device certificate. Certificates bind protocol version, store UUID, issuer/root device UUID, secondary device UUID, device public key, unique serial, issue time and expiry.
 - The primary registers a certificate using `POST /v1/devices/{store_uuid}/{device_uuid}/certificate`. The Worker verifies the signature against the pinned root key before persisting the certificate in the store Durable Object. Identical retries are idempotent; a serial collision or re-use of a revoked serial is rejected.
 - A WebSocket connection is not ready on upgrade. The relay sends a random, short-lived challenge. The client must prove possession of the private key matching its registered certificate (or the pinned root key for the primary). Only then does the relay send `ready`.
-- The primary revokes a secondary using a root-signed request to `POST /v1/devices/{store_uuid}/{device_uuid}/revoke`. The relay records a revocation tombstone, removes the active certificate and closes that device's live sessions. Repeated revocation delivery is idempotent; a revoked device cannot reconnect or re-register the old certificate.
+- The primary revokes a secondary using a root-signed request to `POST /v1/devices/{store_uuid}/{device_uuid}/revoke`. The revocation is first committed to the primary's local pending-revocation table. On the next successful registry sync it reaches the relay, which records a serial-specific tombstone, removes the matching active certificate and closes only sessions authenticated with that serial. A tombstone is accepted even if the certificate registration has not arrived yet. Repeated delivery is idempotent; delayed revocations cannot close a newly re-paired session.
 - `GET /v1/trust/{store_uuid}` returns the public root key and root device ID over HTTPS so a secondary can verify that the pairing certificate is issued by the currently pinned store root.
 
 Certificate and revocation requests are authenticated by the root signature; they do not rely on a bearer secret embedded in the APK. Certificate metadata and revocation state are stored in the Durable Object; business records and message payloads are not.
@@ -29,7 +31,7 @@ Certificate and revocation requests are authenticated by the root signature; the
 
 ## Required production provisioning
 
-After the primary app has generated its stable Android Keystore identity, use its public trust-root JSON to populate `STORE_ROOT_PUBLIC_KEYS` in the Cloudflare Worker configuration for that store. This is a public trust anchor, not a private key. Never upload the private key. Secondary devices fetch this pinned root from the HTTPS trust endpoint before accepting a pairing certificate. The Worker must remain undeployed for real traffic until this provisioning and the complete Android pairing flow have been verified.
+After the primary app has generated its stable Android Keystore identity, use **مزامنة الأجهزة → نسخ جذر الثقة** to copy the public trust-root JSON into `STORE_ROOT_PUBLIC_KEYS` in the Cloudflare Worker configuration. This is a public trust anchor, not a private key. Never upload the private key. Then create a one-time invitation on the primary, create and sign the request on the secondary, register it on the primary, and accept the returned bundle on the secondary using the HTTPS trust endpoint. Configure the WSS endpoint in the app only after the Worker root is provisioned. The Worker must remain undeployed for real traffic until the owner performs this provisioning and the final network tests pass.
 
 For local tests, the integration suite creates a temporary `.dev.vars` file with an ephemeral test root and removes it afterwards.
 
