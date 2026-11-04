@@ -432,7 +432,7 @@ class TwoDeviceSyncIntegrationTest {
         setLocalDeviceId(primaryId)
         AppDatabase.installForTests(primaryDb)
         primaryRepository.mapSecondaryCashAccount(
-            primaryAdminId, secondaryId, "secondary-debt-wallet", primaryWalletId
+            primaryAdminId, secondaryId, secondaryWalletId, primaryWalletId
         )
 
         // The secondary records only a durable command; its own debt and cash ledgers stay untouched.
@@ -451,7 +451,7 @@ class TwoDeviceSyncIntegrationTest {
         assertEquals(0, scalar(secondaryDb,
             "SELECT COUNT(*) FROM cash_transactions WHERE operation_id=?", collectionOperationId))
         val queuedPayload = JSONObject(secondaryDb.readableDatabase.rawQuery(
-            "SELECT payload_json FROM sync_queue WHERE operation_id=?", arrayOf(collectionOperationId)
+            "SELECT payload_json FROM sync_operation_envelopes WHERE operation_id=?", arrayOf(collectionOperationId)
         ).use { c -> assertTrue(c.moveToFirst()); c.getString(0) })
         val collectionFrame = secondaryRepository.encryptedAuthenticatedOutbox(
             collectionOperationId, primaryId

@@ -248,6 +248,7 @@ class CustomerPaymentRepository(context: Context) {
                 val paymentId = "pending-payment-$operationId"
                 val remoteCashTransactionId = "pending-cash-$operationId"
                 val payload = org.json.JSONObject()
+                    .put("business_operation", "COLLECT_CUSTOMER_PAYMENT")
                     .put("invoice_id", invoiceId)
                     .put("payment_id", paymentId)
                     .put("cash_transaction_id", remoteCashTransactionId)
