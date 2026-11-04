@@ -36,7 +36,9 @@ object SyncEnvelopeSecurity {
         "PURCHASE_INVOICE", "SALES_INVOICE", "CUSTOMER_PAYMENT",
         "SUPPLIER_PAYMENT", "SALES_RETURN", "PURCHASE_RETURN",
         "INVENTORY_ADJUSTMENT", "OPERATING_EXPENSE", "CASH_ACCOUNT_TRANSFER",
-        "SERVICE_TRANSFER", "DAILY_SUPPLIER_ROLLOVER", "EXCHANGE_RATE", "STORE_SETTINGS"
+        "SERVICE_TRANSFER", "DAILY_SUPPLIER_ROLLOVER", "EXCHANGE_RATE", "STORE_SETTINGS",
+        // A narrowly handled control-plane probe; the primary applies it without ledger writes.
+        "SYNC_TRANSPORT_PROBE"
     )
 
     fun create(
