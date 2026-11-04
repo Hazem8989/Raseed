@@ -299,11 +299,34 @@ class SyncDeviceManagementActivity : Activity() {
     }
 
     private fun revokeSecondary() {
-        prompt("إلغاء شهادة جهاز", "أدخل معرّف الجهاز الثانوي UUID") { deviceId ->
-            runTask("إلغاء شهادة الجهاز") {
-                repository.revokeDevice(actorUserId, deviceId)
-                SyncRelaySession.refreshDeviceRegistry()
-                main.post { status.text = "أُلغيت صلاحية الجهاز محلياً؛ أُضيف بيان الإلغاء إلى قائمة الإرسال المؤجل." }
+        runTask("تحميل الأجهزة الثانوية المسجلة") {
+            val devices = repository.activeSecondaryDeviceIds()
+            main.post {
+                if (devices.isEmpty()) {
+                    status.text = "لا توجد أجهزة ثانوية نشطة لإلغاء صلاحيتها."
+                } else {
+                    AlertDialog.Builder(this)
+                        .setTitle("اختر الجهاز المراد إلغاء شهادته")
+                        .setItems(devices.toTypedArray()) { _, index ->
+                            val deviceId = devices[index]
+                            AlertDialog.Builder(this)
+                                .setTitle("تأكيد إلغاء الشهادة")
+                                .setMessage("سيُمنع هذا الجهاز من الاتصال بعد وصول الإلغاء إلى الوسيط.\n\n$deviceId")
+                                .setPositiveButton("إلغاء الشهادة") { _, _ ->
+                                    runTask("إلغاء شهادة الجهاز") {
+                                        repository.revokeDevice(actorUserId, deviceId)
+                                        SyncRelaySession.refreshDeviceRegistry()
+                                        main.post {
+                                            status.text = "أُلغيت صلاحية الجهاز محلياً؛ أُضيف بيان الإلغاء إلى قائمة الإرسال المؤجل."
+                                        }
+                                    }
+                                }
+                                .setNegativeButton("تراجع", null)
+                                .show()
+                        }
+                        .setNegativeButton("إغلاق", null)
+                        .show()
+                }
             }
         }
     }
