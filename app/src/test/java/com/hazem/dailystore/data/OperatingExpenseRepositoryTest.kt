@@ -23,6 +23,7 @@ class OperatingExpenseRepositoryTest {
     private lateinit var accounts: CashAccountRepository
 
     @Before fun setUp() {
+        SyncDeviceTestKeyProvider.install()
         val context=RuntimeEnvironment.getApplication()
         AppDatabase.resetForTests(context)
         db=AppDatabase.getInstance(context)
