@@ -446,9 +446,9 @@ class SyncProtocolRepository(private val context: Context, private val credentia
         }
         val signature = Base64.decode(frame.getString("signature"), Base64.DEFAULT)
         val signedFrame = JSONObject(frame.toString())
-            .remove("signature")
-            .remove("signature_algorithm")
-            .remove("sender_key_fingerprint")
+        signedFrame.remove("signature")
+        signedFrame.remove("signature_algorithm")
+        signedFrame.remove("sender_key_fingerprint")
         val context = SyncDeviceAuthenticator.SigningContext(
             storeId, senderId, recipientId, operationId
         )
