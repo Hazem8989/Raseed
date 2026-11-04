@@ -334,6 +334,7 @@ class StoreRepository(context: Context) {
      * must be entered later through a counted stock-opening operation.
      */
     fun importProducts(rows: List<ProductImportRow>, exchangeRateMilli: Long, actorUserId: String): Int {
+        requirePrimaryCatalogAuthority()
         require(actorUserId.isNotBlank()) { "جلسة المستخدم غير صالحة لتسجيل عملية الاستيراد" }
         requireManager(helper.readableDatabase, actorUserId)
         require(rows.isNotEmpty()) { "لا توجد أصناف للاستيراد" }
