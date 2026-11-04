@@ -1385,11 +1385,12 @@ class SyncDomainApplier(context: Context) {
         db.beginTransaction()
         try {
             val row = db.rawQuery(
-                """SELECT origin_device_id,operation_type,entity_type,entity_id,payload_json,status
+                """SELECT origin_device_id,operation_type,entity_type,entity_id,payload_json,status,
+                          origin_created_at
                    FROM sync_inbox WHERE operation_id=?""".trimIndent(), arrayOf(operationId)
             ).use { c ->
                 require(c.moveToFirst()) { "التصنيف غير موجود في صندوق الوارد" }
-                Array(6) { c.getString(it) }
+                Array(7) { c.getString(it) }
             }
             require(row[0] == authority && row[1] == "CREATE" && row[2] == "CATEGORY") {
                 "مصدر أو نوع التصنيف الوارد غير صالح"
@@ -1404,9 +1405,14 @@ class SyncDomainApplier(context: Context) {
                 "نوع عملية التصنيف الواردة غير صالح"
             }
             val name = payload.optString("name").trim()
+            val payloadCreatedAt = payload.optString("created_at")
+            val createdAt = payloadCreatedAt.takeIf {
+                it.matches(Regex("\\d{4}-\\d{2}-\\d{2}T.*"))
+            } ?: row[6]
             require(name.isNotEmpty() && name.length <= 80 &&
-                row[3] == name.lowercase(java.util.Locale.ROOT)) {
-                "اسم التصنيف أو معرّفه غير صالح"
+                row[3] == name.lowercase(java.util.Locale.ROOT) &&
+                createdAt.matches(Regex("\\d{4}-\\d{2}-\\d{2}T.*"))) {
+                "اسم التصنيف أو معرّفه أو وقت إنشائه الأصلي غير صالح"
             }
             val existing = db.rawQuery(
                 "SELECT id,name FROM categories WHERE lower(trim(name))=? LIMIT 1",
@@ -1415,7 +1421,7 @@ class SyncDomainApplier(context: Context) {
             if (existing == null) {
                 db.insertOrThrow("categories", null, ContentValues().apply {
                     put("name", name)
-                    put("created_at", row[4].let { payload.optString("created_at").ifBlank { timestamp() } })
+                    put("created_at", createdAt)
                 })
             } else {
                 require(existing.equals(name, ignoreCase = true)) {
