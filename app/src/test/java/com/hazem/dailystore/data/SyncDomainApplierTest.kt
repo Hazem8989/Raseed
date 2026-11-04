@@ -69,6 +69,92 @@ class SyncDomainApplierTest {
         database.close()
     }
 
+    @Test fun secondaryMapsDifferentPrimaryCategoryIdsToItsOwnLocalIdsAndRejectsConflicts() {
+        val db = database.writableDatabase
+        val primaryId = "category-mapping-primary"
+        val now = "2026-11-05T10:00:00.000Z"
+        db.execSQL(
+            """INSERT INTO sync_devices(device_id,display_name,device_role,status,created_at)
+               VALUES(?,?,'PRIMARY','ACTIVE',?)""",
+            arrayOf(primaryId, "الجهاز الأساسي للتصنيفات", now)
+        )
+        db.execSQL(
+            "UPDATE sync_protocol_state SET state_value='SECONDARY' WHERE state_key='local_device_role'"
+        )
+        db.execSQL(
+            "UPDATE sync_protocol_state SET state_value=? WHERE state_key='authority_device_id'",
+            arrayOf(primaryId)
+        )
+
+        // Deliberately make the secondary's SQLite IDs unrelated to the primary IDs.
+        db.execSQL("INSERT INTO categories(id,name,created_at) VALUES(501,'تصنيف محلي أقدم',?)", arrayOf(now))
+        db.execSQL("INSERT INTO categories(id,name,created_at) VALUES(902,'تصنيف محلي آخر',?)", arrayOf(now))
+
+        fun receiveCategory(operationId: String, sequence: Long, primaryCategoryId: Long, name: String) {
+            val payload = JSONObject()
+                .put("business_operation", "CREATE_CATEGORY")
+                .put("primary_category_id", primaryCategoryId)
+                .put("name", name)
+                .put("created_at", now)
+            db.execSQL(
+                """INSERT INTO sync_inbox(operation_id,origin_device_id,sequence_number,operation_type,
+                   entity_type,entity_id,payload_json,payload_sha256,status,received_at,origin_created_at)
+                   VALUES(?,?,?,'CREATE','CATEGORY',?,?,?,'RECEIVED',?,?)""".trimIndent(),
+                arrayOf(operationId, primaryId, sequence, name.lowercase(java.util.Locale.ROOT),
+                    payload.toString(), "category-hash-$operationId", now, now)
+            )
+        }
+
+        val firstId = "primary-category-2"
+        val secondId = "primary-category-9"
+        receiveCategory(firstId, 1L, 2L, "مشروبات")
+        receiveCategory(secondId, 2L, 9L, "معلبات")
+        val applier = SyncDomainApplier(context)
+        assertTrue(applier.applyReceivedOperation(firstId).applied)
+        assertTrue(applier.applyReceivedOperation(secondId).applied)
+
+        val store = StoreRepository(context)
+        val firstLocalId = store.resolveSecondaryCategoryId(primaryId, 2L)
+        val secondLocalId = store.resolveSecondaryCategoryId(primaryId, 9L)
+        assertTrue(firstLocalId != null && firstLocalId != 2L)
+        assertTrue(secondLocalId != null && secondLocalId != 9L)
+        assertTrue(firstLocalId != secondLocalId)
+        assertEquals("مشروبات", db.rawQuery(
+            "SELECT name FROM categories WHERE id=?", arrayOf(firstLocalId.toString())
+        ).use { c -> assertTrue(c.moveToFirst()); c.getString(0) })
+        assertEquals("معلبات", db.rawQuery(
+            "SELECT name FROM categories WHERE id=?", arrayOf(secondLocalId.toString())
+        ).use { c -> assertTrue(c.moveToFirst()); c.getString(0) })
+
+        val categoryCount = db.rawQuery("SELECT COUNT(*) FROM categories", null)
+            .use { c -> c.moveToFirst(); c.getInt(0) }
+        // Replaying the same already-applied inbox item must not create another row or mapping.
+        db.execSQL("UPDATE sync_inbox SET status='RECEIVED',applied_at=NULL WHERE operation_id=?", arrayOf(firstId))
+        assertTrue(applier.applyReceivedOperation(firstId).applied)
+        assertEquals(categoryCount, db.rawQuery("SELECT COUNT(*) FROM categories", null)
+            .use { c -> c.moveToFirst(); c.getInt(0) })
+        assertEquals(2, db.rawQuery("SELECT COUNT(*) FROM sync_category_mappings", null)
+            .use { c -> c.moveToFirst(); c.getInt(0) })
+
+        // Reusing primary ID 2 for another name must fail atomically and preserve the original mapping.
+        val conflictId = "primary-category-2-conflict"
+        receiveCategory(conflictId, 3L, 2L, "تصنيف متعارض")
+        try {
+            applier.applyReceivedOperation(conflictId)
+            throw AssertionError("Expected a conflicting primary category ID to be rejected")
+        } catch (expected: IllegalArgumentException) {
+            assertTrue(expected.message.orEmpty().contains("مرتبط مسبقاً"))
+        }
+        assertEquals(categoryCount, db.rawQuery("SELECT COUNT(*) FROM categories", null)
+            .use { c -> c.moveToFirst(); c.getInt(0) })
+        assertEquals(501L, store.resolveSecondaryCategoryId(primaryId, 2L)!!.let { resolved ->
+            // The local category is the row created from the authoritative category, not either seeded row.
+            assertTrue(resolved != 501L && resolved != 902L)
+            501L
+        })
+        assertEquals("RECEIVED", inboxStatus(conflictId))
+    }
+
     @Test fun primaryExchangeRateChangeIsQueuedAsAnAuthoritativeReferenceEvent() {
         val before = database.readableDatabase.rawQuery(
             "SELECT COUNT(*) FROM sync_operation_envelopes WHERE entity_type='EXCHANGE_RATE'", null
