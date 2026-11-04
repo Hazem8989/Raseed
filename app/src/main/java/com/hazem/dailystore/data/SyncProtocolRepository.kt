@@ -46,6 +46,7 @@ class SyncProtocolRepository(private val context: Context, private val credentia
                 "يوجد جهاز أساسي آخر؛ لا يمكن نقل سلطة الاعتماد تلقائياً"
             }
             val now = timestamp()
+            val localIdentity = SyncDeviceAuthenticator.getOrCreate(context, deviceId)
             db.insertWithOnConflict("sync_devices", null, ContentValues().apply {
                 put("device_id", deviceId)
                 put("display_name", cleanName)
@@ -59,6 +60,10 @@ class SyncProtocolRepository(private val context: Context, private val credentia
                 put("display_name", cleanName); put("last_seen_at", now)
                 put("status", "ACTIVE"); putNull("revoked_at")
             }, "device_id=?", arrayOf(deviceId))
+            storeDevicePublicKey(
+                db, deviceId,
+                Base64.encodeToString(localIdentity.public.encoded, Base64.NO_WRAP), now
+            )
             putState(db, "authority_device_id", deviceId, now)
             putState(db, "local_device_role", "PRIMARY", now)
             if (state(db, "store_id") == null) putState(db, "store_id", UUID.randomUUID().toString(), now)
@@ -399,15 +404,57 @@ class SyncProtocolRepository(private val context: Context, private val credentia
                 javax.crypto.spec.SecretKeySpec(secret, "AES"),
                 context
             )
-            return JSONObject().put("frame_version", 1)
+            val unsignedFrame = JSONObject().put("frame_version", 1)
                 .put("store_id", envelope.storeId)
-                .put("sender_device_id", envelope.originDeviceId)
+                .put("sender_device_id", localId)
                 .put("recipient_device_id", recipientDeviceId)
                 .put("operation_id", envelope.operationId)
                 .put("ciphertext", Base64.encodeToString(
                     encrypted, Base64.URL_SAFE or Base64.NO_WRAP or Base64.NO_PADDING
-                )).toString()
+                ))
+            val signingIdentity = SyncDeviceAuthenticator.getOrCreate(context, localId)
+            val signingContext = SyncDeviceAuthenticator.SigningContext(
+                envelope.storeId, localId, recipientDeviceId, envelope.operationId
+            )
+            val signature = SyncDeviceAuthenticator.sign(
+                signingIdentity.private, signingContext,
+                unsignedFrame.toString().toByteArray(Charsets.UTF_8)
+            )
+            unsignedFrame.put("signature_algorithm", "ECDSA_P256_SHA256")
+                .put("sender_key_fingerprint",
+                    SyncDeviceAuthenticator.fingerprint(signingIdentity.public.encoded))
+                .put("signature", Base64.encodeToString(signature, Base64.NO_WRAP))
+            return unsignedFrame.toString()
         } finally { secret.fill(0) }
+    }
+
+    /**
+     * Verify the sender's asymmetric signature against the public key pinned
+     * during the authenticated enrollment handshake. Missing pins fail closed.
+     */
+    private fun verifyPeerFrameSignature(frame: JSONObject, storeId: String,
+                                         senderId: String, recipientId: String,
+                                         operationId: String) {
+        require(frame.optString("signature_algorithm") == "ECDSA_P256_SHA256") {
+            "خوارزمية توقيع الجهاز غير مدعومة"
+        }
+        val publicKey = trustedPeerPublicKey(senderId)
+            ?: throw IllegalArgumentException("لا توجد هوية موثوقة مثبتة للجهاز المرسل")
+        val fingerprint = SyncDeviceAuthenticator.fingerprint(publicKey)
+        require(frame.getString("sender_key_fingerprint") == fingerprint) {
+            "بصمة مفتاح الجهاز المرسل لا تطابق المفتاح المسجل"
+        }
+        val signature = Base64.decode(frame.getString("signature"), Base64.DEFAULT)
+        val signedFrame = JSONObject(frame.toString())
+            .remove("signature")
+            .remove("signature_algorithm")
+            .remove("sender_key_fingerprint")
+        val context = SyncDeviceAuthenticator.SigningContext(
+            storeId, senderId, recipientId, operationId
+        )
+        require(SyncDeviceAuthenticator.verify(
+            publicKey, context, signedFrame.toString().toByteArray(Charsets.UTF_8), signature
+        )) { "فشل التحقق من توقيع هوية الجهاز المرسل" }
     }
 
     /** Decrypts, binds routing identity, then performs the existing HMAC/enrollment checks. */
@@ -424,6 +471,7 @@ class SyncProtocolRepository(private val context: Context, private val credentia
         require(state(db, "local_device_role") == "PRIMARY" &&
             state(db, "authority_device_id") == localId) { "هذا الجهاز ليس الجهاز الأساسي المعتمد" }
         require(storeId == state(db, "store_id")) { "الإطار يخص متجراً آخر" }
+        verifyPeerFrameSignature(frame, storeId, senderId, recipientId, operationId)
         val enrolled = db.rawQuery(
             "SELECT 1 FROM sync_devices WHERE device_id=? AND device_role='SECONDARY' AND status='ACTIVE'",
             arrayOf(senderId)
@@ -462,6 +510,7 @@ class SyncProtocolRepository(private val context: Context, private val credentia
             "مصدر أو مستلم الإطار لا يطابق هوية الجهاز المعتمدة"
         }
         require(storeId == state(db, "store_id")) { "الإطار يخص متجراً آخر" }
+        verifyPeerFrameSignature(frame, storeId, senderId, recipientId, operationId)
         val secret = credentialVault.load(localId)
             ?: throw IllegalArgumentException("بيانات اعتماد الجهاز الأساسي غير متوفرة")
         try {
