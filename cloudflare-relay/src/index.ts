@@ -32,8 +32,6 @@ export default {
 } satisfies ExportedHandler<Env>;
 
 export class SyncRoom implements DurableObject {
-  private readonly messageWindows = new Map<WebSocket, { startedAt: number; count: number }>();
-
   constructor(private readonly state: DurableObjectState) {}
 
   async fetch(request: Request): Promise<Response> {
@@ -61,18 +59,28 @@ export class SyncRoom implements DurableObject {
   }
 
   async webSocketMessage(sender: WebSocket, message: string | ArrayBuffer): Promise<void> {
+    const senderDeviceIdForLimit = this.state.getTags(sender)[0];
+    if (!senderDeviceIdForLimit) {
+      sender.send(JSON.stringify({ type: "error", code: "UNAUTHENTICATED_SOCKET" }));
+      try { sender.close(1008, "missing device identity"); } catch { /* already closed */ }
+      return;
+    }
     const now = Date.now();
-    const window = this.messageWindows.get(sender);
-    if (!window || now - window.startedAt >= MESSAGE_WINDOW_MS) {
-      this.messageWindows.set(sender, { startedAt: now, count: 1 });
-    } else {
-      window.count += 1;
-      if (window.count > MAX_MESSAGES_PER_SOCKET) {
-        sender.send(JSON.stringify({ type: "error", code: "RATE_LIMITED" }));
-        try { sender.close(1008, "rate limited"); } catch { /* already closed */ }
-        this.messageWindows.delete(sender);
-        return;
-      }
+    // Persist the fixed-window counter so Durable Object hibernation/restarts
+    // cannot reset the per-device message budget.
+    const rateLimited = await this.state.storage.transaction(async transaction => {
+      const key = `rate:${senderDeviceIdForLimit}`;
+      const current = await transaction.get<{ startedAt: number; count: number }>(key);
+      const next = !current || now - current.startedAt >= MESSAGE_WINDOW_MS
+        ? { startedAt: now, count: 1 }
+        : { startedAt: current.startedAt, count: current.count + 1 };
+      await transaction.put(key, next);
+      return next.count > MAX_MESSAGES_PER_SOCKET;
+    });
+    if (rateLimited) {
+      sender.send(JSON.stringify({ type: "error", code: "RATE_LIMITED" }));
+      try { sender.close(1008, "rate limited"); } catch { /* already closed */ }
+      return;
     }
     if (typeof message !== "string" || message.length > MAX_FRAME_CHARS) {
       sender.send(JSON.stringify({ type: "error", code: "INVALID_FRAME" }));
@@ -120,12 +128,10 @@ export class SyncRoom implements DurableObject {
   }
 
   async webSocketClose(socket: WebSocket): Promise<void> {
-    this.messageWindows.delete(socket);
     try { socket.close(1000, "closed"); } catch { /* already closed */ }
   }
 
   async webSocketError(socket: WebSocket): Promise<void> {
-    this.messageWindows.delete(socket);
     try { socket.close(1011, "transport error"); } catch { /* already closed */ }
   }
 }
