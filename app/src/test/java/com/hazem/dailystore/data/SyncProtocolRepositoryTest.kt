@@ -14,6 +14,12 @@ import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.RuntimeEnvironment
+import okhttp3.OkHttpClient
+import okhttp3.mockwebserver.MockResponse
+import okhttp3.mockwebserver.MockWebServer
+import okhttp3.tls.HandshakeCertificates
+import okhttp3.tls.HeldCertificate
+import org.json.JSONObject
 
 @RunWith(RobolectricTestRunner::class)
 class SyncProtocolRepositoryTest {
@@ -99,6 +105,58 @@ class SyncProtocolRepositoryTest {
             "SELECT status FROM sync_device_revocations WHERE device_id=? AND certificate_serial=?",
             arrayOf(remoteId, revocationJson.getString("serial"))
         ).use { c -> assertTrue(c.moveToFirst()); assertEquals("PENDING", c.getString(0)) }
+    }
+
+    @Test fun primaryRegistrySyncPinsRootAndRetriesPendingRevocationBeforeRegisteringActivePeers() {
+        repository.configureAsPrimary(adminId, "الجهاز الأساسي")
+        val revokedId = UUID.randomUUID().toString()
+        val activeId = UUID.randomUUID().toString()
+        val revokedEnrollment = enrollRemote(repository.createPairingInvitation(adminId), revokedId, "ثانوي ملغى")
+        val activeEnrollment = enrollRemote(repository.createPairingInvitation(adminId), activeId, "ثانوي نشط")
+        repository.revokeDevice(adminId, revokedId)
+
+        val trustJson = JSONObject(repository.primaryRelayTrustRootJson())
+        val storeId = revokedEnrollment.storeId
+        val root = trustJson.getJSONObject(storeId)
+        val tlsCertificate = HeldCertificate.Builder().addSubjectAlternativeName("localhost").build()
+        val serverTls = HandshakeCertificates.Builder().heldCertificate(tlsCertificate).build()
+        val clientTls = HandshakeCertificates.Builder()
+            .addTrustedCertificate(tlsCertificate.certificate).build()
+        val server = MockWebServer()
+        server.useHttps(serverTls.sslSocketFactory(), false)
+        server.enqueue(MockResponse().setBody(JSONObject()
+            .put("store_id", storeId)
+            .put("device_id", root.getString("device_id"))
+            .put("public_key", root.getString("public_key"))
+            .put("algorithm", "EC_P256_SHA256").toString()))
+        server.enqueue(MockResponse().setBody("""{"revoked":true}"""))
+        server.enqueue(MockResponse().setBody("""{"registered":true}"""))
+        server.start()
+        val httpClient = OkHttpClient.Builder()
+            .sslSocketFactory(clientTls.sslSocketFactory(), clientTls.trustManager)
+            .build()
+        try {
+            val result = repository.syncDeviceRegistry(
+                server.url("/").toString(),
+                SyncRelayRegistryClient(server.url("/").toString(), httpClient)
+            )
+            assertEquals(1, result.revocationsSent)
+            assertEquals(1, result.certificatesRegistered)
+            val trustRequest = server.takeRequest()
+            assertEquals("GET", trustRequest.method)
+            assertEquals("/v1/trust/$storeId", trustRequest.path)
+            val revokeRequest = server.takeRequest()
+            assertEquals("POST", revokeRequest.method)
+            assertEquals("/v1/devices/$storeId/$revokedId/revoke", revokeRequest.path)
+            val registerRequest = server.takeRequest()
+            assertEquals("POST", registerRequest.method)
+            assertEquals("/v1/devices/$storeId/$activeId/certificate", registerRequest.path)
+            database.readableDatabase.rawQuery(
+                "SELECT status FROM sync_device_revocations WHERE device_id=?",
+                arrayOf(revokedId)
+            ).use { c -> assertTrue(c.moveToFirst()); assertEquals("SYNCED", c.getString(0)) }
+            assertNotNull(activeEnrollment.deviceCertificateJson)
+        } finally { server.shutdown() }
     }
 
     @Test fun primaryCreatesEncryptedSignedApplicationAckOnlyAfterDurableApply() {

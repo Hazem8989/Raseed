@@ -376,7 +376,10 @@ class SyncProtocolRepository(private val context: Context, private val credentia
     }
 
     /** Fetches the relay's pinned root, registers active peers and retries durable revocations. */
-    fun syncDeviceRegistry(relayBaseUrl: String): SyncRelayRegistrySyncResult {
+    fun syncDeviceRegistry(
+        relayBaseUrl: String,
+        registry: SyncRelayRegistryClient = SyncRelayRegistryClient(relayBaseUrl)
+    ): SyncRelayRegistrySyncResult {
         val localId = localDeviceId()
         require(localDeviceRole() == "PRIMARY" && authorityDeviceId() == localId) {
             "إدارة سجل شهادات الوسيط متاحة على الجهاز الأساسي فقط"
