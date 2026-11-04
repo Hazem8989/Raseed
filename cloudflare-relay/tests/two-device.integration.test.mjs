@@ -229,6 +229,41 @@ test("root-signed revocation closes an active session and blocks reconnection", 
   await close(socket);
   assert.equal((await registerCertificate(cert)).status, 410);
   await assert.rejects(openChallenge(cert.device_id), /not enrolled|WebSocket connection failed/);
+
+  // Re-pairing issues a new serial. A delayed duplicate revoke for the old
+  // serial must not disconnect or invalidate the newly enrolled device.
+  const replacement = await makeCertificate(cert.device_id);
+  assert.equal((await registerCertificate(replacement.cert)).status, 200);
+  const replacementSocket = await authenticate(cert.device_id, replacement.pair, replacement.cert.serial);
+  try {
+    const duplicate = await fetch(`${baseUrl}/v1/devices/${storeId}/${cert.device_id}/revoke`, {
+      method: "POST", headers: { "Content-Type": "application/json" }, body: json(revocation),
+    });
+    assert.equal(duplicate.status, 200);
+    assert.equal((await duplicate.json()).duplicate, true);
+    const live = nextMessage(replacementSocket, m => m.type === "error", 250);
+    await assert.rejects(live, /Timed out/);
+  } finally { await close(replacementSocket); }
+});
+
+test("a revocation tombstone arriving before certificate registration prevents later resurrection", async () => {
+  const deviceId = crypto.randomUUID();
+  const { cert, pair } = await makeCertificate(deviceId);
+  const revocation = {
+    version: 1, store_id: storeId, device_id: deviceId,
+    serial: cert.serial, revoked_at: Date.now(),
+  };
+  revocation.signature = await sign(rootKeys.privateKey, revokePayload(revocation));
+  const response = await fetch(`${baseUrl}/v1/devices/${storeId}/${deviceId}/revoke`, {
+    method: "POST", headers: { "Content-Type": "application/json" }, body: json(revocation),
+  });
+  assert.equal(response.status, 200);
+  assert.equal((await response.json()).certificate_was_active, false);
+  assert.equal((await registerCertificate(cert)).status, 410);
+  const replacement = await makeCertificate(deviceId);
+  assert.equal((await registerCertificate(replacement.cert)).status, 200);
+  const socket = await authenticate(deviceId, replacement.pair, replacement.cert.serial);
+  await close(socket);
 });
 
 test("authenticated sockets retain per-device rate limiting", async () => {

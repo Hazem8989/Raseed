@@ -218,14 +218,25 @@ export class SyncRoom implements DurableObject {
         return Response.json({ revoked: true, duplicate: true, device_id: deviceId, serial: value.serial });
       }
       const cert = await this.state.storage.get<DeviceCertificate>(`cert:${deviceId}`);
-      if (!cert || cert.serial !== value.serial) return new Response("Certificate not found", { status: 404 });
+      // A signed revocation may arrive before its certificate registration when
+      // the primary was offline. Persist the tombstone anyway so a delayed
+      // registration of that serial can never resurrect the revoked device.
       await this.state.storage.put(revokedKey, true);
-      await this.state.storage.delete(`cert:${deviceId}`);
+      if (cert?.serial === value.serial) {
+        await this.state.storage.delete(`cert:${deviceId}`);
+      }
+      // A delayed revocation for an older serial must not disconnect a newer
+      // certificate that was issued after a legitimate re-pairing.
       for (const socket of this.state.getWebSockets(deviceId)) {
+        const attachment = socket.deserializeAttachment() as SocketAttachment | null;
+        if (attachment?.serial !== value.serial) continue;
         try { socket.send(JSON.stringify({ type: "error", code: "DEVICE_REVOKED" })); socket.close(1008, "device revoked"); }
         catch { /* already closed */ }
       }
-      return Response.json({ revoked: true, device_id: deviceId, serial: value.serial });
+      return Response.json({
+        revoked: true, device_id: deviceId, serial: value.serial,
+        certificate_was_active: cert?.serial === value.serial,
+      });
     }
 
     const match = url.pathname.match(/^\/connect\/([^/]+)\/([^/]+)$/);
