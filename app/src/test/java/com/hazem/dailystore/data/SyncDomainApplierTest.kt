@@ -87,8 +87,8 @@ class SyncDomainApplierTest {
         )
 
         // Deliberately make the secondary's SQLite IDs unrelated to the primary IDs.
-        db.execSQL("INSERT INTO categories(id,name,created_at) VALUES(501,'مشروبات',?)", arrayOf(now))
-        db.execSQL("INSERT INTO categories(id,name,created_at) VALUES(902,'معلبات',?)", arrayOf(now))
+        db.execSQL("INSERT INTO categories(id,name,created_at) VALUES(501,'اختبار ربط تصنيف 501',?)", arrayOf(now))
+        db.execSQL("INSERT INTO categories(id,name,created_at) VALUES(902,'اختبار ربط تصنيف 902',?)", arrayOf(now))
 
         fun receiveCategory(operationId: String, sequence: Long, primaryCategoryId: Long, name: String) {
             val payload = JSONObject()
@@ -107,8 +107,8 @@ class SyncDomainApplierTest {
 
         val firstId = "primary-category-2"
         val secondId = "primary-category-9"
-        receiveCategory(firstId, 1L, 2L, "مشروبات")
-        receiveCategory(secondId, 2L, 9L, "معلبات")
+        receiveCategory(firstId, 1L, 2L, "اختبار ربط تصنيف 501")
+        receiveCategory(secondId, 2L, 9L, "اختبار ربط تصنيف 902")
         val applier = SyncDomainApplier(context)
         assertTrue(applier.applyReceivedOperation(firstId).applied)
         assertTrue(applier.applyReceivedOperation(secondId).applied)
@@ -119,10 +119,10 @@ class SyncDomainApplierTest {
         assertTrue(firstLocalId != 2L)
         assertTrue(secondLocalId != 9L)
         assertTrue(firstLocalId != secondLocalId)
-        assertEquals("مشروبات", db.rawQuery(
+        assertEquals("اختبار ربط تصنيف 501", db.rawQuery(
             "SELECT name FROM categories WHERE id=?", arrayOf(firstLocalId.toString())
         ).use { c -> assertTrue(c.moveToFirst()); c.getString(0) })
-        assertEquals("معلبات", db.rawQuery(
+        assertEquals("اختبار ربط تصنيف 902", db.rawQuery(
             "SELECT name FROM categories WHERE id=?", arrayOf(secondLocalId.toString())
         ).use { c -> assertTrue(c.moveToFirst()); c.getString(0) })
 
@@ -138,7 +138,7 @@ class SyncDomainApplierTest {
 
         // Reusing primary ID 2 for another name must fail atomically and preserve the original mapping.
         val conflictId = "primary-category-2-conflict"
-        receiveCategory(conflictId, 3L, 2L, "تصنيف متعارض")
+        receiveCategory(conflictId, 3L, 2L, "اختبار تعارض ربط التصنيف")
         try {
             applier.applyReceivedOperation(conflictId)
             throw AssertionError("Expected a conflicting primary category ID to be rejected")
