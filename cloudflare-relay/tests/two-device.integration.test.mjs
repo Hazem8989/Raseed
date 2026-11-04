@@ -219,11 +219,12 @@ test("root-signed revocation closes an active session and blocks reconnection", 
     serial: cert.serial, revoked_at: revokedAt,
   };
   revocation.signature = await sign(rootKeys.privateKey, revokePayload(revocation));
+  const revokedEventPromise = nextMessage(socket, m => m.type === "error");
   const response = await fetch(`${baseUrl}/v1/devices/${storeId}/${cert.device_id}/revoke`, {
     method: "POST", headers: { "Content-Type": "application/json" }, body: json(revocation),
   });
   assert.equal(response.status, 200);
-  const revokedEvent = await nextMessage(socket, m => m.type === "error");
+  const revokedEvent = await revokedEventPromise;
   assert.equal(revokedEvent.code, "DEVICE_REVOKED");
   await close(socket);
   assert.equal((await registerCertificate(cert)).status, 410);
