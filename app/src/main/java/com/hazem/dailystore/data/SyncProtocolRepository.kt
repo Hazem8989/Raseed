@@ -21,6 +21,7 @@ data class SyncOutboxItem(
     val payloadSha256: String, val createdAt: String, val retryCount: Int
 )
 enum class SyncInboxDisposition { RECEIVED, DUPLICATE, CONFLICT }
+enum class SyncApplicationAckDisposition { APPLIED, DUPLICATE }
 
 /**
  * Durable local-first synchronization protocol primitives.
@@ -1229,6 +1230,207 @@ class SyncProtocolRepository(private val context: Context, private val credentia
                 invoiceId, "CREATE", header.toString()
             )
         }
+    }
+
+
+    /**
+     * Creates a signed, end-to-end encrypted application ACK from a durable APPLIED
+     * inbox row. Relay delivery is deliberately not consulted here.
+     */
+    fun createEncryptedApplicationAck(recipientDeviceId: String, operationId: String): String {
+        require(operationId.isNotBlank() && runCatching { UUID.fromString(recipientDeviceId) }.isSuccess) {
+            "معرّف الجهاز أو العملية غير صالح"
+        }
+        val db = database.readableDatabase
+        val localId = SyncDeviceIdentity.getOrCreate(context)
+        require(state(db, "local_device_role") == "PRIMARY" &&
+            state(db, "authority_device_id") == localId) {
+            "إقرار التطبيق يصدر من الجهاز الأساسي المعتمد فقط"
+        }
+        val peerActive = db.rawQuery(
+            "SELECT 1 FROM sync_devices WHERE device_id=? AND device_role='SECONDARY' AND status='ACTIVE'",
+            arrayOf(recipientDeviceId)
+        ).use { it.moveToFirst() }
+        require(peerActive) { "الجهاز المستلم غير مسجل أو موقوف" }
+        val row = db.rawQuery(
+            """SELECT i.sequence_number,i.payload_sha256,i.status,i.origin_device_id,
+                      (SELECT r.result_reference FROM operation_registry r
+                       WHERE r.operation_id=i.operation_id ORDER BY r.created_at DESC LIMIT 1)
+               FROM sync_inbox i WHERE i.operation_id=?""".trimIndent(),
+            arrayOf(operationId)
+        ).use { c ->
+            require(c.moveToFirst()) { "عملية الإقرار غير موجودة في صندوق الوارد" }
+            arrayOf(
+                c.getLong(0).toString(), c.getString(1), c.getString(2), c.getString(3),
+                if (c.isNull(4)) "" else c.getString(4)
+            )
+        }
+        require(row[2] == "APPLIED" && row[3] == recipientDeviceId) {
+            "لا يمكن إصدار إقرار تطبيق قبل نجاح المعالجة على الجهاز الأساسي"
+        }
+        val storeId = state(db, "store_id") ?: error("معرّف المتجر غير مهيأ")
+        val acknowledgedAt = timestamp()
+        val ackPayload = JSONObject()
+            .put("ack_version", 1)
+            .put("ack_status", "APPLIED")
+            .put("store_id", storeId)
+            .put("device_id", recipientDeviceId)
+            .put("operation_id", operationId)
+            .put("sequence_number", row[0].toLong())
+            .put("payload_sha256", row[1])
+            .put("result_reference", row[4].ifBlank { JSONObject.NULL })
+            .put("acknowledged_at", acknowledgedAt)
+        val secret = credentialVault.load(recipientDeviceId)
+            ?: throw IllegalArgumentException("بيانات اعتماد الجهاز المستلم غير متوفرة")
+        try {
+            val peerContext = SyncEnvelopeCipher.PeerContext(
+                storeId, localId, recipientDeviceId, operationId
+            )
+            val encrypted = SyncEnvelopeCipher.encrypt(
+                ackPayload.toString().toByteArray(Charsets.UTF_8),
+                javax.crypto.spec.SecretKeySpec(secret, "AES"),
+                peerContext
+            )
+            val frame = JSONObject()
+                .put("frame_version", 1)
+                .put("store_id", storeId)
+                .put("sender_device_id", localId)
+                .put("recipient_device_id", recipientDeviceId)
+                .put("operation_id", operationId)
+                .put("ciphertext", Base64.encodeToString(
+                    encrypted, Base64.URL_SAFE or Base64.NO_WRAP or Base64.NO_PADDING
+                ))
+            val identity = SyncDeviceAuthenticator.getOrCreate(context, localId)
+            val signingContext = SyncDeviceAuthenticator.SigningContext(
+                storeId, localId, recipientDeviceId, operationId
+            )
+            val signature = SyncDeviceAuthenticator.sign(
+                identity.private, signingContext, frame.toString().toByteArray(Charsets.UTF_8)
+            )
+            frame.put("signature_algorithm", "ECDSA_P256_SHA256")
+                .put("sender_key_fingerprint", SyncDeviceAuthenticator.fingerprint(identity.public.encoded))
+                .put("signature", Base64.encodeToString(signature, Base64.NO_WRAP))
+            return frame.toString()
+        } finally {
+            secret.fill(0)
+        }
+    }
+
+    /**
+     * Accepts only a primary-signed APPLIED ACK matching the exact locally queued
+     * operation, sequence and payload hash. The queue is marked SYNCED atomically
+     * with the durable ACK receipt; forwarded/not_delivered relay events cannot call this.
+     */
+    fun acceptEncryptedApplicationAck(frameJson: String): SyncApplicationAckDisposition {
+        val frame = JSONObject(frameJson)
+        require(frame.getInt("frame_version") == 1) { "إصدار إقرار المزامنة غير مدعوم" }
+        val storeId = frame.getString("store_id")
+        val senderId = frame.getString("sender_device_id")
+        val recipientId = frame.getString("recipient_device_id")
+        val operationId = frame.getString("operation_id")
+        val localId = SyncDeviceIdentity.getOrCreate(context)
+        val db = database.writableDatabase
+        require(state(db, "local_device_role") == "SECONDARY" &&
+            senderId == state(db, "authority_device_id") && recipientId == localId &&
+            storeId == state(db, "store_id")) {
+            "هوية مرسل أو مستلم إقرار التطبيق لا تطابق إعدادات الجهاز"
+        }
+        verifyPeerFrameSignature(frame, storeId, senderId, recipientId, operationId)
+        val secret = credentialVault.load(localId)
+            ?: throw IllegalArgumentException("بيانات اعتماد الجهاز الثانوي غير متوفرة")
+        try {
+            val peerContext = SyncEnvelopeCipher.PeerContext(storeId, senderId, recipientId, operationId)
+            val ciphertext = Base64.decode(
+                frame.getString("ciphertext"), Base64.URL_SAFE or Base64.NO_WRAP or Base64.NO_PADDING
+            )
+            val plaintext = SyncEnvelopeCipher.decrypt(
+                ciphertext, javax.crypto.spec.SecretKeySpec(secret, "AES"), peerContext
+            ) ?: throw IllegalArgumentException("فشل التحقق من تشفير إقرار التطبيق")
+            val ack = JSONObject(plaintext.toString(Charsets.UTF_8))
+            require(ack.getInt("ack_version") == 1 && ack.getString("ack_status") == "APPLIED" &&
+                ack.getString("store_id") == storeId && ack.getString("device_id") == localId &&
+                ack.getString("operation_id") == operationId) {
+                "محتوى إقرار التطبيق غير صالح أو لا يخص هذا الجهاز"
+            }
+            val sequence = ack.getLong("sequence_number")
+            val payloadHash = ack.getString("payload_sha256")
+            require(sequence > 0L && payloadHash.matches(Regex("[0-9a-f]{64}")) &&
+                ack.getString("acknowledged_at").matches(Regex("\\d{4}-\\d{2}-\\d{2}T.*"))) {
+                "بيانات إقرار التطبيق غير مكتملة"
+            }
+            db.beginTransaction()
+            try {
+                val local = db.rawQuery(
+                    """SELECT e.sequence_number,e.payload_sha256,e.origin_device_id,q.status
+                       FROM sync_operation_envelopes e JOIN sync_queue q ON q.operation_id=e.operation_id
+                       WHERE e.operation_id=?""".trimIndent(), arrayOf(operationId)
+                ).use { c ->
+                    require(c.moveToFirst()) { "لا يوجد أمر محلي مطابق لإقرار التطبيق" }
+                    arrayOf(c.getLong(0).toString(), c.getString(1), c.getString(2), c.getString(3))
+                }
+                require(local[0].toLong() == sequence && local[1] == payloadHash &&
+                    local[2] == localId) {
+                    "الإقرار لا يطابق تسلسل الأمر أو بصمة بياناته المحلية"
+                }
+                require(local[3] in setOf("PENDING", "FAILED", "IN_PROGRESS", "SYNCED")) {
+                    "حالة الأمر المحلي لا تسمح بقبول الإقرار"
+                }
+                val prior = db.rawQuery(
+                    "SELECT sequence_number,status FROM sync_acknowledgements WHERE operation_id=? AND device_id=?",
+                    arrayOf(operationId, senderId)
+                ).use { c ->
+                    if (c.moveToFirst()) arrayOf(c.getLong(0).toString(), c.getString(1)) else null
+                }
+                if (prior != null) {
+                    require(prior[0].toLong() == sequence && prior[1] == "APPLIED") {
+                        "تعارض مع إقرار محفوظ سابقاً"
+                    }
+                } else {
+                    db.insertOrThrow("sync_acknowledgements", null, ContentValues().apply {
+                        put("operation_id", operationId)
+                        put("device_id", senderId)
+                        put("sequence_number", sequence)
+                        put("status", "APPLIED")
+                        put("acknowledged_at", ack.getString("acknowledged_at"))
+                    })
+                }
+                if (local[3] != "SYNCED") {
+                    val changed = db.update("sync_queue", ContentValues().apply {
+                        put("status", "SYNCED")
+                        putNull("last_error")
+                        put("updated_at", timestamp())
+                    }, "operation_id=? AND status IN ('PENDING','FAILED','IN_PROGRESS')", arrayOf(operationId))
+                    require(changed == 1) { "تعذر تثبيت إقرار التطبيق في صندوق الإرسال" }
+                }
+                db.setTransactionSuccessful()
+                return if (prior == null) SyncApplicationAckDisposition.APPLIED
+                    else SyncApplicationAckDisposition.DUPLICATE
+            } finally {
+                db.endTransaction()
+            }
+        } finally {
+            secret.fill(0)
+        }
+    }
+
+    /** Lists durable APPLIED commands whose application ACK can safely be retransmitted. */
+    fun appliedOperationsAwaitingAckForDevice(deviceId: String, limit: Int = 100): List<String> {
+        require(limit in 1..500)
+        val db = database.readableDatabase
+        require(state(db, "local_device_role") == "PRIMARY" &&
+            state(db, "authority_device_id") == SyncDeviceIdentity.getOrCreate(context)) {
+            "قائمة إقرارات التطبيق متاحة على الجهاز الأساسي فقط"
+        }
+        val result = mutableListOf<String>()
+        db.rawQuery(
+            """SELECT i.operation_id FROM sync_inbox i
+               JOIN sync_devices d ON d.device_id=i.origin_device_id
+               WHERE i.origin_device_id=? AND i.status='APPLIED'
+                 AND d.device_role='SECONDARY' AND d.status='ACTIVE'
+               ORDER BY i.sequence_number LIMIT ?""".trimIndent(),
+            arrayOf(deviceId, limit.toString())
+        ).use { c -> while (c.moveToNext()) result.add(c.getString(0)) }
+        return result
     }
 
     fun pendingOutbox(limit: Int = 100): List<SyncOutboxItem> {
