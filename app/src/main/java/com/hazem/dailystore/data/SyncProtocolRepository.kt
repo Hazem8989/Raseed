@@ -1278,7 +1278,7 @@ class SyncProtocolRepository(private val context: Context, private val credentia
             .put("operation_id", operationId)
             .put("sequence_number", row[0].toLong())
             .put("payload_sha256", row[1])
-            .put("result_reference", row[4].ifBlank { JSONObject.NULL })
+            .put("result_reference", if (row[4].isBlank()) JSONObject.NULL else row[4])
             .put("acknowledged_at", acknowledgedAt)
         val secret = credentialVault.load(recipientDeviceId)
             ?: throw IllegalArgumentException("بيانات اعتماد الجهاز المستلم غير متوفرة")
