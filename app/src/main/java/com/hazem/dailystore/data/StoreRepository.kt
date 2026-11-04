@@ -194,6 +194,11 @@ class StoreRepository(context: Context) {
             val id = db.insertOrThrow("categories", null, values)
             insertAudit(db, actorUserId, "CREATE_CATEGORY", "CATEGORY", id.toString(), null,
                 """{"name":"${jsonEscape(clean)}"}""", now)
+            SyncProtocolRepository(appContext).enqueueLocalOperation(
+                db, actorUserId, UUID.randomUUID().toString(), "CREATE_CATEGORY",
+                "CATEGORY", clean.lowercase(Locale.ROOT), "CREATE",
+                """{"name":"${jsonEscape(clean)}"}"""
+            )
             db.setTransactionSuccessful()
             return id
         } finally { db.endTransaction() }
