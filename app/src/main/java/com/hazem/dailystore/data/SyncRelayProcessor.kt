@@ -2,6 +2,9 @@ package com.hazem.dailystore.data
 
 import android.content.Context
 import org.json.JSONObject
+import java.util.concurrent.Executors
+import java.util.concurrent.ScheduledFuture
+import java.util.concurrent.TimeUnit
 
 /**
  * Connects durable protocol state and domain application to the opaque relay.
@@ -134,13 +137,38 @@ class SyncRelayRuntime(
     private val listener: SyncRelayProcessor.Listener = object : SyncRelayProcessor.Listener {}
 ) : SyncRelayWebSocketClient.Listener {
     private lateinit var client: SyncRelayWebSocketClient
+    private val scheduler = Executors.newSingleThreadScheduledExecutor { task ->
+        Thread(task, "daily-shop-sync-retry").apply { isDaemon = true }
+    }
+    @Volatile private var desiredConnection = false
+    private var reconnectDelaySeconds = 1L
+    private var deliveryRetryDelaySeconds = 5L
+    private var reconnectTask: ScheduledFuture<*>? = null
+    private var deliveryRetryTask: ScheduledFuture<*>? = null
+
+    private val processorListener = object : SyncRelayProcessor.Listener {
+        override fun onOperationApplied(operationId: String) =
+            listener.onOperationApplied(operationId)
+
+        override fun onApplicationAckAccepted(operationId: String, duplicate: Boolean) {
+            synchronized(this@SyncRelayRuntime) { deliveryRetryDelaySeconds = 5L }
+            listener.onApplicationAckAccepted(operationId, duplicate)
+        }
+
+        override fun onRetryRequired(operationId: String, reason: String) =
+            listener.onRetryRequired(operationId, reason)
+
+        override fun onProtocolError(operationId: String?, reason: String) =
+            listener.onProtocolError(operationId, reason)
+    }
+
     private val processor = SyncRelayProcessor(
         repository,
         SyncDomainApplier(context.applicationContext),
         sendFrame = { operationId, recipientId, frame ->
             if (::client.isInitialized) client.sendEncryptedFrame(operationId, recipientId, frame) else false
         },
-        listener = listener
+        listener = processorListener
     )
 
     init {
@@ -152,13 +180,79 @@ class SyncRelayRuntime(
         )
     }
 
-    fun connect() = client.connect()
+    @Synchronized
+    fun connect() {
+        if (desiredConnection) return
+        desiredConnection = true
+        reconnectDelaySeconds = 1L
+        try {
+            client.connect()
+        } catch (error: Exception) {
+            listener.onRetryRequired("", error.message ?: "تعذر فتح اتصال وسيط المزامنة")
+            scheduleReconnect()
+        }
+    }
 
-    fun disconnect() = client.disconnect()
+    @Synchronized
+    fun disconnect() {
+        desiredConnection = false
+        reconnectTask?.cancel(false)
+        reconnectTask = null
+        deliveryRetryTask?.cancel(false)
+        deliveryRetryTask = null
+        client.disconnect()
+    }
 
     val isConnected: Boolean get() = client.isReady
 
+    private fun scheduleReconnect() {
+        synchronized(this) {
+            if (!desiredConnection || reconnectTask?.isDone == false) return
+            val delay = reconnectDelaySeconds
+            reconnectDelaySeconds = (delay * 2L).coerceAtMost(60L)
+            reconnectTask = scheduler.schedule({
+                val shouldAttempt = synchronized(this@SyncRelayRuntime) {
+                    reconnectTask = null
+                    desiredConnection
+                }
+                if (shouldAttempt) {
+                    try {
+                        client.connect()
+                    } catch (error: Exception) {
+                        listener.onRetryRequired("", error.message ?: "تعذرت إعادة وصلة المزامنة")
+                        scheduleReconnect()
+                    }
+                }
+            }, delay, TimeUnit.SECONDS)
+        }
+    }
+
+    /**
+     * Re-sends only still-pending work. Duplicate deliveries are safe because
+     * the receiver persists operation IDs and the ACK is idempotent.
+     */
+    private fun scheduleDeliveryRetry() {
+        synchronized(this) {
+            if (!desiredConnection || deliveryRetryTask?.isDone == false) return
+            val delay = deliveryRetryDelaySeconds
+            deliveryRetryDelaySeconds = (delay * 2L).coerceAtMost(60L)
+            deliveryRetryTask = scheduler.schedule({
+                val shouldFlush = synchronized(this@SyncRelayRuntime) {
+                    deliveryRetryTask = null
+                    desiredConnection && client.isReady
+                }
+                if (shouldFlush) {
+                    runCatching { processor.onRelayReady() }
+                        .onFailure {
+                            listener.onProtocolError(null, it.message ?: "تعذرت إعادة إرسال العمليات المعلقة")
+                        }
+                }
+            }, delay, TimeUnit.SECONDS)
+        }
+    }
+
     override fun onReady() {
+        synchronized(this) { reconnectDelaySeconds = 1L }
         runCatching { processor.onRelayReady() }
             .onFailure { listener.onProtocolError(null, it.message ?: "فشل بدء مزامنة صندوق الإرسال") }
     }
@@ -169,6 +263,7 @@ class SyncRelayRuntime(
 
     override fun onDeliveryStatus(frameId: String, deliveredToSocket: Boolean, retryable: Boolean) {
         processor.onRelayDelivery(frameId, deliveredToSocket, retryable)
+        scheduleDeliveryRetry()
     }
 
     override fun onRelayError(code: String) {
@@ -179,5 +274,6 @@ class SyncRelayRuntime(
         if (cause != null) {
             listener.onRetryRequired("", cause.message ?: "انقطع اتصال وسيط المزامنة")
         }
+        scheduleReconnect()
     }
 }
