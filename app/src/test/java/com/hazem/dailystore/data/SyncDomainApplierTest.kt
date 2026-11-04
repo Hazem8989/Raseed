@@ -87,8 +87,8 @@ class SyncDomainApplierTest {
         )
 
         // Deliberately make the secondary's SQLite IDs unrelated to the primary IDs.
-        db.execSQL("INSERT INTO categories(id,name,created_at) VALUES(501,'تصنيف محلي أقدم',?)", arrayOf(now))
-        db.execSQL("INSERT INTO categories(id,name,created_at) VALUES(902,'تصنيف محلي آخر',?)", arrayOf(now))
+        db.execSQL("INSERT INTO categories(id,name,created_at) VALUES(501,'مشروبات',?)", arrayOf(now))
+        db.execSQL("INSERT INTO categories(id,name,created_at) VALUES(902,'معلبات',?)", arrayOf(now))
 
         fun receiveCategory(operationId: String, sequence: Long, primaryCategoryId: Long, name: String) {
             val payload = JSONObject()
@@ -147,7 +147,8 @@ class SyncDomainApplierTest {
         }
         assertEquals(categoryCount, db.rawQuery("SELECT COUNT(*) FROM categories", null)
             .use { c -> c.moveToFirst(); c.getInt(0) })
-        assertTrue(store.resolveSecondaryCategoryId(primaryId, 2L)!! !in listOf(501L, 902L))
+        assertEquals(501L, store.resolveSecondaryCategoryId(primaryId, 2L))
+        assertEquals(902L, store.resolveSecondaryCategoryId(primaryId, 9L))
         assertEquals("RECEIVED", inboxStatus(conflictId))
     }
 
