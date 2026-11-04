@@ -33,6 +33,7 @@ class CustomerPaymentRepositoryTest {
 
     @Before
     fun setUp() {
+        SyncDeviceTestKeyProvider.install()
         val context = RuntimeEnvironment.getApplication()
         AppDatabase.resetForTests(context)
         database = AppDatabase.getInstance(context)
