@@ -104,11 +104,12 @@ object SyncDeviceCertificate {
     }
 
     private fun certificatePayload(
-        storeId: String, deviceId: String, publicKey: String,
+        storeId: String, issuerDeviceId: String, deviceId: String, publicKey: String,
         serial: String, issuedAt: Long, expiresAt: Long
     ): String = JSONObject()
         .put("version", VERSION)
         .put("store_id", storeId)
+        .put("issuer_device_id", issuerDeviceId)
         .put("device_id", deviceId)
         .put("public_key", publicKey)
         .put("serial", serial)
