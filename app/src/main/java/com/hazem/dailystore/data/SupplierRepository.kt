@@ -17,7 +17,8 @@ data class SupplierSummary(
 
 /** Local supplier directory used by purchase invoices. */
 class SupplierRepository(context: Context) {
-    private val database = AppDatabase.getInstance(context)
+    private val appContext = context.applicationContext
+    private val database = AppDatabase.getInstance(appContext)
 
     fun listActive(): List<SupplierSummary> {
         val result = mutableListOf<SupplierSummary>()
@@ -40,6 +41,7 @@ class SupplierRepository(context: Context) {
     }
 
     fun create(actorUserId: String, name: String, phone: String? = null, address: String? = null): SupplierSummary {
+        require(!SyncProtocolRepository(appContext).isConfiguredSecondary()) { "إنشاء الموردين متاح من الجهاز الأساسي فقط حتى تكتمل مزامنة بياناتهم" }
         val cleanName = name.trim()
         require(cleanName.isNotEmpty()) { "اسم المورد مطلوب" }
         val db = database.writableDatabase
