@@ -204,6 +204,32 @@ class StoreRepository(context: Context) {
         } finally { db.endTransaction() }
     }
 
+    /**
+     * Resolves an authoritative category ID to this secondary database's local ID.
+     * Product synchronization must use this mapping instead of copying SQLite row IDs.
+     */
+    fun resolveSecondaryCategoryId(primaryDeviceId: String, primaryCategoryId: Long): Long? {
+        require(primaryDeviceId.isNotBlank() && primaryCategoryId > 0L) {
+            "معرّف الجهاز أو التصنيف الأصلي غير صالح"
+        }
+        val db = helper.readableDatabase
+        val localDeviceId = SyncDeviceIdentity.getOrCreate(appContext)
+        val role = db.rawQuery(
+            "SELECT state_value FROM sync_protocol_state WHERE state_key='local_device_role'", null
+        ).use { c -> if (c.moveToFirst()) c.getString(0) else null }
+        val authority = db.rawQuery(
+            "SELECT state_value FROM sync_protocol_state WHERE state_key='authority_device_id'", null
+        ).use { c -> if (c.moveToFirst()) c.getString(0) else null }
+        require(role == "SECONDARY" && authority == primaryDeviceId && authority != localDeviceId) {
+            "ربط التصنيفات لا يطابق الجهاز الأساسي المعتمد"
+        }
+        return db.rawQuery(
+            """SELECT secondary_category_id FROM sync_category_mappings
+               WHERE primary_device_id=? AND primary_category_id=?""".trimIndent(),
+            arrayOf(primaryDeviceId, primaryCategoryId.toString())
+        ).use { c -> if (c.moveToFirst()) c.getLong(0) else null }
+    }
+
     @Throws(SQLiteConstraintException::class, IllegalArgumentException::class)
     fun saveProduct(
         id: String?,
