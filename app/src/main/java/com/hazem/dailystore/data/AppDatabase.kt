@@ -50,6 +50,7 @@ class AppDatabase private constructor(context: Context) :
             ensureSupplierReturnSchema(db)
             ensureOperatingExpenseSchema(db)
             ensureSyncProtocolSchema(db)
+            ensureSyncDeviceIdentitySchema(db)
             ensureSyncActorMappingSchema(db)
             ensureSyncCashAccountMappingSchema(db)
             db.execSQL(
