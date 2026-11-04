@@ -293,4 +293,10 @@ class SyncRelayRuntime(
         }
         scheduleReconnect()
     }
+
+    @Synchronized
+    fun shutdown() {
+        disconnect()
+        scheduler.shutdownNow()
+    }
 }

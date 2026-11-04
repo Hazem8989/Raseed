@@ -12,6 +12,10 @@
         android:supportsRtl="true">
 
         <activity
+            android:name=".SyncDeviceManagementActivity"
+            android:exported="false" />
+
+        <activity
             android:name=".MainActivity"
             android:exported="false" />
 

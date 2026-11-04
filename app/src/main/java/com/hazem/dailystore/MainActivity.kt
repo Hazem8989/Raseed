@@ -1191,6 +1191,7 @@ class MainActivity : Activity() {
             "تحويل رصيد" to "سيرياتيل العادي وكاش وشام كاش",
             "التقارير" to "المبيعات والأرباح والمخزون",
             "النسخ الاحتياطي والاستعادة" to "حفظ بيانات المتجر واستعادتها بأمان",
+            "مزامنة الأجهزة" to "إدارة جذر الثقة وشهادات الأجهزة والاتصال الآمن",
             "إعدادات المتجر" to "اختيار المنطقة الزمنية التي تعتمدها جميع أجهزة المتجر",
             "المستخدمون والصلاحيات" to "إضافة الموظفين والتحكم بصلاحياتهم"
         )
@@ -1200,7 +1201,7 @@ class MainActivity : Activity() {
                 "تسويات المخزون" -> hasPermission(PermissionPolicy.INVENTORY_ADJUST)
                 "مرتجعات المبيعات", "مرتجعات المشتريات" -> isManager() && hasPermission(PermissionPolicy.RETURNS_PROCESS)
                 "المصاريف التشغيلية" -> isManager() && hasPermission(PermissionPolicy.EXPENSES_MANAGE)
-                "المنتجات والمخزون", "المشتريات", "التقارير", "النسخ الاحتياطي والاستعادة", "إعدادات المتجر", "المستخدمون والصلاحيات" -> isManager()
+                "المنتجات والمخزون", "المشتريات", "التقارير", "النسخ الاحتياطي والاستعادة", "مزامنة الأجهزة", "إعدادات المتجر", "المستخدمون والصلاحيات" -> isManager()
                 else -> true
             }
         }
@@ -1225,6 +1226,9 @@ class MainActivity : Activity() {
                         "تحويل رصيد" -> showServiceTransfers()
                         "التقارير" -> showGeneralReports()
                         "النسخ الاحتياطي والاستعادة" -> showBackupRestoreOptions()
+                        "مزامنة الأجهزة" -> currentUserId?.let {
+                            startActivity(SyncDeviceManagementActivity.intent(this@MainActivity, it))
+                        }
                         "إعدادات المتجر" -> showStoreTimeZoneSettings()
                         "المستخدمون والصلاحيات" -> showUserManagement()
                         else -> Toast.makeText(this@MainActivity, "قسم $title سيُفعّل في مرحلته", Toast.LENGTH_SHORT).show()
