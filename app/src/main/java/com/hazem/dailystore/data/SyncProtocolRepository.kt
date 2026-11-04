@@ -1661,7 +1661,7 @@ class SyncProtocolRepository(private val context: Context, private val credentia
             """SELECT e.operation_id,e.sequence_number,e.operation_type,e.entity_type,e.entity_id,
                       e.payload_json,e.payload_sha256,e.created_at,q.retry_count
                FROM sync_operation_envelopes e JOIN sync_queue q ON q.operation_id=e.operation_id
-               WHERE e.origin_device_id=? AND q.status IN ('PENDING','FAILED')
+               WHERE e.origin_device_id=?
                  AND NOT EXISTS (SELECT 1 FROM sync_acknowledgements a
                    WHERE a.operation_id=e.operation_id AND a.device_id=? AND a.status='APPLIED')
                ORDER BY e.sequence_number LIMIT ?""".trimIndent()
@@ -1708,20 +1708,33 @@ class SyncProtocolRepository(private val context: Context, private val credentia
                 "مصدر العملية ليس الجهاز الأساسي النشط"
             }
             val existing = db.rawQuery(
-                "SELECT payload_sha256,status FROM sync_inbox WHERE operation_id=?",
+                """SELECT payload_sha256,origin_device_id,sequence_number,operation_type,
+                          entity_type,entity_id,origin_created_at,payload_json
+                   FROM sync_inbox WHERE operation_id=?""".trimIndent(),
                 arrayOf(envelope.operationId)
             ).use { cursor ->
-                if (cursor.moveToFirst()) arrayOf(cursor.getString(0), cursor.getString(1)) else null
+                if (!cursor.moveToFirst()) null else arrayOf(
+                    cursor.getString(0), cursor.getString(1), cursor.getLong(2).toString(),
+                    cursor.getString(3), cursor.getString(4), cursor.getString(5),
+                    cursor.getString(6), cursor.getString(7)
+                )
             }
             if (existing != null) {
-                if (existing[0] == envelope.payloadSha256) {
+                val exactReplay = existing[0] == envelope.payloadSha256 &&
+                    existing[1] == envelope.originDeviceId &&
+                    existing[2].toLong() == envelope.sequenceNumber &&
+                    existing[3] == envelope.operationType &&
+                    existing[4] == envelope.entityType &&
+                    existing[5] == envelope.entityId &&
+                    existing[6] == envelope.createdAt
+                if (exactReplay) {
                     db.setTransactionSuccessful()
                     return SyncInboxDisposition.DUPLICATE
                 }
                 db.insertOrThrow("sync_conflicts", null, ContentValues().apply {
                     put("id", UUID.randomUUID().toString()); put("operation_id", envelope.operationId)
                     put("entity_type", envelope.entityType); put("entity_id", envelope.entityId)
-                    put("local_payload_json", "{}"); put("remote_payload_json", envelope.payloadJson)
+                    put("local_payload_json", existing[7]); put("remote_payload_json", envelope.payloadJson)
                     put("created_at", timestamp())
                 })
                 db.setTransactionSuccessful()

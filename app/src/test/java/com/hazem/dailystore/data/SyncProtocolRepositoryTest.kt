@@ -646,6 +646,47 @@ class SyncProtocolRepositoryTest {
         secondSecret.fill(0)
     }
 
+    @Test fun secondaryRejectsPrimaryOperationIdReuseWithChangedSequence() {
+        val primaryId = UUID.randomUUID().toString()
+        val secret = ByteArray(32) { (it + 51).toByte() }
+        val credential = android.util.Base64.encodeToString(
+            secret,
+            android.util.Base64.URL_SAFE or android.util.Base64.NO_WRAP or android.util.Base64.NO_PADDING
+        )
+        configureSecondaryForTest("store-primary-replay-01", primaryId, credential, "الثانوي")
+        val operationId = UUID.randomUUID().toString()
+        val payload = """{"business_operation":"SET_EXCHANGE_RATE","id":"rate-replay","currency_code":"USD","rate_syp_per_usd_milli":15000000,"effective_at":"2026-11-04T12:00:00Z","created_at":"2026-11-04T12:00:00Z"}"""
+        val first = SyncEnvelopeSecurity.create(
+            "store-primary-replay-01", operationId, 1L, primaryId, adminId,
+            "CREATE", "EXCHANGE_RATE", "rate-replay", 0L, payload,
+            "2026-11-04T12:00:00Z", secret
+        )
+        assertEquals(
+            SyncInboxDisposition.RECEIVED,
+            repository.recordIncomingFromPrimary(SyncEnvelopeSecurity.encode(first))
+        )
+        assertEquals(
+            SyncInboxDisposition.DUPLICATE,
+            repository.recordIncomingFromPrimary(SyncEnvelopeSecurity.encode(first))
+        )
+        val changedSequence = SyncEnvelopeSecurity.create(
+            "store-primary-replay-01", operationId, 2L, primaryId, adminId,
+            "CREATE", "EXCHANGE_RATE", "rate-replay", 0L, payload,
+            "2026-11-04T12:00:00Z", secret
+        )
+        assertEquals(
+            SyncInboxDisposition.CONFLICT,
+            repository.recordIncomingFromPrimary(SyncEnvelopeSecurity.encode(changedSequence))
+        )
+        database.readableDatabase.rawQuery(
+            "SELECT last_sequence FROM sync_cursors WHERE device_id=?", arrayOf(primaryId)
+        ).use { c -> assertTrue(c.moveToFirst()); assertEquals(1L, c.getLong(0)) }
+        assertEquals(1, database.readableDatabase.rawQuery(
+            "SELECT COUNT(*) FROM sync_conflicts WHERE operation_id=?", arrayOf(operationId)
+        ).use { c -> c.moveToFirst(); c.getInt(0) })
+        secret.fill(0)
+    }
+
     @Test fun primaryRejectsSequenceGapWithoutAdvancingDurableCursor() {
         repository.configureAsPrimary(adminId, "الرئيسي")
         val invitation = repository.createPairingInvitation(adminId)
@@ -940,6 +981,20 @@ class SyncProtocolRepositoryTest {
         ).use { cursor -> assertTrue(cursor.moveToFirst()); assertEquals("SYNCED", cursor.getString(0)) }
         assertTrue(repository.pendingOutboxForDevice(secondaryIds[0]).isEmpty())
         assertTrue(repository.pendingOutboxForDevice(secondaryIds[1]).isEmpty())
+
+        // A newly enrolled device must receive the primary's already-acknowledged
+        // history; SYNCED is per the currently enrolled peer set, not a global
+        // reason to omit an operation from a later peer's bootstrap stream.
+        val lateDeviceId = UUID.randomUUID().toString()
+        val lateIdentity = SyncDeviceAuthenticator.getOrCreate(context, lateDeviceId)
+        val latePublicKey = android.util.Base64.encodeToString(
+            lateIdentity.public.encoded, android.util.Base64.NO_WRAP
+        )
+        val lateInvitation = repository.createPairingInvitation(adminId)
+        repository.enrollSecondaryDevice(
+            adminId, lateInvitation.token, lateDeviceId, "ثانوي جديد", latePublicKey
+        )
+        assertEquals(operationId, repository.pendingOutboxForDevice(lateDeviceId).single().operationId)
     }
 
 }
