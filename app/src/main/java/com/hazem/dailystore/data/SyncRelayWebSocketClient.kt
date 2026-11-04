@@ -115,9 +115,16 @@ class SyncRelayWebSocketClient(
         private fun buildEndpoint(base: String, storeId: String, deviceId: String): HttpUrl {
             requireUuid(storeId, "معرّف المتجر")
             requireUuid(deviceId, "معرّف الجهاز")
-            val parsed = base.toHttpUrlOrNull()
+            // OkHttp's HttpUrl parser accepts http/https schemes; WebSocket upgrades
+            // are performed by OkHttp when the request is created. Parse WSS as HTTPS,
+            // then retain the HTTPS URL for the WebSocket request.
+            val normalizedBase = when {
+                base.startsWith("wss://", ignoreCase = true) -> "https://" + base.substring(6)
+                else -> base
+            }
+            val parsed = normalizedBase.toHttpUrlOrNull()
                 ?: throw IllegalArgumentException("عنوان وسيط المزامنة غير صالح")
-            require(parsed.scheme == "wss") { "يجب استخدام اتصال WebSocket مشفر WSS" }
+            require(parsed.scheme == "https") { "يجب استخدام اتصال WebSocket مشفر WSS" }
             require(parsed.username.isEmpty() && parsed.password.isEmpty() &&
                 parsed.query == null && parsed.fragment == null) {
                 "عنوان وسيط المزامنة يحتوي بيانات أو معاملات غير مسموحة"
