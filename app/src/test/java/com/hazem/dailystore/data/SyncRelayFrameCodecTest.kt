@@ -3,8 +3,11 @@ package com.hazem.dailystore.data
 import org.junit.Assert.*
 import org.junit.Test
 import org.json.JSONObject
+import org.junit.runner.RunWith
+import org.robolectric.RobolectricTestRunner
 import java.util.UUID
 
+@RunWith(RobolectricTestRunner::class)
 class SyncRelayFrameCodecTest {
     private val store = UUID.randomUUID().toString()
     private val sender = UUID.randomUUID().toString()
