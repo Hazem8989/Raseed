@@ -28,6 +28,7 @@ class SyncDomainApplierTest {
     private lateinit var secondarySecret: ByteArray
 
     @Before fun setUp() {
+        SyncDeviceTestKeyProvider.install()
         context = RuntimeEnvironment.getApplication()
         AppDatabase.resetForTests(context)
         database = AppDatabase.getInstance(context)
