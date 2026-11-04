@@ -14,8 +14,8 @@ import android.database.sqlite.SQLiteOpenHelper
  *
  * Exchange rates are stored as SYP per USD multiplied by 1,000.
  */
-class AppDatabase private constructor(context: Context) :
-    SQLiteOpenHelper(context, DATABASE_NAME, null, DATABASE_VERSION) {
+class AppDatabase internal constructor(context: Context, databaseName: String = DATABASE_NAME) :
+    SQLiteOpenHelper(context, databaseName, null, DATABASE_VERSION) {
 
     override fun onConfigure(db: SQLiteDatabase) {
         super.onConfigure(db)
@@ -1034,6 +1034,13 @@ class AppDatabase private constructor(context: Context) :
             INSTANCE?.close()
             INSTANCE = null
             if (deleteExisting) context.deleteDatabase(DATABASE_NAME)
+        }
+
+        /** Installs an explicitly named isolated database for multi-device integration tests. */
+        @Synchronized
+        internal fun installForTests(database: AppDatabase) {
+            INSTANCE?.takeIf { it !== database }?.close()
+            INSTANCE = database
         }
 
         fun getInstance(context: Context): AppDatabase =
