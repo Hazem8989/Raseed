@@ -37,4 +37,5 @@ jobs:
       - name: Type-check relay
         run: npm run check
       - name: Test two independent WebSocket devices
-        run: npm run test:integration
+        timeout-minutes: 3
+        run: timeout --signal=TERM --kill-after=10s 150s npm run test:integration
