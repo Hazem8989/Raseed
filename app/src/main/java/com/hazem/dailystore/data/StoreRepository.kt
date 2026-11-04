@@ -197,7 +197,7 @@ class StoreRepository(context: Context) {
             SyncProtocolRepository(appContext).enqueueLocalOperation(
                 db, actorUserId, UUID.randomUUID().toString(), "CREATE_CATEGORY",
                 "CATEGORY", clean.lowercase(Locale.ROOT), "CREATE",
-                """{"name":"${jsonEscape(clean)}"}"""
+                """{"name":"${jsonEscape(clean)}","created_at":"$now"}"""
             )
             db.setTransactionSuccessful()
             return id
