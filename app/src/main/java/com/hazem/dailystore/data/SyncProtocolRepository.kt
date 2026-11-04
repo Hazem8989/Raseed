@@ -295,6 +295,122 @@ class SyncProtocolRepository(private val context: Context, private val credentia
     }
 
     /**
+     * Builds an encrypted wire frame for an already persisted outbox operation.
+     * The relay sees only routing metadata and authenticated ciphertext.
+     */
+    fun encryptedAuthenticatedOutbox(operationId: String, recipientDeviceId: String): String {
+        val envelope = authenticatedOutbox(operationId, recipientDeviceId)
+        val db = database.readableDatabase
+        val localId = SyncDeviceIdentity.getOrCreate(context)
+        val role = state(db, "local_device_role")
+        val secret = when {
+            role == "SECONDARY" && envelope.originDeviceId == localId -> {
+                require(recipientDeviceId == state(db, "authority_device_id"))
+                credentialVault.load(localId)
+                    ?: throw IllegalArgumentException("بيانات اعتماد الجهاز الثانوي غير متوفرة")
+            }
+            role == "PRIMARY" && envelope.originDeviceId == localId -> {
+                val active = db.rawQuery(
+                    "SELECT 1 FROM sync_devices WHERE device_id=? AND device_role='SECONDARY' AND status='ACTIVE'",
+                    arrayOf(recipientDeviceId)
+                ).use { it.moveToFirst() }
+                require(active) { "الجهاز المستلم غير مسجل أو موقوف" }
+                credentialVault.load(recipientDeviceId)
+                    ?: throw IllegalArgumentException("بيانات اعتماد الجهاز المستلم غير متوفرة")
+            }
+            else -> throw IllegalArgumentException("اتجاه إرسال المزامنة غير صالح")
+        }
+        try {
+            val context = SyncEnvelopeCipher.PeerContext(
+                envelope.storeId, envelope.originDeviceId, recipientDeviceId, envelope.operationId
+            )
+            val encrypted = SyncEnvelopeCipher.encrypt(
+                SyncEnvelopeSecurity.encode(envelope).toByteArray(Charsets.UTF_8),
+                javax.crypto.spec.SecretKeySpec(secret, "AES"),
+                context
+            )
+            return JSONObject().put("frame_version", 1)
+                .put("store_id", envelope.storeId)
+                .put("sender_device_id", envelope.originDeviceId)
+                .put("recipient_device_id", recipientDeviceId)
+                .put("operation_id", envelope.operationId)
+                .put("ciphertext", Base64.encodeToString(
+                    encrypted, Base64.URL_SAFE or Base64.NO_WRAP or Base64.NO_PADDING
+                )).toString()
+        } finally { secret.fill(0) }
+    }
+
+    /** Decrypts, binds routing identity, then performs the existing HMAC/enrollment checks. */
+    fun verifyEncryptedIncomingFromSecondary(frameJson: String): AuthenticatedSyncEnvelope {
+        val frame = JSONObject(frameJson)
+        require(frame.getInt("frame_version") == 1) { "إصدار إطار المزامنة غير مدعوم" }
+        val storeId = frame.getString("store_id")
+        val senderId = frame.getString("sender_device_id")
+        val recipientId = frame.getString("recipient_device_id")
+        val operationId = frame.getString("operation_id")
+        val localId = SyncDeviceIdentity.getOrCreate(context)
+        require(recipientId == localId) { "إطار المزامنة موجه إلى جهاز آخر" }
+        val db = database.readableDatabase
+        require(state(db, "local_device_role") == "PRIMARY" &&
+            state(db, "authority_device_id") == localId) { "هذا الجهاز ليس الجهاز الأساسي المعتمد" }
+        require(storeId == state(db, "store_id")) { "الإطار يخص متجراً آخر" }
+        val enrolled = db.rawQuery(
+            "SELECT 1 FROM sync_devices WHERE device_id=? AND device_role='SECONDARY' AND status='ACTIVE'",
+            arrayOf(senderId)
+        ).use { it.moveToFirst() }
+        require(enrolled) { "الجهاز المرسل غير مسجل أو تم إلغاء تسجيله" }
+        val secret = credentialVault.load(senderId)
+            ?: throw IllegalArgumentException("بيانات اعتماد الجهاز المرسل غير متوفرة")
+        try {
+            val context = SyncEnvelopeCipher.PeerContext(storeId, senderId, recipientId, operationId)
+            val ciphertext = Base64.decode(
+                frame.getString("ciphertext"), Base64.URL_SAFE or Base64.NO_WRAP or Base64.NO_PADDING
+            )
+            val plaintext = SyncEnvelopeCipher.decrypt(
+                ciphertext, javax.crypto.spec.SecretKeySpec(secret, "AES"), context
+            ) ?: throw IllegalArgumentException("فشل فك تشفير إطار المزامنة أو التحقق من سلامته")
+            val encoded = plaintext.toString(Charsets.UTF_8)
+            val envelope = SyncEnvelopeSecurity.decode(encoded)
+            require(envelope.storeId == storeId && envelope.originDeviceId == senderId &&
+                envelope.operationId == operationId) { "بيانات هوية الإطار لا تطابق الرسالة المشفرة" }
+            return verifyIncomingFromSecondary(encoded)
+        } finally { secret.fill(0) }
+    }
+
+    /** Decrypts a primary frame and verifies the configured authority and HMAC. */
+    fun verifyEncryptedIncomingFromPrimary(frameJson: String): AuthenticatedSyncEnvelope {
+        val frame = JSONObject(frameJson)
+        require(frame.getInt("frame_version") == 1) { "إصدار إطار المزامنة غير مدعوم" }
+        val storeId = frame.getString("store_id")
+        val senderId = frame.getString("sender_device_id")
+        val recipientId = frame.getString("recipient_device_id")
+        val operationId = frame.getString("operation_id")
+        val localId = SyncDeviceIdentity.getOrCreate(context)
+        val db = database.readableDatabase
+        require(state(db, "local_device_role") == "SECONDARY") { "هذا الجهاز ليس جهازاً ثانوياً مسجلاً" }
+        require(recipientId == localId && senderId == state(db, "authority_device_id")) {
+            "مصدر أو مستلم الإطار لا يطابق هوية الجهاز المعتمدة"
+        }
+        require(storeId == state(db, "store_id")) { "الإطار يخص متجراً آخر" }
+        val secret = credentialVault.load(localId)
+            ?: throw IllegalArgumentException("بيانات اعتماد الجهاز الأساسي غير متوفرة")
+        try {
+            val context = SyncEnvelopeCipher.PeerContext(storeId, senderId, recipientId, operationId)
+            val ciphertext = Base64.decode(
+                frame.getString("ciphertext"), Base64.URL_SAFE or Base64.NO_WRAP or Base64.NO_PADDING
+            )
+            val plaintext = SyncEnvelopeCipher.decrypt(
+                ciphertext, javax.crypto.spec.SecretKeySpec(secret, "AES"), context
+            ) ?: throw IllegalArgumentException("فشل فك تشفير إطار المزامنة أو التحقق من سلامته")
+            val encoded = plaintext.toString(Charsets.UTF_8)
+            val envelope = SyncEnvelopeSecurity.decode(encoded)
+            require(envelope.storeId == storeId && envelope.originDeviceId == senderId &&
+                envelope.operationId == operationId) { "بيانات هوية الإطار لا تطابق الرسالة المشفرة" }
+            return verifyIncomingFromPrimary(encoded)
+        } finally { secret.fill(0) }
+    }
+
+    /**
      * Persists a secondary's business intent as a pending command only.
      * It deliberately performs no invoice, cash, debt, or inventory posting.
      * The caller must keep this insert in the same transaction as local command creation.
