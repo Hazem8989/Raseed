@@ -29,7 +29,10 @@ function connect(storeId, deviceId) {
     const socket = new WebSocket(
       `ws://127.0.0.1:8787/v1/ws/${storeId}/${deviceId}`
     );
-    const timeout = setTimeout(() => reject(new Error("WebSocket ready timeout")), 10_000);
+    const timeout = setTimeout(() => {
+      socket.close();
+      reject(new Error("WebSocket ready timeout"));
+    }, 10_000);
     socket.addEventListener("message", event => {
       const message = JSON.parse(String(event.data));
       if (message.type === "ready") {
@@ -62,13 +65,57 @@ function nextMessage(socket, predicate, timeoutMs = 10_000) {
   });
 }
 
-function close(socket) {
-  if (socket && socket.readyState < WebSocket.CLOSING) socket.close();
+async function close(socket) {
+  if (!socket || socket.readyState === WebSocket.CLOSED) return;
+  await new Promise(resolve => {
+    const timeout = setTimeout(resolve, 1_000);
+    socket.addEventListener("close", () => {
+      clearTimeout(timeout);
+      resolve();
+    }, { once: true });
+    if (socket.readyState < WebSocket.CLOSING) socket.close();
+  });
+}
+
+async function stopWorker() {
+  if (!worker) return;
+
+  const child = worker;
+  const pid = child.pid;
+  const closed = child.exitCode !== null || child.signalCode !== null
+    ? Promise.resolve()
+    : new Promise(resolve => child.once("close", resolve));
+
+  // Wrangler starts workerd/esbuild descendants. Kill the detached process
+  // group, not just the Node wrapper, so CI is never held open by orphans.
+  if (pid) {
+    try { process.kill(-pid, "SIGTERM"); } catch (error) {
+      if (error.code !== "ESRCH") throw error;
+    }
+  }
+
+  await Promise.race([
+    closed,
+    new Promise(resolve => setTimeout(resolve, 5_000)),
+  ]);
+
+  if (pid) {
+    try { process.kill(-pid, "SIGKILL"); } catch (error) {
+      if (error.code !== "ESRCH") throw error;
+    }
+  }
+  worker = undefined;
 }
 
 before(async () => {
-  worker = spawn("npx", ["wrangler", "dev", "--local", "--ip", "127.0.0.1", "--port", "8787", "--log-level", "debug"], {
+  // Invoke Wrangler's JS entry point directly; npx's intermediary process
+  // can otherwise outlive the test runner in CI.
+  worker = spawn(process.execPath, [
+    "node_modules/wrangler/bin/wrangler.js",
+    "dev", "--local", "--ip", "127.0.0.1", "--port", "8787", "--log-level", "debug",
+  ], {
     cwd: process.cwd(),
+    detached: true,
     stdio: ["ignore", "pipe", "pipe"],
     env: process.env,
   });
@@ -79,8 +126,8 @@ before(async () => {
   await waitForWorker();
 });
 
-after(() => {
-  if (worker && worker.exitCode === null) worker.kill("SIGTERM");
+after(async () => {
+  await stopWorker();
 });
 
 test("two independent devices exchange a frame and offline peer remains retryable", async () => {
@@ -127,7 +174,6 @@ test("two independent devices exchange a frame and offline peer remains retryabl
     const offlineAck = await offlineAckPromise;
     assert.equal(offlineAck.retryable, true);
   } finally {
-    close(primary);
-    close(secondary);
+    await Promise.all([close(primary), close(secondary)]);
   }
 });
