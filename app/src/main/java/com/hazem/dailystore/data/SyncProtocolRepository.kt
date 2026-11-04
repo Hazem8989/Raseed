@@ -1575,6 +1575,41 @@ class SyncProtocolRepository(private val context: Context, private val credentia
         }
     }
 
+    fun appliedOperationsAwaitingAckForDevice(deviceId: String, limit: Int = 100): List<String> {
+        require(limit in 1..500 && runCatching { UUID.fromString(deviceId) }.isSuccess)
+        val db = database.readableDatabase
+        val role = state(db, "local_device_role")
+        val localId = SyncDeviceIdentity.getOrCreate(context)
+        val expectedPeerRole = when (role) {
+            "PRIMARY" -> {
+                require(state(db, "authority_device_id") == localId)
+                "SECONDARY"
+            }
+            "SECONDARY" -> {
+                require(state(db, "authority_device_id") == deviceId)
+                "PRIMARY"
+            }
+            else -> throw IllegalArgumentException("دور الجهاز غير مهيأ")
+        }
+        require(db.rawQuery(
+            "SELECT 1 FROM sync_devices WHERE device_id=? AND device_role=? AND status='ACTIVE'",
+            arrayOf(deviceId, expectedPeerRole)
+        ).use { it.moveToFirst() }) { "الجهاز المقابل غير مسجل أو موقوف" }
+        val result = mutableListOf<String>()
+        db.rawQuery(
+            """SELECT i.operation_id FROM sync_inbox i
+               JOIN sync_devices d ON d.device_id=i.origin_device_id
+               WHERE i.origin_device_id=? AND i.status='APPLIED'
+                 AND d.device_role=? AND d.status='ACTIVE'
+               ORDER BY i.sequence_number LIMIT ?""".trimIndent(),
+            arrayOf(deviceId, expectedPeerRole, limit.toString())
+        ).use { cursor -> while (cursor.moveToNext()) result.add(cursor.getString(0)) }
+        return result
+    }
+
+    fun storeId(): String = state(database.readableDatabase, "store_id")
+        ?: throw IllegalStateException("معرّف المتجر غير مهيأ")
+
     fun pendingOutbox(limit: Int = 100): List<SyncOutboxItem> {    fun pendingOutbox(limit: Int = 100): List<SyncOutboxItem> {
         require(limit in 1..500)
         val items = mutableListOf<SyncOutboxItem>()
