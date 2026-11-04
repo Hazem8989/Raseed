@@ -396,13 +396,13 @@ class SyncProtocolRepository(private val context: Context, private val credentia
             else -> throw IllegalArgumentException("اتجاه إرسال المزامنة غير صالح")
         }
         try {
-            val context = SyncEnvelopeCipher.PeerContext(
+            val peerContext = SyncEnvelopeCipher.PeerContext(
                 envelope.storeId, envelope.originDeviceId, recipientDeviceId, envelope.operationId
             )
             val encrypted = SyncEnvelopeCipher.encrypt(
                 SyncEnvelopeSecurity.encode(envelope).toByteArray(Charsets.UTF_8),
                 javax.crypto.spec.SecretKeySpec(secret, "AES"),
-                context
+                peerContext
             )
             val unsignedFrame = JSONObject().put("frame_version", 1)
                 .put("store_id", envelope.storeId)
