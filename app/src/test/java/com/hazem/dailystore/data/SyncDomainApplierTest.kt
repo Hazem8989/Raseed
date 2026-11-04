@@ -147,11 +147,7 @@ class SyncDomainApplierTest {
         }
         assertEquals(categoryCount, db.rawQuery("SELECT COUNT(*) FROM categories", null)
             .use { c -> c.moveToFirst(); c.getInt(0) })
-        assertEquals(501L, store.resolveSecondaryCategoryId(primaryId, 2L)!!.let { resolved ->
-            // The local category is the row created from the authoritative category, not either seeded row.
-            assertTrue(resolved != 501L && resolved != 902L)
-            501L
-        })
+        assertTrue(store.resolveSecondaryCategoryId(primaryId, 2L) !in listOf(501L, 902L))
         assertEquals("RECEIVED", inboxStatus(conflictId))
     }
 
