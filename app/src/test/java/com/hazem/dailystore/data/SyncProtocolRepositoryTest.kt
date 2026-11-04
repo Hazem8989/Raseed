@@ -71,6 +71,7 @@ class SyncProtocolRepositoryTest {
         val frameJson = repository.createEncryptedApplicationAck(remoteId, operationId)
         val frame = org.json.JSONObject(frameJson)
         assertEquals(operationId, frame.getString("operation_id"))
+        assertEquals("APPLICATION_ACK", frame.getString("frame_type"))
         assertEquals(remoteId, frame.getString("recipient_device_id"))
         assertEquals("ECDSA_P256_SHA256", frame.getString("signature_algorithm"))
         val signed = org.json.JSONObject(frame.toString()).apply {
