@@ -293,6 +293,8 @@ class SyncDeviceManagementActivity : Activity() {
                     val wss = https.replaceFirst(Regex("^https://", RegexOption.IGNORE_CASE), "wss://")
                     require(wss.startsWith("wss://"))
                     preferences.edit().putString(KEY_RELAY_WSS, wss).apply()
+                    // Rebuild the client so it uses the newly issued certificate serial.
+                    SyncRelaySession.shutdown()
                     SyncRelaySession.connect(applicationContext, wss, repository)
                 }
             }.setNegativeButton("إلغاء", null).show()
