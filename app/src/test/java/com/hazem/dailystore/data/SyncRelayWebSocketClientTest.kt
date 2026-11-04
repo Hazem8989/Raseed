@@ -108,7 +108,7 @@ class SyncRelayWebSocketClientTest {
         }
     }
 
-    @Test fun rejectsUnencryptedWebSocketEndpoint() {
+    @Test fun rejectsPlainWebSocketAndHttpsEndpoints() {
         val listener = object : SyncRelayWebSocketClient.Listener {
             override fun onReady() {}
             override fun onEncryptedFrame(fromDeviceId: String, frameId: String, encryptedFrameJson: String) {}
@@ -119,6 +119,14 @@ class SyncRelayWebSocketClientTest {
         assertThrows(IllegalArgumentException::class.java) {
             SyncRelayWebSocketClient(
                 "ws://localhost:8787",
+                UUID.randomUUID().toString(),
+                UUID.randomUUID().toString(),
+                listener
+            )
+        }
+        assertThrows(IllegalArgumentException::class.java) {
+            SyncRelayWebSocketClient(
+                "https://localhost:8787",
                 UUID.randomUUID().toString(),
                 UUID.randomUUID().toString(),
                 listener

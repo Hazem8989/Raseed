@@ -118,10 +118,10 @@ class SyncRelayWebSocketClient(
             // OkHttp's HttpUrl parser accepts http/https schemes; WebSocket upgrades
             // are performed by OkHttp when the request is created. Parse WSS as HTTPS,
             // then retain the HTTPS URL for the WebSocket request.
-            val normalizedBase = when {
-                base.startsWith("wss://", ignoreCase = true) -> "https://" + base.substring(6)
-                else -> base
+            require(base.startsWith("wss://", ignoreCase = true)) {
+                "يجب استخدام عنوان WSS مشفر"
             }
+            val normalizedBase = "https://" + base.substring(6)
             val parsed = normalizedBase.toHttpUrlOrNull()
                 ?: throw IllegalArgumentException("عنوان وسيط المزامنة غير صالح")
             require(parsed.scheme == "https") { "يجب استخدام اتصال WebSocket مشفر WSS" }
