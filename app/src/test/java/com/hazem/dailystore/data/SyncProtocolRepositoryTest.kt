@@ -587,4 +587,120 @@ class SyncProtocolRepositoryTest {
         ).use { cursor -> assertTrue(cursor.moveToFirst()); assertEquals(0, cursor.getInt(0)) }
     }
 
+
+    @Test fun relayProcessorFlushesDurableSecondaryOutboxAndForwardNoticeDoesNotCompleteIt() {
+        val scenario = prepareAckAcceptanceScenario()
+        val context = RuntimeEnvironment.getApplication()
+        val sent = mutableListOf<Triple<String, String, String>>()
+        val processor = SyncRelayProcessor(
+            repository, SyncDomainApplier(context),
+            sendFrame = { operationId, recipientId, frame ->
+                sent.add(Triple(operationId, recipientId, frame))
+                true
+            }
+        )
+        processor.onRelayReady()
+        assertEquals(1, sent.size)
+        assertEquals(scenario.operationId, sent.single().first)
+        assertEquals(repository.authorityDeviceId(), sent.single().second)
+        val wire = SyncRelayFrameCodec.encodeRelayRequest(
+            repository.storeId(), scenario.secondaryDeviceId, sent.single().second,
+            scenario.operationId, sent.single().third
+        )
+        assertEquals(scenario.operationId, org.json.JSONObject(wire).getString("frame_id"))
+        processor.onRelayDelivery(scenario.operationId, forwarded = true, retryable = false)
+        database.readableDatabase.rawQuery(
+            "SELECT status FROM sync_queue WHERE operation_id=?", arrayOf(scenario.operationId)
+        ).use { cursor -> assertTrue(cursor.moveToFirst()); assertEquals("PENDING", cursor.getString(0)) }
+    }
+
+    @Test fun relayProcessorRoutesInboundApplicationAckToDurableAcceptance() {
+        val scenario = prepareAckAcceptanceScenario()
+        val context = RuntimeEnvironment.getApplication()
+        val processor = SyncRelayProcessor(
+            repository, SyncDomainApplier(context),
+            sendFrame = { _, _, _ -> true }
+        )
+        processor.onEncryptedFrame(
+            repository.authorityDeviceId()!!, scenario.operationId, scenario.frameJson
+        )
+        database.readableDatabase.rawQuery(
+            "SELECT status FROM sync_queue WHERE operation_id=?", arrayOf(scenario.operationId)
+        ).use { cursor -> assertTrue(cursor.moveToFirst()); assertEquals("SYNCED", cursor.getString(0)) }
+    }
+
+    @Test fun primaryTracksApplicationAckPerSecondaryBeforeCompletingSharedOutbox() {
+        val context = RuntimeEnvironment.getApplication()
+        repository.configureAsPrimary(adminId, "الجهاز الأساسي")
+        val primaryId = SyncDeviceIdentity.getOrCreate(context)
+        val secondaryIds = (1..2).map { index ->
+            val id = UUID.randomUUID().toString()
+            val key = SyncDeviceAuthenticator.getOrCreate(context, id)
+            val publicKey = android.util.Base64.encodeToString(key.public.encoded, android.util.Base64.NO_WRAP)
+            val invitation = repository.createPairingInvitation(adminId)
+            repository.enrollSecondaryDevice(adminId, invitation.token, id, "ثانوي $index", publicKey)
+            id
+        }
+        val operationId = UUID.randomUUID().toString()
+        val db = database.writableDatabase
+        db.beginTransaction()
+        val sequence = repository.enqueueLocalOperation(
+            db, adminId, operationId, "SALE_POSTED", "SALES_INVOICE",
+            "sale-$operationId", "CREATE", """{"invoice_id":"sale-$operationId"}"""
+        )!!
+        db.setTransactionSuccessful()
+        db.endTransaction()
+        val payloadHash = db.rawQuery(
+            "SELECT payload_sha256 FROM sync_operation_envelopes WHERE operation_id=?",
+            arrayOf(operationId)
+        ).use { cursor -> assertTrue(cursor.moveToFirst()); cursor.getString(0) }
+
+        fun makeSecondaryAck(secondaryId: String): String {
+            context.getSharedPreferences(
+                "the_daily_shop_sync_identity", android.content.Context.MODE_PRIVATE
+            ).edit().putString("device_id", secondaryId).commit()
+            setProtocolStateForTest("local_device_role", "SECONDARY")
+            setProtocolStateForTest("authority_device_id", primaryId)
+            db.delete("sync_inbox", "operation_id=?", arrayOf(operationId))
+            val now = "2026-11-04T12:00:00.000Z"
+            db.insertOrThrow("sync_inbox", null, ContentValues().apply {
+                put("operation_id", operationId); put("origin_device_id", primaryId)
+                put("sequence_number", sequence); put("operation_type", "CREATE")
+                put("entity_type", "SALES_INVOICE"); put("entity_id", "sale-$operationId")
+                put("payload_json", """{"business_operation":"SALE_POSTED"}""")
+                put("payload_sha256", payloadHash); put("status", "APPLIED")
+                put("received_at", now); put("applied_at", now); put("origin_created_at", now)
+            })
+            return repository.createEncryptedApplicationAck(primaryId, operationId)
+        }
+
+        val firstAck = makeSecondaryAck(secondaryIds[0])
+        context.getSharedPreferences(
+            "the_daily_shop_sync_identity", android.content.Context.MODE_PRIVATE
+        ).edit().putString("device_id", primaryId).commit()
+        setProtocolStateForTest("local_device_role", "PRIMARY")
+        setProtocolStateForTest("authority_device_id", primaryId)
+        assertEquals(SyncApplicationAckDisposition.APPLIED,
+            repository.acceptEncryptedApplicationAck(firstAck))
+        database.readableDatabase.rawQuery(
+            "SELECT status FROM sync_queue WHERE operation_id=?", arrayOf(operationId)
+        ).use { cursor -> assertTrue(cursor.moveToFirst()); assertEquals("PENDING", cursor.getString(0)) }
+        assertTrue(repository.pendingOutboxForDevice(secondaryIds[0]).isEmpty())
+        assertEquals(operationId, repository.pendingOutboxForDevice(secondaryIds[1]).single().operationId)
+
+        val secondAck = makeSecondaryAck(secondaryIds[1])
+        context.getSharedPreferences(
+            "the_daily_shop_sync_identity", android.content.Context.MODE_PRIVATE
+        ).edit().putString("device_id", primaryId).commit()
+        setProtocolStateForTest("local_device_role", "PRIMARY")
+        setProtocolStateForTest("authority_device_id", primaryId)
+        assertEquals(SyncApplicationAckDisposition.APPLIED,
+            repository.acceptEncryptedApplicationAck(secondAck))
+        database.readableDatabase.rawQuery(
+            "SELECT status FROM sync_queue WHERE operation_id=?", arrayOf(operationId)
+        ).use { cursor -> assertTrue(cursor.moveToFirst()); assertEquals("SYNCED", cursor.getString(0)) }
+        assertTrue(repository.pendingOutboxForDevice(secondaryIds[0]).isEmpty())
+        assertTrue(repository.pendingOutboxForDevice(secondaryIds[1]).isEmpty())
+    }
+
 }
