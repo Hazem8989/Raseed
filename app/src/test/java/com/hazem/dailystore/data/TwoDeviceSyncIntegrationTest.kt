@@ -58,8 +58,6 @@ class TwoDeviceSyncIntegrationTest {
         val enrollment = primaryRepository.enrollSecondaryDevice(
             primaryAdminId, invitation.token, secondaryId, "جهاز التكامل الثانوي", remotePublicKey
         )
-        primaryRepository.mapSecondaryActor(primaryAdminId, secondaryId, "secondary-admin", primaryAdminId)
-
         cashAccountId = UUID.randomUUID().toString()
         categoryId = UUID.randomUUID().toString()
         primaryDb.writableDatabase.execSQL(
@@ -78,7 +76,11 @@ class TwoDeviceSyncIntegrationTest {
         AppDatabase.installForTests(secondaryDb)
         StoreRepository(context).ensureBaseSetup()
         secondaryAdminId = createReadyAdmin()
+        setLocalDeviceId(primaryId)
+        AppDatabase.installForTests(primaryDb)
+        primaryRepository.mapSecondaryActor(primaryAdminId, secondaryId, secondaryAdminId, primaryAdminId)
         setLocalDeviceId(secondaryId)
+        AppDatabase.installForTests(secondaryDb)
         secondaryRepository = SyncProtocolRepository(context, SyncCredentialVault(context) { vaultKey })
         secondaryRepository.configureAsSecondary(
             secondaryAdminId, enrollment.storeId, primaryId, enrollment.credential,
