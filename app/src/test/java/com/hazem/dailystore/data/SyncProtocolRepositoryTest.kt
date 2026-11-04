@@ -23,6 +23,7 @@ class SyncProtocolRepositoryTest {
     private lateinit var adminId: String
 
     @Before fun setUp() {
+        SyncDeviceTestKeyProvider.install()
         val context = RuntimeEnvironment.getApplication()
         AppDatabase.resetForTests(context)
         database = AppDatabase.getInstance(context)
