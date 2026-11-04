@@ -111,6 +111,49 @@ class SyncProtocolRepositoryTest {
         ).use { c -> assertTrue(c.moveToFirst()); assertEquals("PENDING", c.getString(0)) }
     }
 
+    @Test fun revokedSecondaryCanBeRepairedWithNewCertificateWithoutClearingOldRevocation() {
+        repository.configureAsPrimary(adminId, "الجهاز الأساسي")
+        val remoteId = UUID.randomUUID().toString()
+        val first = enrollRemote(repository.createPairingInvitation(adminId), remoteId, "الهاتف الثانوي")
+        val oldSerial = SyncDeviceCertificate.serial(first.deviceCertificateJson!!)
+        val oldPublicKey = repository.trustedPeerPublicKey(remoteId)!!
+        repository.revokeDevice(adminId, remoteId)
+        assertNull(repository.trustedPeerPublicKey(remoteId))
+
+        val replacement = enrollRemote(repository.createPairingInvitation(adminId), remoteId, "الهاتف الثانوي بعد إعادة الاقتران")
+        val newSerial = SyncDeviceCertificate.serial(replacement.deviceCertificateJson!!)
+        assertTrue(oldSerial != newSerial)
+        assertTrue(oldPublicKey.contentEquals(repository.trustedPeerPublicKey(remoteId)!!))
+        assertTrue(repository.activeSecondaryDeviceIds().contains(remoteId))
+        assertTrue(SyncDeviceCertificate.verify(
+            replacement.deviceCertificateJson!!,
+            replacement.storeId,
+            remoteId,
+            replacement.primaryDeviceId,
+            android.util.Base64.encodeToString(
+                SyncDeviceAuthenticator.getOrCreate(
+                    RuntimeEnvironment.getApplication(), replacement.primaryDeviceId
+                ).public.encoded,
+                android.util.Base64.NO_WRAP
+            )
+        ))
+        database.readableDatabase.rawQuery(
+            "SELECT status FROM sync_device_revocations WHERE device_id=? AND certificate_serial=?",
+            arrayOf(remoteId, oldSerial)
+        ).use { c ->
+            assertTrue(c.moveToFirst())
+            assertEquals("PENDING", c.getString(0))
+        }
+        database.readableDatabase.rawQuery(
+            "SELECT status,certificate_json FROM sync_device_public_keys WHERE device_id=?",
+            arrayOf(remoteId)
+        ).use { c ->
+            assertTrue(c.moveToFirst())
+            assertEquals("ACTIVE", c.getString(0))
+            assertEquals(newSerial, SyncDeviceCertificate.serial(c.getString(1)))
+        }
+    }
+
     @Test fun primaryRegistrySyncPinsRootAndRetriesPendingRevocationBeforeRegisteringActivePeers() {
         repository.configureAsPrimary(adminId, "الجهاز الأساسي")
         val revokedId = UUID.randomUUID().toString()
