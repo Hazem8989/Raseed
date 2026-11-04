@@ -447,4 +447,144 @@ class SyncProtocolRepositoryTest {
         assertNull(result)
         assertTrue(repository.pendingOutbox().isEmpty())
     }
+
+    private data class AckAcceptanceScenario(
+        val secondaryDeviceId: String,
+        val operationId: String,
+        val frameJson: String
+    )
+
+    private fun prepareAckAcceptanceScenario(): AckAcceptanceScenario {
+        val context = RuntimeEnvironment.getApplication()
+        repository.configureAsPrimary(adminId, "الجهاز الأساسي")
+        val primaryId = SyncDeviceIdentity.getOrCreate(context)
+        val secondaryId = UUID.randomUUID().toString()
+        val secondaryIdentity = SyncDeviceAuthenticator.getOrCreate(context, secondaryId)
+        val secondaryPublicKey = android.util.Base64.encodeToString(
+            secondaryIdentity.public.encoded, android.util.Base64.NO_WRAP
+        )
+        val invitation = repository.createPairingInvitation(adminId)
+        repository.enrollSecondaryDevice(
+            adminId, invitation.token, secondaryId, "الجهاز الثانوي", secondaryPublicKey
+        )
+
+        // Simulate the separately installed secondary identity against an isolated
+        // logical device in this repository test database.
+        context.getSharedPreferences("the_daily_shop_sync_identity", android.content.Context.MODE_PRIVATE)
+            .edit().putString("device_id", secondaryId).commit()
+        setProtocolStateForTest("local_device_role", "SECONDARY")
+        setProtocolStateForTest("authority_device_id", primaryId)
+
+        val operationId = UUID.randomUUID().toString()
+        val db = database.writableDatabase
+        db.beginTransaction()
+        val sequence = repository.enqueueSecondaryCommand(
+            db, adminId, operationId, "POST_OPERATING_EXPENSE",
+            "OPERATING_EXPENSE", "expense-$operationId",
+            """{"amount_syp":12500,"description":"sync acknowledgement test"}"""
+        )
+        db.setTransactionSuccessful()
+        db.endTransaction()
+        val payloadHash = db.rawQuery(
+            "SELECT payload_sha256 FROM sync_operation_envelopes WHERE operation_id=?",
+            arrayOf(operationId)
+        ).use { cursor -> assertTrue(cursor.moveToFirst()); cursor.getString(0) }
+
+        context.getSharedPreferences("the_daily_shop_sync_identity", android.content.Context.MODE_PRIVATE)
+            .edit().putString("device_id", primaryId).commit()
+        setProtocolStateForTest("local_device_role", "PRIMARY")
+        setProtocolStateForTest("authority_device_id", primaryId)
+        val storeId = db.rawQuery(
+            "SELECT state_value FROM sync_protocol_state WHERE state_key='store_id'", null
+        ).use { cursor -> assertTrue(cursor.moveToFirst()); cursor.getString(0) }
+        val now = "2026-11-04T12:00:00.000Z"
+        db.insertOrThrow("sync_inbox", null, ContentValues().apply {
+            put("operation_id", operationId)
+            put("origin_device_id", secondaryId)
+            put("sequence_number", sequence)
+            put("operation_type", "CREATE")
+            put("entity_type", "OPERATING_EXPENSE")
+            put("entity_id", "expense-$operationId")
+            put("payload_json", """{"business_operation":"POST_OPERATING_EXPENSE"}""")
+            put("payload_sha256", payloadHash)
+            put("status", "APPLIED")
+            put("received_at", now)
+            put("applied_at", now)
+            put("origin_created_at", now)
+        })
+        val ackFrame = repository.createEncryptedApplicationAck(secondaryId, operationId)
+        context.getSharedPreferences("the_daily_shop_sync_identity", android.content.Context.MODE_PRIVATE)
+            .edit().putString("device_id", secondaryId).commit()
+        setProtocolStateForTest("local_device_role", "SECONDARY")
+        setProtocolStateForTest("authority_device_id", primaryId)
+        assertEquals(storeId, org.json.JSONObject(ackFrame).getString("store_id"))
+        return AckAcceptanceScenario(secondaryId, operationId, ackFrame)
+    }
+
+    private fun setProtocolStateForTest(key: String, value: String) {
+        val changed = database.writableDatabase.update(
+            "sync_protocol_state", ContentValues().apply { put("state_value", value) },
+            "state_key=?", arrayOf(key)
+        )
+        assertEquals(1, changed)
+    }
+
+    @Test fun secondaryAcceptsValidPrimaryApplicationAckAndMarksQueueSyncedAtomically() {
+        val scenario = prepareAckAcceptanceScenario()
+        assertEquals(SyncApplicationAckDisposition.APPLIED,
+            repository.acceptEncryptedApplicationAck(scenario.frameJson))
+        database.readableDatabase.rawQuery(
+            "SELECT status FROM sync_queue WHERE operation_id=?", arrayOf(scenario.operationId)
+        ).use { cursor -> assertTrue(cursor.moveToFirst()); assertEquals("SYNCED", cursor.getString(0)) }
+        database.readableDatabase.rawQuery(
+            "SELECT status,sequence_number FROM sync_acknowledgements WHERE operation_id=?",
+            arrayOf(scenario.operationId)
+        ).use { cursor ->
+            assertTrue(cursor.moveToFirst())
+            assertEquals("APPLIED", cursor.getString(0))
+            assertEquals(1L, cursor.getLong(1))
+        }
+    }
+
+    @Test fun repeatedPrimaryApplicationAckIsIdempotentAndDoesNotDuplicateReceipt() {
+        val scenario = prepareAckAcceptanceScenario()
+        assertEquals(SyncApplicationAckDisposition.APPLIED,
+            repository.acceptEncryptedApplicationAck(scenario.frameJson))
+        assertEquals(SyncApplicationAckDisposition.DUPLICATE,
+            repository.acceptEncryptedApplicationAck(scenario.frameJson))
+        database.readableDatabase.rawQuery(
+            "SELECT COUNT(*) FROM sync_acknowledgements WHERE operation_id=?",
+            arrayOf(scenario.operationId)
+        ).use { cursor -> assertTrue(cursor.moveToFirst()); assertEquals(1, cursor.getInt(0)) }
+        database.readableDatabase.rawQuery(
+            "SELECT status FROM sync_queue WHERE operation_id=?", arrayOf(scenario.operationId)
+        ).use { cursor -> assertTrue(cursor.moveToFirst()); assertEquals("SYNCED", cursor.getString(0)) }
+    }
+
+    @Test fun forgedOrTamperedApplicationAckIsRejectedAndOutboxRemainsPending() {
+        val scenario = prepareAckAcceptanceScenario()
+        val forged = org.json.JSONObject(scenario.frameJson)
+            .put("signature", android.util.Base64.encodeToString(
+                ByteArray(72) { 0x41 }, android.util.Base64.NO_WRAP
+            )).toString()
+        var rejected = false
+        try { repository.acceptEncryptedApplicationAck(forged) }
+        catch (_: Exception) { rejected = true }
+        assertTrue("يجب رفض الإقرار ذي التوقيع المزور", rejected)
+        val tamperedCiphertext = org.json.JSONObject(scenario.frameJson)
+            .put("ciphertext", "AAAA" + org.json.JSONObject(scenario.frameJson).getString("ciphertext"))
+            .toString()
+        rejected = false
+        try { repository.acceptEncryptedApplicationAck(tamperedCiphertext) }
+        catch (_: Exception) { rejected = true }
+        assertTrue("يجب رفض العبث بالمحتوى المشفر", rejected)
+        database.readableDatabase.rawQuery(
+            "SELECT status FROM sync_queue WHERE operation_id=?", arrayOf(scenario.operationId)
+        ).use { cursor -> assertTrue(cursor.moveToFirst()); assertEquals("PENDING", cursor.getString(0)) }
+        database.readableDatabase.rawQuery(
+            "SELECT COUNT(*) FROM sync_acknowledgements WHERE operation_id=?",
+            arrayOf(scenario.operationId)
+        ).use { cursor -> assertTrue(cursor.moveToFirst()); assertEquals(0, cursor.getInt(0)) }
+    }
+
 }
