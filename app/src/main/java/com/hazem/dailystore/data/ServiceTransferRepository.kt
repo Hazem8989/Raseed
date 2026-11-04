@@ -111,6 +111,7 @@ class ServiceTransferRepository(context:Context) {
     fun rechargeAccountId():String? = database.readableDatabase.rawQuery("SELECT setting_value FROM app_settings WHERE setting_key='service_recharge_cash_account_id'",null).use { if(it.moveToFirst())it.getString(0) else null }
 
     fun setRechargeAccount(actor:String,accountId:String) {
+        require(!SyncProtocolRepository(appContext).isConfiguredSecondary()) { "تغيير حساب شحن الخدمات متاح من الجهاز الأساسي فقط حتى تكتمل مزامنته" }
         val db=database.writableDatabase
         // Check authority before the helper opens its own transaction or repairs local account records.
         requireManager(db,actor)
