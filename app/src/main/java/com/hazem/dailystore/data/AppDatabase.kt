@@ -525,6 +525,14 @@ class AppDatabase private constructor(context: Context) :
                 version = 23
             } finally { db.endTransaction() }
         }
+        if (version < 24) {
+            db.beginTransaction()
+            try {
+                ensureSyncDeviceIdentitySchema(db)
+                db.setTransactionSuccessful()
+                version = 24
+            } finally { db.endTransaction() }
+        }
         if (version != newVersion) {
             throw IllegalStateException("Missing database migration from version $version to $newVersion")
         }
@@ -557,6 +565,27 @@ class AppDatabase private constructor(context: Context) :
             while (c.moveToNext()) if (c.getString(1) == "origin_created_at") exists = true
         }
         if (!exists) db.execSQL("ALTER TABLE sync_inbox ADD COLUMN origin_created_at TEXT NOT NULL DEFAULT ''")
+    }
+
+    /**
+     * Stores pinned public identities for enrolled peers. Private signing keys
+     * remain exclusively in Android Keystore and are never persisted here.
+     */
+    private fun ensureSyncDeviceIdentitySchema(db: SQLiteDatabase) {
+        db.execSQL("""
+            CREATE TABLE IF NOT EXISTS sync_device_public_keys (
+                device_id TEXT PRIMARY KEY NOT NULL,
+                public_key_base64 TEXT NOT NULL,
+                public_key_fingerprint TEXT NOT NULL,
+                algorithm TEXT NOT NULL CHECK(algorithm='EC_P256_SHA256'),
+                status TEXT NOT NULL CHECK(status IN ('ACTIVE','REVOKED')),
+                enrolled_at TEXT NOT NULL,
+                revoked_at TEXT,
+                FOREIGN KEY(device_id) REFERENCES sync_devices(device_id)
+                    ON UPDATE RESTRICT ON DELETE RESTRICT
+            )
+        """.trimIndent())
+        db.execSQL("CREATE INDEX IF NOT EXISTS idx_sync_device_public_keys_status ON sync_device_public_keys(status,device_id)")
     }
 
     private fun ensureSyncActorMappingSchema(db: SQLiteDatabase) {
@@ -949,7 +978,7 @@ class AppDatabase private constructor(context: Context) :
 
     companion object {
         const val DATABASE_NAME = "the_daily_shop.db"
-        const val DATABASE_VERSION = 23
+        const val DATABASE_VERSION = 24
 
         @Volatile
         private var INSTANCE: AppDatabase? = null
