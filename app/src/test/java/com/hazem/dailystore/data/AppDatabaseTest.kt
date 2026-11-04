@@ -142,6 +142,9 @@ class AppDatabaseTest {
     private fun downgradeSchemaForMigrationTest(db: android.database.sqlite.SQLiteDatabase, targetVersion: Int) {
         fun dropIndex(name: String) { db.execSQL("DROP INDEX IF EXISTS $name") }
         fun dropTable(name: String) { db.execSQL("DROP TABLE IF EXISTS $name") }
+        // Version 27 introduced the category-ID mapping table; remove it when
+        // simulating any earlier installed schema so the real migration is exercised.
+        if (targetVersion < 27) dropTable("sync_category_mappings")
         fun dropColumn(table: String, column: String) {
             val exists = db.rawQuery("PRAGMA table_info($table)", null).use { cursor ->
                 var found = false
