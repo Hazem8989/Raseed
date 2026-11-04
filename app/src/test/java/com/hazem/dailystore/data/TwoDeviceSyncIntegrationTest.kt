@@ -142,7 +142,7 @@ class TwoDeviceSyncIntegrationTest {
         )
         primaryProcessor.onEncryptedFrame(secondaryId, operationId, outgoingFrame)
 
-        val ack = deliveredAck ?: fail("Primary did not emit an application acknowledgement")
+        val ack: String = deliveredAck ?: throw AssertionError("Primary did not emit an application acknowledgement")
         val ackJson = JSONObject(ack)
         assertEquals("APPLICATION_ACK", ackJson.getString("frame_type"))
         assertEquals(primaryId, ackJson.getString("sender_device_id"))
@@ -170,7 +170,7 @@ class TwoDeviceSyncIntegrationTest {
         setLocalDeviceId(primaryId)
         AppDatabase.installForTests(primaryDb)
         primaryProcessor.onEncryptedFrame(secondaryId, operationId, outgoingFrame)
-        val repeatedAck = deliveredAck ?: fail("Primary did not re-issue ACK after duplicate delivery")
+        val repeatedAck: String = deliveredAck ?: throw AssertionError("Primary did not re-issue ACK after duplicate delivery")
         setLocalDeviceId(secondaryId)
         AppDatabase.installForTests(secondaryDb)
         secondaryProcessor.onEncryptedFrame(primaryId, operationId, repeatedAck)
