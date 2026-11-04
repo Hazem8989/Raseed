@@ -387,7 +387,6 @@ class SyncProtocolRepository(private val context: Context, private val credentia
         val db = database.writableDatabase
         val storeId = state(db, "store_id") ?: error("معرّف المتجر غير مهيأ")
         val identity = SyncDeviceAuthenticator.getOrCreate(context, localId)
-        val registry = SyncRelayRegistryClient(relayBaseUrl)
         val trust = registry.fetchTrustRoot(storeId)
         require(trust.deviceId == localId &&
             SyncDeviceAuthenticator.fingerprint(Base64.decode(trust.publicKeyBase64, Base64.DEFAULT)) ==
@@ -1198,6 +1197,15 @@ class SyncProtocolRepository(private val context: Context, private val credentia
             db.update("sync_device_public_keys", ContentValues().apply {
                 put("status", "REVOKED"); put("revoked_at", now)
             }, "device_id=?", arrayOf(remoteDeviceId))
+            val statement = signedRevocation ?: error("تعذر إنشاء بيان إلغاء الشهادة")
+            val serial = JSONObject(statement).getString("serial")
+            db.insertWithOnConflict("sync_device_revocations", null, ContentValues().apply {
+                put("device_id", remoteDeviceId)
+                put("certificate_serial", serial)
+                put("revocation_json", statement)
+                put("status", "PENDING")
+                put("created_at", now)
+            }, SQLiteDatabase.CONFLICT_IGNORE)
             audit(db, actorUserId, "SYNC_DEVICE_REVOKED", remoteDeviceId, before,
                 JSONObject().put("status", "REVOKED").toString(), now)
             db.setTransactionSuccessful()

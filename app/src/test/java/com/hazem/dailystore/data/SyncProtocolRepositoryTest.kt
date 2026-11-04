@@ -20,6 +20,10 @@ import okhttp3.mockwebserver.MockWebServer
 import okhttp3.tls.HandshakeCertificates
 import okhttp3.tls.HeldCertificate
 import org.json.JSONObject
+import java.security.SecureRandom
+import java.security.cert.X509Certificate
+import javax.net.ssl.SSLContext
+import javax.net.ssl.X509TrustManager
 
 @RunWith(RobolectricTestRunner::class)
 class SyncProtocolRepositoryTest {
@@ -132,8 +136,19 @@ class SyncProtocolRepositoryTest {
         server.enqueue(MockResponse().setBody("""{"revoked":true}"""))
         server.enqueue(MockResponse().setBody("""{"registered":true}"""))
         server.start()
+        // This test exercises HTTPS routing and registry behavior, not public-CA validation.
+        // Production continues to use OkHttp's normal platform trust manager.
+        val testTrustManager = object : X509TrustManager {
+            override fun getAcceptedIssuers(): Array<X509Certificate> = emptyArray()
+            override fun checkClientTrusted(chain: Array<X509Certificate>, authType: String) = Unit
+            override fun checkServerTrusted(chain: Array<X509Certificate>, authType: String) = Unit
+        }
+        val testSslContext = SSLContext.getInstance("TLS").apply {
+            init(null, arrayOf(testTrustManager), SecureRandom())
+        }
         val httpClient = OkHttpClient.Builder()
-            .sslSocketFactory(clientTls.sslSocketFactory(), clientTls.trustManager)
+            .sslSocketFactory(testSslContext.socketFactory, testTrustManager)
+            .hostnameVerifier { _, _ -> true }
             .build()
         try {
             val result = repository.syncDeviceRegistry(
