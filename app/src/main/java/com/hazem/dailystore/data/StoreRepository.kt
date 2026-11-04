@@ -178,6 +178,7 @@ class StoreRepository(context: Context) {
     }
 
     fun addCategory(name: String, actorUserId: String): Long {
+        requirePrimaryCatalogAuthority()
         val clean = name.trim()
         require(clean.isNotEmpty()) { "اسم التصنيف مطلوب" }
         val db = helper.writableDatabase
@@ -212,6 +213,7 @@ class StoreRepository(context: Context) {
         openingQuantity: Double,
         actorUserId: String
     ): String {
+        requirePrimaryCatalogAuthority()
         val cleanName = name.trim()
         require(cleanName.isNotEmpty()) { "اسم المنتج مطلوب" }
         require(purchaseCostUsdCents >= 0 && salePriceUsdCents > 0) { "سعر البيع يجب أن يكون موجباً والتكلفة غير سالبة" }
@@ -490,6 +492,7 @@ class StoreRepository(context: Context) {
      * purchases, sales, returns or explicit stock adjustments, never overwritten.
      */
     fun recordOpeningStock(productId: String, quantity: Double, actorUserId: String, note: String?): Unit {
+        requirePrimaryCatalogAuthority()
         require(productId.isNotBlank() && actorUserId.isNotBlank()) { "بيانات العملية غير مكتملة" }
         require(quantity > 0.0 && quantity.isFinite()) { "كمية الجرد يجب أن تكون أكبر من صفر" }
         val db = helper.writableDatabase
@@ -590,6 +593,7 @@ class StoreRepository(context: Context) {
         ).use { it.moveToFirst() }
 
     fun setProductActive(id: String, active: Boolean, actorUserId: String) {
+        requirePrimaryCatalogAuthority()
         val db = helper.writableDatabase
         requireManager(db, actorUserId)
         db.beginTransaction()
@@ -653,6 +657,12 @@ class StoreRepository(context: Context) {
 
     private fun ContentValues.putNullable(key: String, value: String?) {
         if (value == null) putNull(key) else put(key, value)
+    }
+
+    private fun requirePrimaryCatalogAuthority() {
+        require(!SyncProtocolRepository(appContext).isConfiguredSecondary()) {
+            "تعديل المنتجات والتصنيفات والمخزون الافتتاحي متاح من الجهاز الأساسي فقط حتى يكتمل مسار مزامنة البيانات الأساسية"
+        }
     }
 
     private fun timestamp(): String =
