@@ -1,7 +1,8 @@
 import { after, before, test } from "node:test";
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
-import { webcrypto } from "node:crypto";\nimport { writeFileSync, unlinkSync, existsSync } from "node:fs";
+import { webcrypto } from "node:crypto";
+import { writeFileSync, unlinkSync, existsSync } from "node:fs";
 
 const crypto = webcrypto;
 const baseUrl = "http://127.0.0.1:8787";
@@ -9,7 +10,8 @@ const storeId = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
 const rootDeviceId = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
 let rootKeys;
 let worker;
-let workerOutput = "";\nlet devVarsCreated = false;
+let workerOutput = "";
+let devVarsCreated = false;
 
 const b64 = bytes => Buffer.from(bytes).toString("base64");
 const json = value => JSON.stringify(value);
@@ -125,9 +127,12 @@ async function stopWorker() {
 
 before(async () => {
   rootKeys = await keyPair();
-  process.env.STORE_ROOT_PUBLIC_KEYS = json({
+  const varsPath = ".dev.vars";
+  if (existsSync(varsPath)) throw new Error("Refusing to overwrite an existing .dev.vars file");
+  writeFileSync(varsPath, `STORE_ROOT_PUBLIC_KEYS=${json({
     [storeId]: { device_id: rootDeviceId, public_key: await publicKeyBase64(rootKeys) },
-  });
+  })}\n`);
+  devVarsCreated = true;
   worker = spawn(process.execPath, [
     "node_modules/wrangler/bin/wrangler.js", "dev", "--local",
     "--ip", "127.0.0.1", "--port", "8787", "--log-level", "debug",

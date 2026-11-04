@@ -78,7 +78,8 @@ async function verifySignature(publicKeyBase64: string, data: string, signatureB
       "spki", decodeBase64(publicKeyBase64),
       { name: "ECDSA", namedCurve: "P-256" }, false, ["verify"]
     );
-    const encodedSignature = decodeBase64(signatureBase64);\n    const signature = encodedSignature.length === 64 ? encodedSignature : derEcdsaToRaw(encodedSignature);
+    const encodedSignature = decodeBase64(signatureBase64);
+    const signature = encodedSignature.length === 64 ? encodedSignature : derEcdsaToRaw(encodedSignature);
     return await crypto.subtle.verify(
       { name: "ECDSA", hash: "SHA-256" }, key, signature,
       new TextEncoder().encode(data)
