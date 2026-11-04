@@ -1293,6 +1293,7 @@ class SyncProtocolRepository(private val context: Context, private val credentia
             )
             val frame = JSONObject()
                 .put("frame_version", 1)
+                .put("frame_type", "APPLICATION_ACK")
                 .put("store_id", storeId)
                 .put("sender_device_id", localId)
                 .put("recipient_device_id", recipientDeviceId)
@@ -1322,8 +1323,9 @@ class SyncProtocolRepository(private val context: Context, private val credentia
      * with the durable ACK receipt; forwarded/not_delivered relay events cannot call this.
      */
     fun acceptEncryptedApplicationAck(frameJson: String): SyncApplicationAckDisposition {
+        require(frameJson.length in 2..700_000) { "حجم إقرار المزامنة غير صالح" }
         val frame = JSONObject(frameJson)
-        require(frame.getInt("frame_version") == 1) { "إصدار إقرار المزامنة غير مدعوم" }
+        require(frame.getInt("frame_version") == 1 && frame.getString("frame_type") == "APPLICATION_ACK") { "إصدار إقرار المزامنة غير مدعوم" }
         val storeId = frame.getString("store_id")
         val senderId = frame.getString("sender_device_id")
         val recipientId = frame.getString("recipient_device_id")
