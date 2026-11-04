@@ -202,6 +202,22 @@ class SyncRelayRuntime(
 
     val isConnected: Boolean get() = client.isReady
 
+    /** Flush durable pending operations when a user explicitly requests a test/send. */
+    fun flushPending() {
+        synchronized(this) {
+            if (!desiredConnection) {
+                connect()
+                return
+            }
+        }
+        scheduler.execute {
+            if (client.isReady) {
+                runCatching { processor.onRelayReady() }
+                    .onFailure { listener.onProtocolError(null, it.message ?: "تعذر إرسال العمليات المعلقة") }
+            }
+        }
+    }
+
     /** Registry updates are completed before the primary opens its relay socket. */
     private fun prepareAndConnect() {
         try {

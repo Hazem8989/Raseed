@@ -673,6 +673,35 @@ class SyncProtocolRepository(private val context: Context, private val credentia
      * It deliberately performs no invoice, cash, debt, or inventory posting.
      * The caller must keep this insert in the same transaction as local command creation.
      */
+    /** Queue a harmless end-to-end transport probe on a secondary device. */
+    fun enqueueTransportProbe(actorUserId: String): String {
+        require(isConfiguredSecondary()) { "اختبار النقل متاح على الجهاز الثانوي المرتبط فقط" }
+        val db = database.writableDatabase
+        val operationId = UUID.randomUUID().toString()
+        db.beginTransaction()
+        try {
+            PermissionPolicy.requireAssigned(db, actorUserId, PermissionPolicy.SYNC_MANAGE)
+            val payload = JSONObject()
+                .put("probe_id", operationId)
+                .put("nonce", UUID.randomUUID().toString())
+                .put("created_at", timestamp())
+                .toString()
+            enqueueSecondaryCommand(
+                db, actorUserId, operationId, "SYNC_TRANSPORT_PROBE",
+                "SYNC_TRANSPORT_PROBE", operationId, payload
+            )
+            db.setTransactionSuccessful()
+        } finally { db.endTransaction() }
+        return operationId
+    }
+
+    fun outboxStatus(operationId: String): String? {
+        if (operationId.isBlank()) return null
+        return database.readableDatabase.rawQuery(
+            "SELECT status FROM sync_queue WHERE operation_id=?", arrayOf(operationId)
+        ).use { c -> if (c.moveToFirst()) c.getString(0) else null }
+    }
+
     fun enqueueSecondaryCommand(
         db: SQLiteDatabase, actorUserId: String, operationId: String,
         businessOperation: String, entityType: String, entityId: String,
@@ -880,16 +909,30 @@ class SyncProtocolRepository(private val context: Context, private val credentia
 
             val payload = JSONObject(envelope.payloadJson)
             val businessOperation = payload.optString("business_operation")
-            val requiredPermission = requiredPermissionForBusinessOperation(businessOperation)
-            val mappedUser = db.rawQuery(
-                """SELECT m.primary_user_id FROM sync_actor_mappings m
-                   JOIN users u ON u.id=m.primary_user_id
-                   WHERE m.device_id=? AND m.remote_actor_user_id=? AND m.is_active=1
-                     AND u.is_active=1 AND u.must_change_password=0""".trimIndent(),
-                arrayOf(envelope.originDeviceId, envelope.actorUserId)
-            ).use { c -> if (c.moveToFirst()) c.getString(0) else null }
-                ?: throw IllegalArgumentException("لم يتم ربط مستخدم الجهاز الثانوي بحساب مخول على الجهاز الأساسي")
-            PermissionPolicy.require(db, mappedUser, requiredPermission)
+            if (businessOperation == "SYNC_TRANSPORT_PROBE") {
+                // A transport probe is deliberately non-financial. It proves the
+                // authenticated route and signed ACK without requiring business
+                // actor/account/catalog mappings or touching the store ledger.
+                require(envelope.operationType == "CREATE" &&
+                    envelope.entityType == "SYNC_TRANSPORT_PROBE" &&
+                    envelope.entityId == envelope.operationId &&
+                    payload.optString("probe_id") == envelope.operationId &&
+                    runCatching { UUID.fromString(payload.optString("nonce")) }.isSuccess &&
+                    payload.optString("created_at").matches(Regex("\\d{4}-\\d{2}-\\d{2}T.*"))) {
+                    "بيانات اختبار النقل غير صالحة"
+                }
+            } else {
+                val requiredPermission = requiredPermissionForBusinessOperation(businessOperation)
+                val mappedUser = db.rawQuery(
+                    """SELECT m.primary_user_id FROM sync_actor_mappings m
+                       JOIN users u ON u.id=m.primary_user_id
+                       WHERE m.device_id=? AND m.remote_actor_user_id=? AND m.is_active=1
+                         AND u.is_active=1 AND u.must_change_password=0""".trimIndent(),
+                    arrayOf(envelope.originDeviceId, envelope.actorUserId)
+                ).use { c -> if (c.moveToFirst()) c.getString(0) else null }
+                    ?: throw IllegalArgumentException("لم يتم ربط مستخدم الجهاز الثانوي بحساب مخول على الجهاز الأساسي")
+                PermissionPolicy.require(db, mappedUser, requiredPermission)
+            }
             val last = db.rawQuery(
                 "SELECT last_sequence FROM sync_cursors WHERE device_id=?",
                 arrayOf(envelope.originDeviceId)

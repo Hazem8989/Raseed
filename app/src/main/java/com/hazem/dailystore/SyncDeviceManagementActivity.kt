@@ -92,6 +92,21 @@ class SyncDeviceManagementActivity : Activity() {
             addButton(root, "إنشاء طلب إعادة اقتران لهذا الجهاز") { createSecondaryRequest() }
             addButton(root, "قبول شهادة اقتران جديدة") { acceptEnrollmentResponse() }
             addButton(root, "إعداد عنوان وسيط المزامنة والاتصال") { configureRelay() }
+            addButton(root, "إرسال اختبار نقل مشفر إلى الجهاز الأساسي") {
+                runTask("إرسال اختبار النقل") {
+                    val probeId = repository.enqueueTransportProbe(actorUserId)
+                    preferences.edit().putString(KEY_LAST_PROBE_ID, probeId).apply()
+                    SyncRelaySession.flushPending()
+                }
+            }
+            addButton(root, "فحص نتيجة اختبار النقل") {
+                val probeId = preferences.getString(KEY_LAST_PROBE_ID, null)
+                status.text = when (repository.outboxStatus(probeId.orEmpty())) {
+                    "SYNCED" -> "نجح اختبار النقل: وصل الأمر إلى الجهاز الأساسي وعاد الإقرار المشفر الموثق."
+                    "PENDING", "FAILED", "IN_PROGRESS" -> "اختبار النقل محفوظ وينتظر الإقرار الموثق من الجهاز الأساسي."
+                    else -> "لا يوجد اختبار نقل محفوظ على هذا الجهاز."
+                }
+            }
         } else {
             addButton(root, "إنشاء طلب اقتران لهذا الهاتف") { createSecondaryRequest() }
             addButton(root, "إكمال الاقتران ببيانات الجهاز الأساسي") { acceptEnrollmentResponse() }
@@ -349,6 +364,7 @@ class SyncDeviceManagementActivity : Activity() {
     companion object {
         const val EXTRA_ACTOR_USER_ID = "actor_user_id"
         private const val KEY_RELAY_WSS = "relay_wss_url"
+        private const val KEY_LAST_PROBE_ID = "last_transport_probe_id"
         fun intent(context: Context, actorUserId: String) =
             Intent(context, SyncDeviceManagementActivity::class.java)
                 .putExtra(EXTRA_ACTOR_USER_ID, actorUserId)

@@ -42,6 +42,7 @@ class SyncDomainApplier(context: Context) {
         }
         return when (JSONObject(payloadJson).optString("business_operation")) {
             "UPDATE_STORE_TIME_ZONE" -> applyReceivedStoreTimeZone(operationId)
+            "SYNC_TRANSPORT_PROBE" -> applyReceivedTransportProbe(operationId)
             "SET_EXCHANGE_RATE" -> applyReceivedExchangeRate(operationId)
             "POST_PURCHASE_INVOICE", "POST_SALES_INVOICE" -> applyReceivedInvoice(operationId)
             "POST_OPERATING_EXPENSE" -> applyReceivedOperatingExpense(operationId)
@@ -1362,6 +1363,59 @@ class SyncDomainApplier(context: Context) {
             }
             db.setTransactionSuccessful()
             ApplyResult(operationId,true)
+        } finally { db.endTransaction() }
+    }
+
+    /** Accepts a signed transport probe on the primary without changing business ledgers. */
+    fun applyReceivedTransportProbe(operationId: String): ApplyResult = synchronized(APPLY_LOCK) {
+        require(operationId.isNotBlank()) { "معرّف اختبار النقل مطلوب" }
+        val db = database.writableDatabase
+        val localId = SyncDeviceIdentity.getOrCreate(appContext)
+        val role = db.rawQuery(
+            "SELECT state_value FROM sync_protocol_state WHERE state_key='local_device_role'", null
+        ).use { c -> if (c.moveToFirst()) c.getString(0) else null }
+        val authority = db.rawQuery(
+            "SELECT state_value FROM sync_protocol_state WHERE state_key='authority_device_id'", null
+        ).use { c -> if (c.moveToFirst()) c.getString(0) else null }
+        require(role == "PRIMARY" && authority == localId) {
+            "اختبار النقل الوارد يُعتمد على الجهاز الأساسي فقط"
+        }
+        db.beginTransaction()
+        try {
+            val row = db.rawQuery(
+                """SELECT i.origin_device_id,i.operation_type,i.entity_type,i.entity_id,
+                          i.payload_json,i.status,d.status
+                   FROM sync_inbox i JOIN sync_devices d ON d.device_id=i.origin_device_id
+                   WHERE i.operation_id=?""".trimIndent(), arrayOf(operationId)
+            ).use { c ->
+                require(c.moveToFirst()) { "اختبار النقل غير موجود في صندوق الوارد" }
+                Array(7) { c.getString(it) }
+            }
+            require(row[6] == "ACTIVE" && row[1] == "CREATE" &&
+                row[2] == "SYNC_TRANSPORT_PROBE" && row[3] == operationId) {
+                "مصدر أو نوع اختبار النقل غير صالح"
+            }
+            if (row[5] == "APPLIED") {
+                db.setTransactionSuccessful()
+                return@synchronized ApplyResult(operationId, true)
+            }
+            require(row[5] == "RECEIVED") { "حالة اختبار النقل لا تسمح بالتطبيق" }
+            val payload = JSONObject(row[4])
+            require(payload.optString("business_operation") == "SYNC_TRANSPORT_PROBE" &&
+                payload.optString("probe_id") == operationId &&
+                runCatching { UUID.fromString(payload.optString("nonce")) }.isSuccess &&
+                payload.optString("created_at").matches(Regex("\\d{4}-\\d{2}-\\d{2}T.*"))) {
+                "محتوى اختبار النقل غير صالح"
+            }
+            db.update("sync_inbox", ContentValues().apply {
+                put("status", "APPLIED")
+                put("applied_at", timestamp())
+                putNull("rejection_reason")
+            }, "operation_id=? AND status='RECEIVED'", arrayOf(operationId)).also {
+                require(it == 1) { "تعذر تثبيت نتيجة اختبار النقل" }
+            }
+            db.setTransactionSuccessful()
+            ApplyResult(operationId, true)
         } finally { db.endTransaction() }
     }
 

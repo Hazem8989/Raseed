@@ -181,6 +181,73 @@ class TwoDeviceSyncIntegrationTest {
         assertEquals("SYNCED", queueStatus(secondaryDb, operationId))
     }
 
+    @Test fun twoIndependentDevicesExchangeTransportProbeAndSignedAckWithoutLedgerMutation() {
+        var expenseAck: String? = null
+        setLocalDeviceId(primaryId)
+        AppDatabase.installForTests(primaryDb)
+        val primaryProcessor = SyncRelayProcessor(
+            primaryRepository, SyncDomainApplier(context),
+            sendFrame = { _, recipient, frame ->
+                assertEquals(secondaryId, recipient)
+                expenseAck = frame
+                true
+            }
+        )
+        primaryProcessor.onEncryptedFrame(secondaryId, operationId, outgoingFrame)
+        assertEquals("APPLIED", inboxStatus(primaryDb, operationId))
+        setLocalDeviceId(secondaryId)
+        AppDatabase.installForTests(secondaryDb)
+        val secondaryProcessor = SyncRelayProcessor(
+            secondaryRepository, SyncDomainApplier(context), sendFrame = { _, _, _ -> true }
+        )
+        secondaryProcessor.onEncryptedFrame(primaryId, operationId, expenseAck!!)
+        assertEquals("SYNCED", queueStatus(secondaryDb, operationId))
+
+        // Probes are device-authenticated control messages, not business commands;
+        // removing the actor mapping must not block a harmless transport test.
+        setLocalDeviceId(primaryId)
+        AppDatabase.installForTests(primaryDb)
+        primaryDb.writableDatabase.update(
+            "sync_actor_mappings", android.content.ContentValues().apply { put("is_active", 0) },
+            "device_id=?", arrayOf(secondaryId)
+        )
+        val expenseCountBefore = scalar(primaryDb, "SELECT COUNT(*) FROM operating_expenses WHERE operation_id=?", operationId)
+        val cashCountBefore = scalar(primaryDb, "SELECT COUNT(*) FROM cash_transactions WHERE operation_id=?", operationId + ":CASH")
+
+        setLocalDeviceId(secondaryId)
+        AppDatabase.installForTests(secondaryDb)
+        val probeId = secondaryRepository.enqueueTransportProbe(secondaryAdminId)
+        val probeFrame = secondaryRepository.encryptedAuthenticatedOutbox(probeId, primaryId)
+
+        var probeAck: String? = null
+        setLocalDeviceId(primaryId)
+        AppDatabase.installForTests(primaryDb)
+        val primaryProbeProcessor = SyncRelayProcessor(
+            primaryRepository, SyncDomainApplier(context),
+            sendFrame = { id, recipient, frame ->
+                assertEquals(probeId, id)
+                assertEquals(secondaryId, recipient)
+                probeAck = frame
+                true
+            }
+        )
+        primaryProbeProcessor.onEncryptedFrame(secondaryId, probeId, probeFrame)
+        assertEquals("APPLIED", inboxStatus(primaryDb, probeId))
+        assertEquals(expenseCountBefore, scalar(primaryDb,
+            "SELECT COUNT(*) FROM operating_expenses WHERE operation_id=?", operationId))
+        assertEquals(cashCountBefore, scalar(primaryDb,
+            "SELECT COUNT(*) FROM cash_transactions WHERE operation_id=?", operationId + ":CASH"))
+
+        setLocalDeviceId(secondaryId)
+        AppDatabase.installForTests(secondaryDb)
+        secondaryProcessor.onEncryptedFrame(primaryId, probeId, probeAck!!)
+        assertEquals("SYNCED", queueStatus(secondaryDb, probeId))
+        assertEquals(0, scalar(primaryDb,
+            "SELECT COUNT(*) FROM operating_expenses WHERE operation_id=?", probeId))
+        assertEquals(0, scalar(primaryDb,
+            "SELECT COUNT(*) FROM cash_transactions WHERE operation_id=?", probeId + ":CASH"))
+    }
+
     @Test fun twoIndependentDevicesSyncCashSaleStockAndFinancialEffectsExactlyOnce() {
         // The shared setup queued an expense as sequence 1. Deliver and ACK it
         // before the sale (sequence 2), preserving the receiver's strict cursor.

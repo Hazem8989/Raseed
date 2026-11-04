@@ -26,6 +26,11 @@ object SyncRelaySession {
     }
 
     @Synchronized
+    fun flushPending() {
+        runtime?.flushPending()
+    }
+
+    @Synchronized
     fun isConnected(): Boolean = runtime?.isConnected == true
 
     @Synchronized
