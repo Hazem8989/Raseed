@@ -182,6 +182,40 @@ class TwoDeviceSyncIntegrationTest {
     }
 
     @Test fun twoIndependentDevicesSyncCashSaleStockAndFinancialEffectsExactlyOnce() {
+        // The shared setup queued an expense as sequence 1. Deliver and ACK it
+        // before the sale (sequence 2), preserving the receiver's strict cursor.
+        var priorExpenseAck: String? = null
+        var priorExpenseProtocolError: String? = null
+        setLocalDeviceId(primaryId)
+        AppDatabase.installForTests(primaryDb)
+        val priorExpenseProcessor = SyncRelayProcessor(
+            primaryRepository, SyncDomainApplier(context),
+            listener = object : SyncRelayProcessor.Listener {
+                override fun onProtocolError(operationId: String?, message: String) {
+                    priorExpenseProtocolError = message
+                }
+            },
+            sendFrame = { id, recipient, frame ->
+                assertEquals(operationId, id)
+                assertEquals(secondaryId, recipient)
+                priorExpenseAck = frame
+                true
+            }
+        )
+        priorExpenseProcessor.onEncryptedFrame(secondaryId, operationId, outgoingFrame)
+        assertEquals("لا ينبغي رفض الأمر السابق: $priorExpenseProtocolError", null, priorExpenseProtocolError)
+        assertEquals("APPLIED", inboxStatus(primaryDb, operationId))
+        val acceptedPriorAck = priorExpenseAck
+            ?: throw AssertionError("Primary did not issue the prior expense application ACK")
+
+        setLocalDeviceId(secondaryId)
+        AppDatabase.installForTests(secondaryDb)
+        val priorAckProcessor = SyncRelayProcessor(
+            secondaryRepository, SyncDomainApplier(context), sendFrame = { _, _, _ -> true }
+        )
+        priorAckProcessor.onEncryptedFrame(primaryId, operationId, acceptedPriorAck)
+        assertEquals("SYNCED", queueStatus(secondaryDb, operationId))
+
         // Prepare authoritative product and opening stock only on the primary database.
         setLocalDeviceId(primaryId)
         AppDatabase.installForTests(primaryDb)
