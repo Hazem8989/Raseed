@@ -137,6 +137,7 @@ class SyncRelayRuntime(
     private val listener: SyncRelayProcessor.Listener = object : SyncRelayProcessor.Listener {}
 ) : SyncRelayWebSocketClient.Listener {
     private lateinit var client: SyncRelayWebSocketClient
+    private val registryBaseUrl = relayBaseUrl.replaceFirst(Regex("^wss://", RegexOption.IGNORE_CASE), "https://")
     private val scheduler = Executors.newSingleThreadScheduledExecutor { task ->
         Thread(task, "daily-shop-sync-retry").apply { isDaemon = true }
     }
@@ -176,7 +177,8 @@ class SyncRelayRuntime(
             relayBaseUrl,
             repository.storeId(),
             repository.localDeviceId(),
-            this
+            this,
+            authentication = repository.relayAuthentication()
         )
     }
 
@@ -185,12 +187,7 @@ class SyncRelayRuntime(
         if (desiredConnection) return
         desiredConnection = true
         reconnectDelaySeconds = 1L
-        try {
-            client.connect()
-        } catch (error: Exception) {
-            listener.onRetryRequired("", error.message ?: "تعذر فتح اتصال وسيط المزامنة")
-            scheduleReconnect()
-        }
+        scheduler.execute { prepareAndConnect() }
     }
 
     @Synchronized
@@ -205,6 +202,31 @@ class SyncRelayRuntime(
 
     val isConnected: Boolean get() = client.isReady
 
+    /** Registry updates are completed before the primary opens its relay socket. */
+    private fun prepareAndConnect() {
+        try {
+            if (repository.localDeviceRole() == "PRIMARY") {
+                repository.syncDeviceRegistry(registryBaseUrl)
+            }
+            synchronized(this) {
+                if (!desiredConnection) return
+            }
+            client.connect()
+        } catch (error: Exception) {
+            listener.onRetryRequired("", error.message ?: "تعذر تجهيز مصادقة وسيط المزامنة")
+            scheduleReconnect()
+        }
+    }
+
+    /** Call after enrolling or revoking a device while the relay is already connected. */
+    fun refreshDeviceRegistry() {
+        if (repository.localDeviceRole() != "PRIMARY") return
+        scheduler.execute {
+            runCatching { repository.syncDeviceRegistry(registryBaseUrl) }
+                .onFailure { listener.onRetryRequired("", it.message ?: "تعذر تحديث سجل شهادات الأجهزة") }
+        }
+    }
+
     private fun scheduleReconnect() {
         synchronized(this) {
             if (!desiredConnection || reconnectTask?.isDone == false) return
@@ -216,12 +238,7 @@ class SyncRelayRuntime(
                     desiredConnection
                 }
                 if (shouldAttempt) {
-                    try {
-                        client.connect()
-                    } catch (error: Exception) {
-                        listener.onRetryRequired("", error.message ?: "تعذرت إعادة وصلة المزامنة")
-                        scheduleReconnect()
-                    }
+                    prepareAndConnect()
                 }
             }, delay, TimeUnit.SECONDS)
         }
