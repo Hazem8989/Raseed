@@ -241,10 +241,16 @@ class TwoDeviceSyncIntegrationTest {
         assertEquals("PENDING", queueStatus(secondaryDb, saleOperationId))
 
         var saleAck: String? = null
+        var saleProtocolError: String? = null
         setLocalDeviceId(primaryId)
         AppDatabase.installForTests(primaryDb)
         val primaryProcessor = SyncRelayProcessor(
             primaryRepository, SyncDomainApplier(context),
+            listener = object : SyncRelayProcessor.Listener {
+                override fun onProtocolError(operationId: String?, message: String) {
+                    saleProtocolError = message
+                }
+            },
             sendFrame = { id, recipient, frame ->
                 assertEquals(saleOperationId, id)
                 assertEquals(secondaryId, recipient)
@@ -253,6 +259,7 @@ class TwoDeviceSyncIntegrationTest {
             }
         )
         primaryProcessor.onEncryptedFrame(secondaryId, saleOperationId, saleFrame)
+        assertEquals("لا ينبغي رفض أمر البيع: $saleProtocolError", null, saleProtocolError)
         assertEquals("POSTED", primaryDb.readableDatabase.rawQuery(
             "SELECT status FROM sales_invoices WHERE id=?", arrayOf(invoiceId)
         ).use { c -> assertTrue(c.moveToFirst()); c.getString(0) })
