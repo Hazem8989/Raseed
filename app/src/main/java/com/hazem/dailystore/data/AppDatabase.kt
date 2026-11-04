@@ -54,6 +54,7 @@ class AppDatabase internal constructor(context: Context, databaseName: String = 
             ensureSyncDeviceRevocationSchema(db)
             ensureSyncActorMappingSchema(db)
             ensureSyncCashAccountMappingSchema(db)
+            ensureSyncCategoryMappingSchema(db)
             db.execSQL(
                 """INSERT INTO app_settings(setting_key, setting_value, updated_at)
                    VALUES('base_currency', 'USD', strftime('%Y-%m-%dT%H:%M:%fZ','now'))"""
@@ -551,9 +552,36 @@ class AppDatabase internal constructor(context: Context, databaseName: String = 
                 version = 26
             } finally { db.endTransaction() }
         }
+        if (version < 27) {
+            db.beginTransaction()
+            try {
+                ensureSyncCategoryMappingSchema(db)
+                db.setTransactionSuccessful()
+                version = 27
+            } finally { db.endTransaction() }
+        }
         if (version != newVersion) {
             throw IllegalStateException("Missing database migration from version $version to $newVersion")
         }
+    }
+
+    private fun ensureSyncCategoryMappingSchema(db: SQLiteDatabase) {
+        db.execSQL("""
+            CREATE TABLE IF NOT EXISTS sync_category_mappings (
+                primary_device_id TEXT NOT NULL,
+                primary_category_id INTEGER NOT NULL CHECK(primary_category_id > 0),
+                secondary_category_id INTEGER NOT NULL,
+                category_name TEXT NOT NULL,
+                mapped_at TEXT NOT NULL,
+                PRIMARY KEY(primary_device_id, primary_category_id),
+                UNIQUE(primary_device_id, category_name),
+                FOREIGN KEY(primary_device_id) REFERENCES sync_devices(device_id)
+                    ON UPDATE RESTRICT ON DELETE RESTRICT,
+                FOREIGN KEY(secondary_category_id) REFERENCES categories(id)
+                    ON UPDATE RESTRICT ON DELETE RESTRICT
+            )
+        """.trimIndent())
+        db.execSQL("CREATE INDEX IF NOT EXISTS idx_sync_category_mappings_local ON sync_category_mappings(secondary_category_id)")
     }
 
     private fun ensureSyncCashAccountMappingSchema(db: SQLiteDatabase) {
@@ -1020,7 +1048,7 @@ class AppDatabase internal constructor(context: Context, databaseName: String = 
 
     companion object {
         const val DATABASE_NAME = "the_daily_shop.db"
-        const val DATABASE_VERSION = 26
+        const val DATABASE_VERSION = 27
 
         @Volatile
         private var INSTANCE: AppDatabase? = null
