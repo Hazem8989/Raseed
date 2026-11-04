@@ -15,7 +15,8 @@ data class CashAccountSummary(
 
 /** Cash boxes and wallets. Balances are derived from opening balances and recorded transactions. */
 class CashAccountRepository(context: Context) {
-    private val database = AppDatabase.getInstance(context)
+    private val appContext = context.applicationContext
+    private val database = AppDatabase.getInstance(appContext)
 
     fun listActive(): List<CashAccountSummary> {
         ensureSystemCashAccounts()
@@ -272,6 +273,7 @@ class CashAccountRepository(context: Context) {
         actorUserId: String, name: String, accountType: String, currencyCode: String,
         openingBalanceMinor: Long = 0L
     ): CashAccountSummary {
+        require(!SyncProtocolRepository(appContext).isConfiguredSecondary()) { "إنشاء الحسابات المالية متاح من الجهاز الأساسي فقط حتى تكتمل مزامنة بيانات الحسابات" }
         val cleanName = name.trim()
         val currency = currencyCode.trim().uppercase(Locale.US)
         require(cleanName.isNotEmpty()) { "اسم الحساب مطلوب" }
@@ -321,6 +323,7 @@ class CashAccountRepository(context: Context) {
         actorRole: String, actorUserId: String, accountId: String,
         name: String, accountType: String, currencyCode: String
     ) {
+        require(!SyncProtocolRepository(appContext).isConfiguredSecondary()) { "تعديل الحسابات المالية متاح من الجهاز الأساسي فقط حتى تكتمل مزامنة بيانات الحسابات" }
         require(actorRole == "ADMIN") { "تعديل الحسابات المالية متاح للمدير فقط" }
         require(actorUserId.isNotBlank()) { "جلسة المدير غير صالحة" }
         val cleanName = name.trim()
