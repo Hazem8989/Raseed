@@ -209,6 +209,64 @@ test("forged certificates and replayed or incorrect challenge proofs are rejecte
   await close(wrong.socket);
 });
 
+test("expired, future-dated, wrong-store and wrong-issuer certificates are rejected", async () => {
+  const deviceId = crypto.randomUUID();
+  const { cert } = await makeCertificate(deviceId);
+
+  const expired = {
+    ...cert,
+    serial: crypto.randomUUID(),
+    issued_at: Date.now() - 2 * 24 * 60 * 60 * 1000,
+    expires_at: Date.now() - 24 * 60 * 60 * 1000,
+  };
+  expired.signature = await sign(rootKeys.privateKey, certificatePayload(expired));
+  assert.equal((await registerCertificate(expired)).status, 401);
+
+  const futureDated = {
+    ...cert,
+    serial: crypto.randomUUID(),
+    issued_at: Date.now() + 5 * 60 * 1000,
+    expires_at: Date.now() + 30 * 24 * 60 * 60 * 1000,
+  };
+  futureDated.signature = await sign(rootKeys.privateKey, certificatePayload(futureDated));
+  assert.equal((await registerCertificate(futureDated)).status, 401);
+
+  const wrongIssuer = {
+    ...cert,
+    serial: crypto.randomUUID(),
+    issuer_device_id: crypto.randomUUID(),
+  };
+  wrongIssuer.signature = await sign(rootKeys.privateKey, certificatePayload(wrongIssuer));
+  assert.equal((await registerCertificate(wrongIssuer)).status, 401);
+
+  const wrongStore = {
+    ...cert,
+    store_id: crypto.randomUUID(),
+    serial: crypto.randomUUID(),
+  };
+  wrongStore.signature = await sign(rootKeys.privateKey, certificatePayload(wrongStore));
+  const wrongStoreResponse = await fetch(`${baseUrl}/v1/devices/${storeId}/${deviceId}/certificate`, {
+    method: "POST", headers: { "Content-Type": "application/json" }, body: json(wrongStore),
+  });
+  assert.equal(wrongStoreResponse.status, 401);
+});
+
+test("forged root revocation cannot revoke an enrolled device", async () => {
+  const { cert, pair } = await makeCertificate(crypto.randomUUID());
+  assert.equal((await registerCertificate(cert)).status, 200);
+  const revocation = {
+    version: 1, store_id: storeId, device_id: cert.device_id,
+    serial: cert.serial, revoked_at: Date.now(),
+  };
+  revocation.signature = await sign(await keyPair(), revokePayload(revocation));
+  const response = await fetch(`${baseUrl}/v1/devices/${storeId}/${cert.device_id}/revoke`, {
+    method: "POST", headers: { "Content-Type": "application/json" }, body: json(revocation),
+  });
+  assert.equal(response.status, 401);
+  const socket = await authenticate(cert.device_id, pair, cert.serial);
+  await close(socket);
+});
+
 test("root-signed revocation closes an active session and blocks reconnection", async () => {
   const { cert, pair } = await makeCertificate(crypto.randomUUID());
   assert.equal((await registerCertificate(cert)).status, 200);
