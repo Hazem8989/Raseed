@@ -1405,6 +1405,8 @@ class SyncDomainApplier(context: Context) {
                 "نوع عملية التصنيف الواردة غير صالح"
             }
             val name = payload.optString("name").trim()
+            val primaryCategoryId = payload.optLong("primary_category_id", 0L)
+            require(primaryCategoryId > 0L) { "معرّف التصنيف الأصلي غير صالح" }
             val payloadCreatedAt = payload.optString("created_at")
             val createdAt = payloadCreatedAt.takeIf {
                 it.matches(Regex("\\d{4}-\\d{2}-\\d{2}T.*"))
@@ -1417,16 +1419,40 @@ class SyncDomainApplier(context: Context) {
             val existing = db.rawQuery(
                 "SELECT id,name FROM categories WHERE lower(trim(name))=? LIMIT 1",
                 arrayOf(name.lowercase(java.util.Locale.ROOT))
-            ).use { c -> if (c.moveToFirst()) c.getString(1) else null }
-            if (existing == null) {
+            ).use { c ->
+                if (c.moveToFirst()) Pair(c.getLong(0), c.getString(1)) else null
+            }
+            val secondaryCategoryId = if (existing == null) {
                 db.insertOrThrow("categories", null, ContentValues().apply {
                     put("name", name)
                     put("created_at", createdAt)
                 })
             } else {
-                require(existing.equals(name, ignoreCase = true)) {
+                require(existing.second.equals(name, ignoreCase = true)) {
                     "اسم التصنيف موجود محلياً بصيغة متعارضة"
                 }
+                existing.first
+            }
+            val mappedLocalId = db.rawQuery(
+                """SELECT secondary_category_id,category_name FROM sync_category_mappings
+                   WHERE primary_device_id=? AND primary_category_id=?""".trimIndent(),
+                arrayOf(authority, primaryCategoryId.toString())
+            ).use { c ->
+                if (c.moveToFirst()) Pair(c.getLong(0), c.getString(1)) else null
+            }
+            if (mappedLocalId != null) {
+                require(mappedLocalId.first == secondaryCategoryId &&
+                    mappedLocalId.second.equals(name, ignoreCase = true)) {
+                    "معرّف التصنيف الأصلي مرتبط مسبقاً بتصنيف محلي مختلف"
+                }
+            } else {
+                db.insertOrThrow("sync_category_mappings", null, ContentValues().apply {
+                    put("primary_device_id", authority)
+                    put("primary_category_id", primaryCategoryId)
+                    put("secondary_category_id", secondaryCategoryId)
+                    put("category_name", name)
+                    put("mapped_at", timestamp())
+                })
             }
             db.update("sync_inbox", ContentValues().apply {
                 put("status", "APPLIED")
