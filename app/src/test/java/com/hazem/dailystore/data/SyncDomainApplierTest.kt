@@ -114,10 +114,10 @@ class SyncDomainApplierTest {
         assertTrue(applier.applyReceivedOperation(secondId).applied)
 
         val store = StoreRepository(context)
-        val firstLocalId = store.resolveSecondaryCategoryId(primaryId, 2L)
-        val secondLocalId = store.resolveSecondaryCategoryId(primaryId, 9L)
-        assertTrue(firstLocalId != null && firstLocalId != 2L)
-        assertTrue(secondLocalId != null && secondLocalId != 9L)
+        val firstLocalId = requireNotNull(store.resolveSecondaryCategoryId(primaryId, 2L))
+        val secondLocalId = requireNotNull(store.resolveSecondaryCategoryId(primaryId, 9L))
+        assertTrue(firstLocalId != 2L)
+        assertTrue(secondLocalId != 9L)
         assertTrue(firstLocalId != secondLocalId)
         assertEquals("مشروبات", db.rawQuery(
             "SELECT name FROM categories WHERE id=?", arrayOf(firstLocalId.toString())
@@ -147,7 +147,7 @@ class SyncDomainApplierTest {
         }
         assertEquals(categoryCount, db.rawQuery("SELECT COUNT(*) FROM categories", null)
             .use { c -> c.moveToFirst(); c.getInt(0) })
-        assertTrue(store.resolveSecondaryCategoryId(primaryId, 2L) !in listOf(501L, 902L))
+        assertTrue(store.resolveSecondaryCategoryId(primaryId, 2L)!! !in listOf(501L, 902L))
         assertEquals("RECEIVED", inboxStatus(conflictId))
     }
 
