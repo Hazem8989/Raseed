@@ -60,7 +60,11 @@ jobs:
         run: |
           set -e
           echo "sdk.dir=$ANDROID_SDK_ROOT" > local.properties
-          /tmp/gradle-8.9/bin/gradle --no-daemon clean testDebugUnitTest
+          if ! /tmp/gradle-8.9/bin/gradle --no-daemon clean testDebugUnitTest; then
+            echo "===== JUNIT FAILURE DETAILS ====="
+            find app/build/test-results/testDebugUnitTest -type f -name '*.xml' -maxdepth 1 -print -exec cat {} \;
+            exit 1
+          fi
 
       - name: Detect configured release signing
         env:
