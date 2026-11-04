@@ -195,16 +195,8 @@ class TwoDeviceSyncIntegrationTest {
         val warehouseId = primaryDb.readableDatabase.rawQuery(
             "SELECT id FROM warehouses WHERE is_default=1 AND is_active=1 LIMIT 1", null
         ).use { c -> assertTrue(c.moveToFirst()); c.getString(0) }
-        primaryDb.writableDatabase.execSQL(
-            "INSERT INTO inventory_balances(product_id,warehouse_id,quantity,updated_at) VALUES(?,?,10,?)",
-            arrayOf(productId, warehouseId, "2026-11-04T10:00:00Z")
-        )
-        primaryDb.writableDatabase.execSQL(
-            """INSERT INTO inventory_movements(id,product_id,warehouse_id,movement_type,quantity_delta,
-               unit_cost_usd_cents,source_type,source_id,operation_id,note,created_by,created_at)
-               VALUES(?,?,?,'OPENING',10,100,'OPENING','opening-sync-test',NULL,'رصيد افتتاحي',?,?)""",
-            arrayOf(UUID.randomUUID().toString(), productId, warehouseId, primaryAdminId, "2026-11-04T10:00:00Z")
-        )
+        // saveProduct(... openingQuantity = 10.0) creates the opening balance,
+        // movement and FIFO cost layer atomically; do not insert a duplicate balance.
 
         val invoiceId = "secondary-sale-" + UUID.randomUUID()
         val saleOperationId = UUID.randomUUID().toString()
