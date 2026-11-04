@@ -97,7 +97,7 @@ class StoreTimeTest {
         ).use { c -> assertTrue(c.moveToFirst()); c.getString(0) }
         assertEquals("2026-11-03", transferDate)
         assertEquals("2026-11-03", walletDate)
-        assertEquals(26, database.readableDatabase.version)
+        assertEquals(AppDatabase.DATABASE_VERSION, database.readableDatabase.version)
     }
 
 }
