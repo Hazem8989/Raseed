@@ -295,7 +295,7 @@ class TwoDeviceSyncIntegrationTest {
         primaryProcessor.onEncryptedFrame(secondaryId, saleOperationId, saleFrame)
         // Keep the primary-side rejection visible in the CI JUnit XML report.
         assertEquals("لا ينبغي رفض أمر البيع: $saleProtocolError", null, saleProtocolError)
-        assertEquals("POSTED", primaryDb.readableDatabase.rawQuery(
+        assertEquals("PAID", primaryDb.readableDatabase.rawQuery(
             "SELECT status FROM sales_invoices WHERE id=?", arrayOf(invoiceId)
         ).use { c -> assertTrue(c.moveToFirst()); c.getString(0) })
         assertEquals(8.0, primaryDb.readableDatabase.rawQuery(
