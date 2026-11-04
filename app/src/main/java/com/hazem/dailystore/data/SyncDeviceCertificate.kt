@@ -20,7 +20,7 @@ object SyncDeviceCertificate {
         rootPrivateKey: PrivateKey,
         nowMillis: Long = System.currentTimeMillis()
     ): String {
-        requireUuid(storeId); requireUuid(issuerDeviceId); requireUuid(deviceId)
+        require(storeId.isNotBlank()); requireUuid(issuerDeviceId); requireUuid(deviceId)
         val key = Base64.decode(devicePublicKeyBase64, Base64.DEFAULT)
         require(key.size in 64..256)
         val serial = UUID.randomUUID().toString()
