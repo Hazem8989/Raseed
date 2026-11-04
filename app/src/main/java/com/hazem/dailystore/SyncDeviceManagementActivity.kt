@@ -38,7 +38,7 @@ class SyncDeviceManagementActivity : Activity() {
         super.onCreate(savedInstanceState)
         actorUserId = intent.getStringExtra(EXTRA_ACTOR_USER_ID).orEmpty()
         if (actorUserId.isBlank()) { finish(); return }
-        repository = SyncProtocolRepository(this)
+        repository = SyncProtocolRepository(applicationContext)
         if (!runCatching { repository.localDeviceRole() }.isSuccess) {
             Toast.makeText(this, "تعذر قراءة إعدادات مزامنة الأجهزة", Toast.LENGTH_LONG).show()
             finish(); return
@@ -46,7 +46,8 @@ class SyncDeviceManagementActivity : Activity() {
         render()
         val savedEndpoint = preferences.getString(KEY_RELAY_WSS, null)
         if (!savedEndpoint.isNullOrBlank() && repository.localDeviceRole() != null) {
-            SyncRelaySession.connect(applicationContext, savedEndpoint, repository)
+            runCatching { SyncRelaySession.connect(applicationContext, savedEndpoint, repository) }
+                .onFailure { status.text = "تعذر بدء اتصال الوسيط: ${it.message ?: "عنوان غير صالح"}" }
         }
     }
 
@@ -86,6 +87,10 @@ class SyncDeviceManagementActivity : Activity() {
             addButton(root, "إنشاء دعوة اقتران لجهاز ثانوي") { createInvitation() }
             addButton(root, "تسجيل طلب اقتران وارد من جهاز ثانوي") { enrollSecondaryFromRequest() }
             addButton(root, "إلغاء شهادة جهاز ثانوي") { revokeSecondary() }
+            addButton(root, "إعداد عنوان وسيط المزامنة والاتصال") { configureRelay() }
+        } else if (roleNow == "SECONDARY") {
+            addButton(root, "إنشاء طلب إعادة اقتران لهذا الجهاز") { createSecondaryRequest() }
+            addButton(root, "قبول شهادة اقتران جديدة") { acceptEnrollmentResponse() }
             addButton(root, "إعداد عنوان وسيط المزامنة والاتصال") { configureRelay() }
         } else {
             addButton(root, "إنشاء طلب اقتران لهذا الهاتف") { createSecondaryRequest() }
@@ -257,7 +262,7 @@ class SyncDeviceManagementActivity : Activity() {
                     .put("store_time_zone_id", enrollment.storeTimeZoneId)
                     .put("device_certificate_json", enrollment.deviceCertificateJson)
                     .toString()
-                main.post { copyText("بيانات إكمال الاقتران", response) }
+                main.post { copyText("بيانات اقتران سرية — انقلها مباشرة للجهاز المقصود", response) }
                 SyncRelaySession.refreshDeviceRegistry()
             }
         }
@@ -307,8 +312,8 @@ class SyncDeviceManagementActivity : Activity() {
         prompt("عنوان وسيط المزامنة", "wss://your-worker.workers.dev") { endpoint ->
             runTask("حفظ عنوان الوسيط وبدء المصادقة") {
                 require(endpoint.startsWith("wss://", ignoreCase = true)) { "يجب إدخال عنوان WSS مشفر" }
-                preferences.edit().putString(KEY_RELAY_WSS, endpoint).apply()
                 SyncRelaySession.connect(applicationContext, endpoint, repository)
+                preferences.edit().putString(KEY_RELAY_WSS, endpoint).apply()
             }
         }
     }

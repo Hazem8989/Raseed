@@ -43,6 +43,7 @@ import com.hazem.dailystore.data.CurrencyConverter
 import com.hazem.dailystore.data.StoreRepository
 import com.hazem.dailystore.data.StoreTime
 import com.hazem.dailystore.data.SyncProtocolRepository
+import com.hazem.dailystore.data.SyncRelaySession
 import com.hazem.dailystore.data.InvoiceRepository
 import com.hazem.dailystore.data.InvoiceLineInput
 import com.hazem.dailystore.data.SupplierRepository
@@ -408,6 +409,19 @@ class MainActivity : Activity() {
         view.id = STABLE_VIEW_ID_BASE + next[0]++
         if (view is ViewGroup) {
             for (index in 0 until view.childCount) assignStableViewIds(view.getChildAt(index), next)
+        }
+    }
+
+    override fun onResume() {
+        super.onResume()
+        if (currentUserId.isNullOrBlank()) return
+        val endpoint = getSharedPreferences("daily_shop_sync_relay", MODE_PRIVATE)
+            .getString("relay_wss_url", null) ?: return
+        runCatching {
+            val repository = SyncProtocolRepository(applicationContext)
+            if (repository.localDeviceRole() != null) {
+                SyncRelaySession.connect(applicationContext, endpoint, repository)
+            }
         }
     }
 
