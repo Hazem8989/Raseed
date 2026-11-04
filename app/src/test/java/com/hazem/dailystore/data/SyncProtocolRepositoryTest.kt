@@ -581,6 +581,71 @@ class SyncProtocolRepositoryTest {
         secret.fill(0)
     }
 
+    @Test fun operationIdReplayMustMatchOriginSequenceAndEnvelopeMetadata() {
+        repository.configureAsPrimary(adminId, "الرئيسي")
+        val firstId = UUID.randomUUID().toString()
+        val firstInvitation = repository.createPairingInvitation(adminId)
+        enrollRemote(firstInvitation, firstId, "الثانوي الأول")
+        repository.mapSecondaryActor(adminId, firstId, "remote-admin-1", adminId)
+        val firstSecret = vault.load(firstId)!!
+        val storeId = repository.storeId()
+        val operationId = UUID.randomUUID().toString()
+        val payload = """{"business_operation":"POST_SALES_INVOICE","invoice_id":"shared-id","total_usd_cents":2500}"""
+        val createdAt = "2026-11-04T12:00:00Z"
+        val first = SyncEnvelopeSecurity.create(
+            storeId, operationId, 1L, firstId, "remote-admin-1", "CREATE",
+            "SALES_INVOICE", "shared-id", 0L, payload, createdAt, firstSecret
+        )
+        val encodedFirst = SyncEnvelopeSecurity.encode(first)
+        assertEquals(SyncInboxDisposition.RECEIVED, repository.recordIncomingFromSecondary(encodedFirst))
+
+        // A lost ACK must still be recoverable for the exact accepted operation,
+        // even if the manager later disables that actor mapping.
+        database.writableDatabase.update(
+            "sync_actor_mappings", ContentValues().apply { put("is_active", 0) },
+            "device_id=?", arrayOf(firstId)
+        )
+        assertEquals(SyncInboxDisposition.DUPLICATE, repository.recordIncomingFromSecondary(encodedFirst))
+
+        val secondId = UUID.randomUUID().toString()
+        val secondInvitation = repository.createPairingInvitation(adminId)
+        enrollRemote(secondInvitation, secondId, "الثانوي الثاني")
+        repository.mapSecondaryActor(adminId, secondId, "remote-admin-2", adminId)
+        val secondSecret = vault.load(secondId)!!
+        val crossDeviceReuse = SyncEnvelopeSecurity.create(
+            storeId, operationId, 1L, secondId, "remote-admin-2", "CREATE",
+            "SALES_INVOICE", "shared-id", 0L, payload, createdAt, secondSecret
+        )
+        assertEquals(
+            SyncInboxDisposition.CONFLICT,
+            repository.recordIncomingFromSecondary(SyncEnvelopeSecurity.encode(crossDeviceReuse))
+        )
+
+        val changedSequence = SyncEnvelopeSecurity.create(
+            storeId, operationId, 2L, firstId, "remote-admin-1", "CREATE",
+            "SALES_INVOICE", "shared-id", 0L, payload, createdAt, firstSecret
+        )
+        assertEquals(
+            SyncInboxDisposition.CONFLICT,
+            repository.recordIncomingFromSecondary(SyncEnvelopeSecurity.encode(changedSequence))
+        )
+
+        database.readableDatabase.rawQuery(
+            "SELECT last_sequence FROM sync_cursors WHERE device_id=?", arrayOf(firstId)
+        ).use { c -> assertTrue(c.moveToFirst()); assertEquals(1L, c.getLong(0)) }
+        database.readableDatabase.rawQuery(
+            "SELECT last_sequence FROM sync_cursors WHERE device_id=?", arrayOf(secondId)
+        ).use { c -> assertTrue(c.moveToFirst()); assertEquals(0L, c.getLong(0)) }
+        assertEquals(1, database.readableDatabase.rawQuery(
+            "SELECT COUNT(*) FROM sync_inbox WHERE operation_id=?", arrayOf(operationId)
+        ).use { c -> c.moveToFirst(); c.getInt(0) })
+        assertEquals(2, database.readableDatabase.rawQuery(
+            "SELECT COUNT(*) FROM sync_conflicts WHERE operation_id=?", arrayOf(operationId)
+        ).use { c -> c.moveToFirst(); c.getInt(0) })
+        firstSecret.fill(0)
+        secondSecret.fill(0)
+    }
+
     @Test fun primaryRejectsSequenceGapWithoutAdvancingDurableCursor() {
         repository.configureAsPrimary(adminId, "الرئيسي")
         val invitation = repository.createPairingInvitation(adminId)

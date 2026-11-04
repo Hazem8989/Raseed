@@ -841,6 +841,43 @@ class SyncProtocolRepository(private val context: Context, private val credentia
                 arrayOf(envelope.originDeviceId)
             ).use { it.moveToFirst() }
             require(active) { "تم إلغاء تسجيل الجهاز المرسل" }
+            // Resolve an existing operation before re-checking mutable actor permissions.
+            // This lets an already accepted operation receive its lost ACK after a
+            // permission change, while never allowing a different device or envelope
+            // metadata to impersonate that operation ID.
+            val existing = db.rawQuery(
+                """SELECT payload_sha256,origin_device_id,sequence_number,operation_type,
+                          entity_type,entity_id,origin_created_at,payload_json
+                   FROM sync_inbox WHERE operation_id=?""".trimIndent(),
+                arrayOf(envelope.operationId)
+            ).use { c ->
+                if (!c.moveToFirst()) null else arrayOf(
+                    c.getString(0), c.getString(1), c.getLong(2).toString(), c.getString(3),
+                    c.getString(4), c.getString(5), c.getString(6), c.getString(7)
+                )
+            }
+            if (existing != null) {
+                val exactReplay = existing[0] == envelope.payloadSha256 &&
+                    existing[1] == envelope.originDeviceId &&
+                    existing[2].toLong() == envelope.sequenceNumber &&
+                    existing[3] == envelope.operationType &&
+                    existing[4] == envelope.entityType &&
+                    existing[5] == envelope.entityId &&
+                    existing[6] == envelope.createdAt
+                if (exactReplay) {
+                    db.setTransactionSuccessful()
+                    return SyncInboxDisposition.DUPLICATE
+                }
+                db.insertOrThrow("sync_conflicts", null, ContentValues().apply {
+                    put("id", UUID.randomUUID().toString()); put("operation_id", envelope.operationId)
+                    put("entity_type", envelope.entityType); put("entity_id", envelope.entityId)
+                    put("local_payload_json", existing[7]); put("remote_payload_json", envelope.payloadJson)
+                    put("created_at", timestamp())
+                })
+                db.setTransactionSuccessful()
+                return SyncInboxDisposition.CONFLICT
+            }
+
             val payload = JSONObject(envelope.payloadJson)
             val businessOperation = payload.optString("business_operation")
             val requiredPermission = requiredPermissionForBusinessOperation(businessOperation)
@@ -853,24 +890,6 @@ class SyncProtocolRepository(private val context: Context, private val credentia
             ).use { c -> if (c.moveToFirst()) c.getString(0) else null }
                 ?: throw IllegalArgumentException("لم يتم ربط مستخدم الجهاز الثانوي بحساب مخول على الجهاز الأساسي")
             PermissionPolicy.require(db, mappedUser, requiredPermission)
-            val existing = db.rawQuery(
-                "SELECT payload_sha256 FROM sync_inbox WHERE operation_id=?",
-                arrayOf(envelope.operationId)
-            ).use { c -> if (c.moveToFirst()) c.getString(0) else null }
-            if (existing != null) {
-                if (existing == envelope.payloadSha256) {
-                    db.setTransactionSuccessful()
-                    return SyncInboxDisposition.DUPLICATE
-                }
-                db.insertOrThrow("sync_conflicts", null, ContentValues().apply {
-                    put("id", UUID.randomUUID().toString()); put("operation_id", envelope.operationId)
-                    put("entity_type", envelope.entityType); put("entity_id", envelope.entityId)
-                    put("local_payload_json", "{}"); put("remote_payload_json", envelope.payloadJson)
-                    put("created_at", timestamp())
-                })
-                db.setTransactionSuccessful()
-                return SyncInboxDisposition.CONFLICT
-            }
             val last = db.rawQuery(
                 "SELECT last_sequence FROM sync_cursors WHERE device_id=?",
                 arrayOf(envelope.originDeviceId)
