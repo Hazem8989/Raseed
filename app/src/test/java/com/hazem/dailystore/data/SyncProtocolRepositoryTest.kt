@@ -38,6 +38,96 @@ class SyncProtocolRepositoryTest {
 
     @After fun tearDown() { database.close() }
 
+
+    @Test fun primaryCreatesEncryptedSignedApplicationAckOnlyAfterDurableApply() {
+        repository.configureAsPrimary(adminId, "الرئيسي")
+        val context = RuntimeEnvironment.getApplication()
+        val remoteId = UUID.randomUUID().toString()
+        val remoteIdentity = SyncDeviceAuthenticator.getOrCreate(context, remoteId)
+        val remotePublicKey = android.util.Base64.encodeToString(
+            remoteIdentity.public.encoded, android.util.Base64.NO_WRAP
+        )
+        val invitation = repository.createPairingInvitation(adminId)
+        val enrolled = repository.enrollSecondaryDevice(
+            adminId, invitation.token, remoteId, "الثانوي", remotePublicKey
+        )
+        val operationId = UUID.randomUUID().toString()
+        val payloadHash = "b".repeat(64)
+        val now = "2026-11-04T12:00:00.000Z"
+        database.writableDatabase.insertOrThrow("sync_inbox", null, ContentValues().apply {
+            put("operation_id", operationId)
+            put("origin_device_id", remoteId)
+            put("sequence_number", 1L)
+            put("operation_type", "CREATE")
+            put("entity_type", "OPERATING_EXPENSE")
+            put("entity_id", "expense-$operationId")
+            put("payload_json", """{"business_operation":"POST_OPERATING_EXPENSE"}""")
+            put("payload_sha256", payloadHash)
+            put("status", "APPLIED")
+            put("received_at", now)
+            put("applied_at", now)
+            put("origin_created_at", now)
+        })
+        val frameJson = repository.createEncryptedApplicationAck(remoteId, operationId)
+        val frame = org.json.JSONObject(frameJson)
+        assertEquals(operationId, frame.getString("operation_id"))
+        assertEquals(remoteId, frame.getString("recipient_device_id"))
+        assertEquals("ECDSA_P256_SHA256", frame.getString("signature_algorithm"))
+        val signed = org.json.JSONObject(frame.toString()).apply {
+            remove("signature")
+            remove("signature_algorithm")
+            remove("sender_key_fingerprint")
+        }
+        val primaryId = repository.hasConfiguredPrimary().let {
+            database.readableDatabase.rawQuery(
+                "SELECT state_value FROM sync_protocol_state WHERE state_key='authority_device_id'", null
+            ).use { c -> assertTrue(c.moveToFirst()); c.getString(0) }
+        }
+        val signingContext = SyncDeviceAuthenticator.SigningContext(
+            enrolled.storeId, primaryId, remoteId, operationId
+        )
+        val signature = android.util.Base64.decode(frame.getString("signature"), android.util.Base64.DEFAULT)
+        assertTrue(SyncDeviceAuthenticator.verify(
+            repository.trustedPeerPublicKey(primaryId)!!, signingContext,
+            signed.toString().toByteArray(Charsets.UTF_8), signature
+        ))
+        val secret = vault.load(remoteId)!!
+        val clear = SyncEnvelopeCipher.decrypt(
+            android.util.Base64.decode(
+                frame.getString("ciphertext"),
+                android.util.Base64.URL_SAFE or android.util.Base64.NO_WRAP or android.util.Base64.NO_PADDING
+            ),
+            SecretKeySpec(secret, "AES"),
+            SyncEnvelopeCipher.PeerContext(enrolled.storeId, primaryId, remoteId, operationId)
+        )!!
+        secret.fill(0)
+        val ack = org.json.JSONObject(clear.toString(Charsets.UTF_8))
+        assertEquals("APPLIED", ack.getString("ack_status"))
+        assertEquals(payloadHash, ack.getString("payload_sha256"))
+        assertEquals(1L, ack.getLong("sequence_number"))
+    }
+
+    @Test fun primaryCannotCreateApplicationAckForReceivedOrOtherDeviceOperation() {
+        repository.configureAsPrimary(adminId, "الرئيسي")
+        val remoteId = UUID.randomUUID().toString()
+        val invitation = repository.createPairingInvitation(adminId)
+        repository.enrollSecondaryDevice(adminId, invitation.token, remoteId, "الثانوي")
+        val operationId = UUID.randomUUID().toString()
+        val now = "2026-11-04T12:00:00.000Z"
+        database.writableDatabase.insertOrThrow("sync_inbox", null, ContentValues().apply {
+            put("operation_id", operationId); put("origin_device_id", remoteId)
+            put("sequence_number", 1L); put("operation_type", "CREATE")
+            put("entity_type", "OPERATING_EXPENSE"); put("entity_id", "expense-$operationId")
+            put("payload_json", """{"business_operation":"POST_OPERATING_EXPENSE"}""")
+            put("payload_sha256", "c".repeat(64)); put("status", "RECEIVED")
+            put("received_at", now); put("origin_created_at", now)
+        })
+        var rejected = false
+        try { repository.createEncryptedApplicationAck(remoteId, operationId) }
+        catch (_: IllegalArgumentException) { rejected = true }
+        assertTrue(rejected)
+    }
+
     @Test fun primarySetupIsIdempotentAndAudited() {
         repository.configureAsPrimary(adminId, "الهاتف الرئيسي")
         repository.configureAsPrimary(adminId, "الهاتف الرئيسي")
