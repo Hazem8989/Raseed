@@ -14,7 +14,7 @@ import java.util.UUID
 import android.util.Base64
 
 data class SyncPairingInvitation(val invitationId: String, val token: String, val expiresAt: String)
-data class SyncEnrollment(val deviceId: String, val credential: String, val storeId: String, val primaryDeviceId: String, val storeTimeZoneId: String)
+data class SyncEnrollment(val deviceId: String, val credential: String, val storeId: String, val primaryDeviceId: String, val storeTimeZoneId: String, val primaryPublicKeyBase64: String? = null)
 data class SyncOutboxItem(
     val operationId: String, val sequence: Long, val operationType: String,
     val entityType: String, val entityId: String, val payloadJson: String,
@@ -95,7 +95,8 @@ class SyncProtocolRepository(private val context: Context, private val credentia
 
     /** Called by the primary after a future authenticated pairing handshake. */
     fun enrollSecondaryDevice(
-        actorUserId: String, invitationToken: String, remoteDeviceId: String, displayName: String
+        actorUserId: String, invitationToken: String, remoteDeviceId: String, displayName: String,
+        remotePublicKeyBase64: String? = null
     ): SyncEnrollment {
         val cleanName = displayName.trim()
         require(cleanName.isNotEmpty() && cleanName.length <= 80) { "اسم الجهاز غير صالح" }
@@ -142,6 +143,14 @@ class SyncProtocolRepository(private val context: Context, private val credentia
             }, "device_id=?", arrayOf(remoteDeviceId))
             db.update("sync_pairing_invitations", ContentValues().apply { put("consumed_at", now) },
                 "invitation_id=?", arrayOf(invitation))
+            if (remotePublicKeyBase64 != null) {
+                storeDevicePublicKey(db, remoteDeviceId, remotePublicKeyBase64, now)
+            }
+            val localIdentity = SyncDeviceAuthenticator.getOrCreate(context, SyncDeviceIdentity.getOrCreate(context))
+            storeDevicePublicKey(
+                db, SyncDeviceIdentity.getOrCreate(context),
+                Base64.encodeToString(localIdentity.public.encoded, Base64.NO_WRAP), now
+            )
             db.insertWithOnConflict("sync_cursors", null, ContentValues().apply {
                 put("device_id", remoteDeviceId); put("last_sequence", 0L); put("updated_at", now)
             }, SQLiteDatabase.CONFLICT_REPLACE)
@@ -154,7 +163,8 @@ class SyncProtocolRepository(private val context: Context, private val credentia
                 remoteDeviceId, credential,
                 state(db, "store_id") ?: error("معرّف المتجر غير مهيأ"),
                 SyncDeviceIdentity.getOrCreate(context),
-                StoreTime.zoneId(db)
+                StoreTime.zoneId(db),
+                Base64.encodeToString(localIdentity.public.encoded, Base64.NO_WRAP)
             )
         } catch (error: Exception) {
             if (credentialSaved) credentialVault.remove(remoteDeviceId)
@@ -172,7 +182,8 @@ class SyncProtocolRepository(private val context: Context, private val credentia
     fun configureAsSecondary(
         actorUserId: String, storeId: String, primaryDeviceId: String,
         credential: String, displayName: String,
-        storeTimeZoneId: String = StoreTime.DEFAULT_ZONE_ID
+        storeTimeZoneId: String = StoreTime.DEFAULT_ZONE_ID,
+        primaryPublicKeyBase64: String? = null
     ) {
         require(storeId.isNotBlank() && displayName.trim().isNotEmpty() && displayName.length <= 80)
         require(StoreTime.isValidZoneId(storeTimeZoneId)) { "منطقة المتجر الزمنية غير صالحة" }
@@ -212,6 +223,14 @@ class SyncProtocolRepository(private val context: Context, private val credentia
             db.insertWithOnConflict("sync_cursors", null, ContentValues().apply {
                 put("device_id", primaryDeviceId); put("last_sequence", 0L); put("updated_at", now)
             }, SQLiteDatabase.CONFLICT_IGNORE)
+            if (primaryPublicKeyBase64 != null) {
+                storeDevicePublicKey(db, primaryDeviceId, primaryPublicKeyBase64, now)
+            }
+            val localIdentity = SyncDeviceAuthenticator.getOrCreate(context, localDeviceId)
+            storeDevicePublicKey(
+                db, localDeviceId,
+                Base64.encodeToString(localIdentity.public.encoded, Base64.NO_WRAP), now
+            )
             putState(db, "authority_device_id", primaryDeviceId, now)
             putState(db, "local_device_role", "SECONDARY", now)
             putState(db, "store_id", storeId, now)
@@ -231,6 +250,57 @@ class SyncProtocolRepository(private val context: Context, private val credentia
         } finally {
             db.endTransaction()
             secret.fill(0)
+        }
+    }
+
+    private fun storeDevicePublicKey(
+        db: SQLiteDatabase, deviceId: String, encodedBase64: String, now: String
+    ) {
+        val encoded = runCatching {
+            Base64.decode(encodedBase64, Base64.DEFAULT)
+        }.getOrElse { throw IllegalArgumentException("المفتاح العام للجهاز غير صالح") }
+        require(encoded.size in 64..256) { "حجم المفتاح العام غير صالح" }
+        val publicKey = runCatching {
+            java.security.KeyFactory.getInstance("EC")
+                .generatePublic(java.security.spec.X509EncodedKeySpec(encoded))
+        }.getOrElse { throw IllegalArgumentException("صيغة المفتاح العام غير مدعومة") }
+        require(publicKey.algorithm.equals("EC", ignoreCase = true)) {
+            "خوارزمية هوية الجهاز غير مدعومة"
+        }
+        val fingerprint = SyncDeviceAuthenticator.fingerprint(encoded)
+        val existing = db.rawQuery(
+            "SELECT public_key_fingerprint FROM sync_device_public_keys WHERE device_id=?",
+            arrayOf(deviceId)
+        ).use { c -> if (c.moveToFirst()) c.getString(0) else null }
+        require(existing == null || existing == fingerprint) {
+            "تغيير مفتاح جهاز مسجل يتطلب إلغاء الاقتران وإعادة تسجيله"
+        }
+        db.insertWithOnConflict("sync_device_public_keys", null, ContentValues().apply {
+            put("device_id", deviceId)
+            put("public_key_base64", Base64.encodeToString(encoded, Base64.NO_WRAP))
+            put("public_key_fingerprint", fingerprint)
+            put("algorithm", "EC_P256_SHA256")
+            put("status", "ACTIVE")
+            put("enrolled_at", now)
+            putNull("revoked_at")
+        }, SQLiteDatabase.CONFLICT_REPLACE)
+    }
+
+    /** Returns a pinned public key only for an active enrolled peer. */
+    fun trustedPeerPublicKey(deviceId: String): ByteArray? {
+        if (deviceId.isBlank()) return null
+        val db = database.readableDatabase
+        val activeDevice = db.rawQuery(
+            "SELECT 1 FROM sync_devices WHERE device_id=? AND status='ACTIVE'",
+            arrayOf(deviceId)
+        ).use { it.moveToFirst() }
+        if (!activeDevice) return null
+        return db.rawQuery(
+            "SELECT public_key_base64 FROM sync_device_public_keys WHERE device_id=? AND status='ACTIVE'",
+            arrayOf(deviceId)
+        ).use { c ->
+            if (!c.moveToFirst()) null
+            else runCatching { Base64.decode(c.getString(0), Base64.DEFAULT) }.getOrNull()
         }
     }
 
@@ -923,6 +993,9 @@ class SyncProtocolRepository(private val context: Context, private val credentia
             }
             val now = timestamp()
             db.update("sync_devices", ContentValues().apply {
+                put("status", "REVOKED"); put("revoked_at", now)
+            }, "device_id=?", arrayOf(remoteDeviceId))
+            db.update("sync_device_public_keys", ContentValues().apply {
                 put("status", "REVOKED"); put("revoked_at", now)
             }, "device_id=?", arrayOf(remoteDeviceId))
             audit(db, actorUserId, "SYNC_DEVICE_REVOKED", remoteDeviceId, before,
