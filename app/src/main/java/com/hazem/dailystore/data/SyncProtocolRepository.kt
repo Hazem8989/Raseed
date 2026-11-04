@@ -1610,7 +1610,7 @@ class SyncProtocolRepository(private val context: Context, private val credentia
     fun storeId(): String = state(database.readableDatabase, "store_id")
         ?: throw IllegalStateException("معرّف المتجر غير مهيأ")
 
-    fun pendingOutbox(limit: Int = 100): List<SyncOutboxItem> {    fun pendingOutbox(limit: Int = 100): List<SyncOutboxItem> {
+    fun pendingOutbox(limit: Int = 100): List<SyncOutboxItem> {
         require(limit in 1..500)
         val items = mutableListOf<SyncOutboxItem>()
         database.readableDatabase.rawQuery(
