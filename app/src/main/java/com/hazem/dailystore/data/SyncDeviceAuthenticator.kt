@@ -39,9 +39,26 @@ object SyncDeviceAuthenticator {
         }
     }
 
+    @Volatile
+    private var testKeyPairProvider: ((Context, String) -> KeyPair)? = null
+
+    /**
+     * Test-only seam. Release builds never consult this provider; production keys
+     * are always generated and retained by Android Keystore.
+     */
+    internal fun installTestKeyPairProvider(provider: (Context, String) -> KeyPair) {
+        check(com.hazem.dailystore.BuildConfig.DEBUG) {
+            "Test key providers are disabled in release builds"
+        }
+        testKeyPairProvider = provider
+    }
+
     /** Generate once; the private key is never exported from Android Keystore. */
     fun getOrCreate(context: Context, deviceId: String): KeyPair {
         require(deviceId.isNotBlank())
+        if (com.hazem.dailystore.BuildConfig.DEBUG) {
+            testKeyPairProvider?.let { return it(context, deviceId) }
+        }
         val alias = aliasFor(deviceId)
         val keyStore = java.security.KeyStore.getInstance(ANDROID_KEYSTORE).apply { load(null) }
         val existing = keyStore.getCertificate(alias)
