@@ -4,6 +4,9 @@ export interface Env {
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const MAX_FRAME_CHARS = 700_000;
+const MAX_CONNECTIONS_PER_STORE = 64;
+const MAX_MESSAGES_PER_SOCKET = 60;
+const MESSAGE_WINDOW_MS = 10_000;
 
 export default {
   async fetch(request: Request, env: Env): Promise<Response> {
@@ -29,6 +32,8 @@ export default {
 } satisfies ExportedHandler<Env>;
 
 export class SyncRoom implements DurableObject {
+  private readonly messageWindows = new Map<WebSocket, { startedAt: number; count: number }>();
+
   constructor(private readonly state: DurableObjectState) {}
 
   async fetch(request: Request): Promise<Response> {
@@ -39,6 +44,14 @@ export class SyncRoom implements DurableObject {
     const deviceId = match[1];
     if (!UUID.test(deviceId)) return new Response("Invalid device identifier", { status: 400 });
 
+    // Reject duplicate sessions for one device and cap room occupancy before accepting.
+    if (this.state.getWebSockets(deviceId).length > 0) {
+      return new Response("Device already connected", { status: 409 });
+    }
+    if (this.state.getWebSockets().length >= MAX_CONNECTIONS_PER_STORE) {
+      return new Response("Store relay capacity reached", { status: 503 });
+    }
+
     const pair = new WebSocketPair();
     const client = pair[0];
     const server = pair[1];
@@ -48,6 +61,19 @@ export class SyncRoom implements DurableObject {
   }
 
   async webSocketMessage(sender: WebSocket, message: string | ArrayBuffer): Promise<void> {
+    const now = Date.now();
+    const window = this.messageWindows.get(sender);
+    if (!window || now - window.startedAt >= MESSAGE_WINDOW_MS) {
+      this.messageWindows.set(sender, { startedAt: now, count: 1 });
+    } else {
+      window.count += 1;
+      if (window.count > MAX_MESSAGES_PER_SOCKET) {
+        sender.send(JSON.stringify({ type: "error", code: "RATE_LIMITED" }));
+        try { sender.close(1008, "rate limited"); } catch { /* already closed */ }
+        this.messageWindows.delete(sender);
+        return;
+      }
+    }
     if (typeof message !== "string" || message.length > MAX_FRAME_CHARS) {
       sender.send(JSON.stringify({ type: "error", code: "INVALID_FRAME" }));
       return;
@@ -94,10 +120,12 @@ export class SyncRoom implements DurableObject {
   }
 
   async webSocketClose(socket: WebSocket): Promise<void> {
+    this.messageWindows.delete(socket);
     try { socket.close(1000, "closed"); } catch { /* already closed */ }
   }
 
   async webSocketError(socket: WebSocket): Promise<void> {
+    this.messageWindows.delete(socket);
     try { socket.close(1011, "transport error"); } catch { /* already closed */ }
   }
 }
