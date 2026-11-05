@@ -24,12 +24,16 @@ class SyncForegroundService : Service() {
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        val endpoint = getSharedPreferences(PREFS, MODE_PRIVATE)
-            .getString(ENDPOINT_KEY, null)
-        if (endpoint.isNullOrBlank()) {
+        if (!shouldRun(this)) {
             stopSelf(startId)
             return START_NOT_STICKY
         }
+        val endpoint = getSharedPreferences(PREFS, MODE_PRIVATE)
+            .getString(ENDPOINT_KEY, null)
+            ?: run {
+                stopSelf(startId)
+                return START_NOT_STICKY
+            }
 
         startVisibleForeground()
         try {
@@ -104,6 +108,12 @@ class SyncForegroundService : Service() {
         private const val ENDPOINT_KEY = "relay_wss_url"
         private const val CHANNEL_ID = "daily_shop_sync"
         private const val NOTIFICATION_ID = 7401
+
+        internal fun shouldRun(context: Context): Boolean {
+            val preferences = context.getSharedPreferences(PREFS, MODE_PRIVATE)
+            return preferences.getBoolean("sync_enabled", false) &&
+                !preferences.getString(ENDPOINT_KEY, null).isNullOrBlank()
+        }
 
         fun start(context: Context) {
             context.getSharedPreferences(PREFS, MODE_PRIVATE).edit()

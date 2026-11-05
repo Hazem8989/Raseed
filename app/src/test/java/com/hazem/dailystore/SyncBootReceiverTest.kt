@@ -6,6 +6,7 @@ import android.content.ContextWrapper
 import android.content.Intent
 import org.junit.After
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertNotNull
 import org.junit.Before
@@ -69,6 +70,24 @@ class SyncBootReceiverTest {
 
         assertServiceStartRecorded()
         assertEquals(true, preferences().getBoolean("sync_enabled", false))
+    }
+
+
+    @Test
+    fun syncRunGateRequiresExplicitEnableAndConfiguredEndpoint() {
+        assertFalse(SyncForegroundService.shouldRun(context))
+
+        preferences().edit()
+            .putBoolean("sync_enabled", false)
+            .putString("relay_wss_url", "wss://relay.example.test")
+            .commit()
+        assertFalse(SyncForegroundService.shouldRun(context))
+
+        preferences().edit().putBoolean("sync_enabled", true).commit()
+        assertEquals(true, SyncForegroundService.shouldRun(context))
+
+        preferences().edit().remove("relay_wss_url").commit()
+        assertFalse(SyncForegroundService.shouldRun(context))
     }
 
     @Test

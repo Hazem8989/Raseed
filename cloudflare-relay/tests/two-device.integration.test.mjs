@@ -180,6 +180,29 @@ test("root-pinned devices authenticate before relay; independent peers exchange 
   } finally { await Promise.all([close(primary), close(secondary)]); }
 });
 
+
+test("an unauthenticated challenge expires and releases the device connection slot", async () => {
+  const deviceId = crypto.randomUUID();
+  const { cert } = await makeCertificate(deviceId);
+  assert.equal((await registerCertificate(cert)).status, 200);
+
+  const { socket, challenge } = await openChallenge(deviceId);
+  const timeoutEvent = nextMessage(
+    socket,
+    message => message.type === "error",
+    Math.max(5_000, challenge.expires_at - Date.now() + 5_000)
+  );
+  assert.equal((await timeoutEvent).code, "AUTHENTICATION_TIMEOUT");
+  await close(socket);
+  await new Promise(resolve => setTimeout(resolve, 100));
+
+  // An abandoned unauthenticated socket must not reserve the enrolled device
+  // forever or prevent its legitimate client from reconnecting.
+  const replacement = await openChallenge(deviceId);
+  assert.ok(replacement.challenge.challenge);
+  await close(replacement.socket);
+});
+
 test("forged certificates and replayed or incorrect challenge proofs are rejected", async () => {
   const deviceId = crypto.randomUUID();
   const { cert, pair } = await makeCertificate(deviceId);

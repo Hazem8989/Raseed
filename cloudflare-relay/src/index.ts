@@ -279,8 +279,41 @@ export class SyncRoom implements DurableObject {
     };
     this.state.acceptWebSocket(server, [deviceId]);
     server.serializeAttachment(attachment);
+    try {
+      await this.scheduleChallengeExpiry();
+    } catch {
+      this.failSocket(server, "AUTH_CHALLENGE_TIMER_UNAVAILABLE");
+      return new Response("Unable to schedule authentication challenge expiry", { status: 503 });
+    }
     server.send(JSON.stringify({ type: "challenge", challenge: challengeText, expires_at: attachment.challengeExpiresAt }));
     return new Response(null, { status: 101, webSocket: client });
+  }
+
+  /** Close unauthenticated sockets when their one-time challenge expires. */
+  async alarm(): Promise<void> {
+    const now = Date.now();
+    let nextExpiry = Number.POSITIVE_INFINITY;
+    for (const socket of this.state.getWebSockets()) {
+      const attachment = socket.deserializeAttachment() as SocketAttachment | null;
+      if (!attachment || attachment.authenticated) continue;
+      if (attachment.challengeExpiresAt <= now) {
+        this.failSocket(socket, "AUTHENTICATION_TIMEOUT");
+      } else {
+        nextExpiry = Math.min(nextExpiry, attachment.challengeExpiresAt);
+      }
+    }
+    if (Number.isFinite(nextExpiry)) await this.state.storage.setAlarm(nextExpiry);
+  }
+
+  private async scheduleChallengeExpiry(): Promise<void> {
+    let nextExpiry = Number.POSITIVE_INFINITY;
+    for (const socket of this.state.getWebSockets()) {
+      const attachment = socket.deserializeAttachment() as SocketAttachment | null;
+      if (attachment && !attachment.authenticated) {
+        nextExpiry = Math.min(nextExpiry, attachment.challengeExpiresAt);
+      }
+    }
+    if (Number.isFinite(nextExpiry)) await this.state.storage.setAlarm(nextExpiry);
   }
 
   async webSocketMessage(sender: WebSocket, message: string | ArrayBuffer): Promise<void> {

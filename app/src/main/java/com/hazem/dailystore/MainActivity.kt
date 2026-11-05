@@ -415,8 +415,7 @@ class MainActivity : Activity() {
     override fun onResume() {
         super.onResume()
         if (currentUserId.isNullOrBlank()) return
-        val endpoint = getSharedPreferences("daily_shop_sync_relay", MODE_PRIVATE)
-            .getString("relay_wss_url", null) ?: return
+        if (!SyncForegroundService.shouldRun(this)) return
         runCatching {
             val repository = SyncProtocolRepository(applicationContext)
             if (repository.localDeviceRole() != null) {
