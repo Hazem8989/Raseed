@@ -392,6 +392,37 @@ class SyncProtocolRepositoryTest {
         ).use { c -> assertTrue(c.moveToFirst()); assertEquals("SECONDARY", c.getString(0)) }
     }
 
+    @Test fun enrolledSecondaryCannotPromoteWhenBothLocalRoleAndAuthorityStateAreMissing() {
+        val primaryId = UUID.randomUUID().toString()
+        configureSecondaryForTest(
+            UUID.randomUUID().toString(), primaryId,
+            android.util.Base64.encodeToString(
+                ByteArray(32) { 11 },
+                android.util.Base64.URL_SAFE or android.util.Base64.NO_WRAP or android.util.Base64.NO_PADDING
+            ),
+            "الثانوي"
+        )
+        val localId = SyncDeviceIdentity.getOrCreate(RuntimeEnvironment.getApplication())
+        database.writableDatabase.delete(
+            "sync_protocol_state",
+            "state_key IN ('authority_device_id','local_device_role')",
+            null
+        )
+
+        var denied = false
+        try {
+            repository.configureAsPrimary(adminId, "محاولة ترقية بعد فقدان الإعدادات")
+        } catch (_: IllegalArgumentException) {
+            denied = true
+        }
+
+        assertTrue("يجب أن يمنع سجل الجهاز الثانوي الترقية حتى مع فقدان مفاتيح الحالة", denied)
+        database.readableDatabase.rawQuery(
+            "SELECT device_role FROM sync_devices WHERE device_id=?", arrayOf(localId)
+        ).use { c -> assertTrue(c.moveToFirst()); assertEquals("SECONDARY", c.getString(0)) }
+        assertNull(repository.localDeviceRole())
+    }
+
     @Test fun cashierCannotConfigurePrimaryOrCreateInvitations() {
         val auth = AuthRepository(RuntimeEnvironment.getApplication())
         val cashierId = auth.createUser("ADMIN", adminId, "sync-cashier", "Cashier", "Cashier12345", "CASHIER")
