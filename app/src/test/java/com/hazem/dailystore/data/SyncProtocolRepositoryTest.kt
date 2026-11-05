@@ -553,7 +553,9 @@ class SyncProtocolRepositoryTest {
             secretBytes,
             android.util.Base64.URL_SAFE or android.util.Base64.NO_WRAP or android.util.Base64.NO_PADDING
         )
-        configureSecondaryForTest("store-command-actor-01", primaryId, credential, "الثانوي")
+        // Create the second actor while this isolated test database is still in
+        // its primary/unconfigured state. User administration is intentionally
+        // unavailable after the device is configured as a sales-only secondary.
         val auth = AuthRepository(RuntimeEnvironment.getApplication())
         val temporaryPassphrase = "UnitTestPassphrase!"
         val cashierId = auth.createUser(
@@ -561,6 +563,7 @@ class SyncProtocolRepositoryTest {
             temporaryPassphrase, "CASHIER"
         )
         auth.changePassword(cashierId, temporaryPassphrase, "AnotherUnitTestPassphrase!")
+        configureSecondaryForTest("store-command-actor-01", primaryId, credential, "الثانوي")
         val operationId = UUID.randomUUID().toString()
         val entityId = "sale-$operationId"
         val payload = """{"invoice_id":"$entityId","total_usd_cents":2500}"""
