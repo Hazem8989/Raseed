@@ -812,11 +812,16 @@ class SyncProtocolRepositoryTest {
     }
 
     private fun setProtocolStateForTest(key: String, value: String) {
-        val changed = database.writableDatabase.update(
-            "sync_protocol_state", ContentValues().apply { put("state_value", value) },
-            "state_key=?", arrayOf(key)
+        // Test scenarios switch the logical device role in one isolated database.
+        // Some keys (for example secondary_next_sequence) are intentionally absent
+        // until a secondary has been initialized, so seed or replace them atomically.
+        database.writableDatabase.insertWithOnConflict(
+            "sync_protocol_state", null, ContentValues().apply {
+                put("state_key", key)
+                put("state_value", value)
+                put("updated_at", "2026-11-05T12:00:00.000Z")
+            }, android.database.sqlite.SQLiteDatabase.CONFLICT_REPLACE
         )
-        assertEquals(1, changed)
     }
 
     @Test fun secondaryAcceptsValidPrimaryApplicationAckAndMarksQueueSyncedAtomically() {
