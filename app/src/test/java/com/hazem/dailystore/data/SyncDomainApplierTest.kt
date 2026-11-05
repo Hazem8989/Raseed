@@ -852,6 +852,26 @@ class SyncDomainApplierTest {
         ).use { it.moveToFirst(); it.getInt(0) })
     }
 
+    @Test fun rejectsCustomerCollectionWhenAuthenticatedActorHasNoMappingEvenIfAnotherActorIsMapped() {
+        val fixture = receiveCustomerCollectionCommand()
+        protocol.mapSecondaryActor(adminId, secondaryId, "remote-other-actor", adminId)
+        database.writableDatabase.execSQL(
+            "UPDATE sync_inbox SET actor_user_id='unmapped-authenticated-actor' WHERE operation_id=?",
+            arrayOf(fixture.operationId)
+        )
+        assertCustomerCollectionRejected(fixture, "غير مربوط")
+    }
+
+    @Test fun rejectsCustomerCollectionWhenAuthenticatedActorMappingIsDisabledEvenIfAnotherActorIsActive() {
+        val fixture = receiveCustomerCollectionCommand()
+        database.writableDatabase.execSQL(
+            "UPDATE sync_actor_mappings SET is_active=0 WHERE device_id=? AND remote_actor_user_id=?",
+            arrayOf(secondaryId, "remote-admin")
+        )
+        protocol.mapSecondaryActor(adminId, secondaryId, "remote-other-actor", adminId)
+        assertCustomerCollectionRejected(fixture, "غير مربوط")
+    }
+
     private data class CustomerCollectionFixture(
         val customerId: String, val invoiceId: String, val operationId: String
     )
