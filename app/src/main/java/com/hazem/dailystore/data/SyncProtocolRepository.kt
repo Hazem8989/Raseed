@@ -747,16 +747,22 @@ class SyncProtocolRepository(private val context: Context, private val credentia
         )
         val hash = sha256(payload)
         val prior = db.rawQuery(
-            "SELECT sequence_number,payload_sha256,entity_type,entity_id FROM sync_operation_envelopes WHERE operation_id=?",
+            """SELECT sequence_number,payload_sha256,entity_type,entity_id,
+                      actor_user_id,operation_type,origin_device_id
+               FROM sync_operation_envelopes WHERE operation_id=?""".trimIndent(),
             arrayOf(operationId)
         ).use { c ->
             if (!c.moveToFirst()) null else arrayOf(
-                c.getLong(0).toString(), c.getString(1), c.getString(2), c.getString(3)
+                c.getLong(0).toString(), c.getString(1), c.getString(2), c.getString(3),
+                c.getString(4), c.getString(5), c.getString(6)
             )
         }
         if (prior != null) {
-            require(prior[1] == hash && prior[2] == entityType && prior[3] == entityId) {
-                "أعيد استخدام معرّف الأمر ببيانات مختلفة"
+            require(
+                prior[1] == hash && prior[2] == entityType && prior[3] == entityId &&
+                    prior[4] == actorUserId && prior[5] == "CREATE" && prior[6] == SyncDeviceIdentity.getOrCreate(context)
+            ) {
+                "أعيد استخدام معرّف الأمر بهوية أو بيانات مختلفة"
             }
             return prior[0].toLong()
         }
