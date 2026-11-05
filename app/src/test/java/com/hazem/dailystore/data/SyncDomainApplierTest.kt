@@ -403,7 +403,7 @@ class SyncDomainApplierTest {
 
     @Test fun appliesIncomingCreditSaleAndDoesNotCreateCashReceipt() {
         val customerId = CustomerRepository(context).create(adminId, "زبون مزامنة").id
-        val operationId = receiveInvoice("POST_SALES_INVOICE", "sale-remote-1", customerId, "CREDIT")
+        val operationId = receiveInvoice("POST_SALE_INVOICE", "sale-remote-1", customerId, "CREDIT")
 
         assertTrue(applyWithDiagnostic(SyncDomainApplier(context), operationId).applied)
         assertEquals("POSTED", invoiceStatus("sales_invoices", "sale-remote-1"))
@@ -440,7 +440,7 @@ class SyncDomainApplierTest {
         )
         protocol.mapSecondaryCashAccount(adminId, secondaryId, "remote-wallet-usd", primaryWalletId)
         val operationId = receiveInvoice(
-            "POST_SALES_INVOICE", "sale-cash-mapped", null, "CASH",
+            "POST_SALE_INVOICE", "sale-cash-mapped", null, "CASH",
             "remote-wallet-usd", "WALLET", "USD"
         )
         val applier = SyncDomainApplier(context)
@@ -487,7 +487,7 @@ class SyncDomainApplierTest {
 
     @Test fun rejectsCashSaleWithoutApplyingOrChangingInventory() {
         val operationId = receiveInvoice(
-            "POST_SALES_INVOICE", "sale-cash-remote", null, "CASH",
+            "POST_SALE_INVOICE", "sale-cash-remote", null, "CASH",
             "remote-wallet-unmapped", "WALLET", "USD"
         )
         var rejected = false
@@ -506,7 +506,7 @@ class SyncDomainApplierTest {
         val primaryWalletId = createPrimaryWallet("USD")
         protocol.mapSecondaryCashAccount(adminId, secondaryId, "remote-wallet-bad-amount", primaryWalletId)
         val operationId = receiveInvoice(
-            "POST_SALES_INVOICE", "sale-cash-bad-amount", null, "CASH",
+            "POST_SALE_INVOICE", "sale-cash-bad-amount", null, "CASH",
             "remote-wallet-bad-amount", "WALLET", "USD", receiptAmountMinor = 299L
         )
 
@@ -533,7 +533,7 @@ class SyncDomainApplierTest {
             arrayOf(secondaryId, "remote-wallet-disabled")
         )
         val operationId = receiveInvoice(
-            "POST_SALES_INVOICE", "sale-cash-disabled-map", null, "CASH",
+            "POST_SALE_INVOICE", "sale-cash-disabled-map", null, "CASH",
             "remote-wallet-disabled", "WALLET", "USD"
         )
 
@@ -553,7 +553,7 @@ class SyncDomainApplierTest {
         val primaryWalletId = createPrimaryWallet("USD")
         protocol.mapSecondaryCashAccount(adminId, secondaryId, "remote-wallet-metadata", primaryWalletId)
         val operationId = receiveInvoice(
-            "POST_SALES_INVOICE", "sale-cash-metadata-mismatch", null, "CASH",
+            "POST_SALE_INVOICE", "sale-cash-metadata-mismatch", null, "CASH",
             "remote-wallet-metadata", "CASH_BOX", "USD"
         )
 
@@ -1082,7 +1082,7 @@ class SyncDomainApplierTest {
             else -> "SALES_INVOICE"
         }
         val occurredAt = "2026-11-03T12:00:00Z"
-        if (operation in setOf("POST_SALES_INVOICE", "SYNC_TRANSPORT_PROBE")) {
+        if (operation in setOf("POST_SALE_INVOICE", "SYNC_TRANSPORT_PROBE")) {
             val envelope = SyncEnvelopeSecurity.create(
                 storeId, operationId, nextSequence(), secondaryId, "remote-admin",
                 "CREATE", entityType, resolvedEntityId, 0L, payload.toString(), occurredAt, secondarySecret
