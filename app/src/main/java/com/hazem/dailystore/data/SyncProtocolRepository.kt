@@ -1874,8 +1874,9 @@ class SyncProtocolRepository(private val context: Context, private val credentia
                     // authoritative confirmation that the primary accepted the invoice.
                     // Reflect only its workflow status locally; stock, debt and cash
                     // ledgers remain exclusively owned by the primary device.
-                    if (local[4] == "SALES_INVOICE" && local[5] == "POST_SALE_INVOICE") {
+                    if (local[4] == "SALES_INVOICE") {
                         val posted = JSONObject(local[7])
+                        if (posted.optString("business_operation") == "POST_SALE_INVOICE") {
                         require(posted.optString("business_operation") == "POST_SALE_INVOICE" &&
                             posted.optString("id") == local[6] &&
                             posted.optString("sale_type") == "CREDIT") {
@@ -1907,6 +1908,7 @@ class SyncProtocolRepository(private val context: Context, private val credentia
                                 put("updated_at", timestamp())
                             }, "id=? AND status='DRAFT'", arrayOf(invoiceId))
                             require(changed == 1) { "تعذر تثبيت اعتماد فاتورة الدين على الجهاز الثانوي" }
+                        }
                         }
                     }
                 } else {
