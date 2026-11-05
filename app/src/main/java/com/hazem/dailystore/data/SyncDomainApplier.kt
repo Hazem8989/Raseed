@@ -43,6 +43,9 @@ class SyncDomainApplier(context: Context) {
         return when (JSONObject(payloadJson).optString("business_operation")) {
             "UPDATE_STORE_TIME_ZONE" -> applyReceivedStoreTimeZone(operationId)
             "CREATE_CATEGORY" -> applyReceivedCategory(operationId)
+            "UPSERT_PRODUCT" -> applyReceivedProduct(operationId)
+            "SET_PRODUCT_ACTIVE" -> applyReceivedProductActive(operationId)
+            "SET_PRODUCT_OPENING_STOCK" -> applyReceivedProductOpeningStock(operationId)
             "SYNC_TRANSPORT_PROBE" -> applyReceivedTransportProbe(operationId)
             "SET_EXCHANGE_RATE" -> applyReceivedExchangeRate(operationId)
             "POST_PURCHASE_INVOICE", "POST_SALES_INVOICE" -> applyReceivedInvoice(operationId)
@@ -1364,6 +1367,319 @@ class SyncDomainApplier(context: Context) {
             }
             db.setTransactionSuccessful()
             ApplyResult(operationId,true)
+        } finally { db.endTransaction() }
+    }
+
+    /** Applies an authoritative product create/update to the secondary catalog. */
+    fun applyReceivedProduct(operationId: String): ApplyResult = synchronized(APPLY_LOCK) {
+        require(operationId.isNotBlank()) { "معرّف العملية مطلوب" }
+        val db = database.writableDatabase
+        val localId = SyncDeviceIdentity.getOrCreate(appContext)
+        val role = db.rawQuery(
+            "SELECT state_value FROM sync_protocol_state WHERE state_key='local_device_role'", null
+        ).use { if (it.moveToFirst()) it.getString(0) else null }
+        val authority = db.rawQuery(
+            "SELECT state_value FROM sync_protocol_state WHERE state_key='authority_device_id'", null
+        ).use { if (it.moveToFirst()) it.getString(0) else null }
+        require(role == "SECONDARY" && !authority.isNullOrBlank() && authority != localId) {
+            "تطبيق دليل المنتجات الوارد مسموح على جهاز ثانوي مرتبط فقط"
+        }
+        db.beginTransaction()
+        try {
+            val row = db.rawQuery(
+                """SELECT origin_device_id,operation_type,entity_type,entity_id,payload_json,status,origin_created_at
+                   FROM sync_inbox WHERE operation_id=?""".trimIndent(), arrayOf(operationId)
+            ).use { c ->
+                require(c.moveToFirst()) { "عملية المنتج غير موجودة في صندوق الوارد" }
+                Array(7) { c.getString(it) }
+            }
+            require(row[0] == authority && row[2] == "PRODUCT" &&
+                row[1] in setOf("CREATE", "UPDATE")) { "مصدر أو نوع حدث المنتج غير صالح" }
+            if (row[5] == "APPLIED") {
+                db.setTransactionSuccessful()
+                return@synchronized ApplyResult(operationId, true)
+            }
+            require(row[5] == "RECEIVED") { "حالة حدث المنتج لا تسمح بالتطبيق" }
+            val payload = JSONObject(row[4])
+            require(payload.optString("business_operation") == "UPSERT_PRODUCT") {
+                "نوع حدث المنتج الوارد غير صالح"
+            }
+            val productId = payload.optString("product_id")
+            val name = payload.optString("name").trim()
+            val unitName = payload.optString("unit_name").trim()
+            val unitSymbol = payload.optString("unit_symbol").trim()
+            val decimals = payload.optInt("unit_decimal_places", -1)
+            val cost = payload.optLong("purchase_cost_usd_cents", -1L)
+            val price = payload.optLong("sale_price_usd_cents", -1L)
+            val tracksInventory = payload.optBoolean("tracks_inventory", false)
+            val openingQuantity = payload.optDouble("opening_quantity", 0.0)
+            val createdAt = payload.optString("created_at").takeIf {
+                it.matches(Regex("\\d{4}-\\d{2}-\\d{2}T.*"))
+            } ?: row[6]
+            val updatedAt = payload.optString("updated_at").takeIf {
+                it.matches(Regex("\\d{4}-\\d{2}-\\d{2}T.*"))
+            } ?: createdAt
+            require(productId.isNotBlank() && productId == row[3] && name.isNotEmpty() &&
+                name.length <= 200 && unitName.isNotEmpty() && unitSymbol.isNotEmpty() &&
+                decimals in 0..6 && cost >= 0L && price > 0L &&
+                (!tracksInventory || cost > 0L) && openingQuantity.isFinite() && openingQuantity >= 0.0 &&
+                (openingQuantity == 0.0 || tracksInventory)) {
+                "بيانات المنتج أو الوحدة أو الأسعار أو الرصيد الافتتاحي غير صالحة"
+            }
+
+            val categoryId = if (payload.isNull("primary_category_id")) {
+                require(payload.isNull("category_name")) { "اسم التصنيف موجود دون معرّف أصلي" }
+                null
+            } else {
+                val primaryCategoryId = payload.optLong("primary_category_id", 0L)
+                val categoryName = payload.optString("category_name").trim()
+                require(primaryCategoryId > 0L && categoryName.isNotEmpty()) {
+                    "بيانات تصنيف المنتج غير مكتملة"
+                }
+                val mapping = db.rawQuery(
+                    """SELECT secondary_category_id,category_name FROM sync_category_mappings
+                       WHERE primary_device_id=? AND primary_category_id=?""".trimIndent(),
+                    arrayOf(authority, primaryCategoryId.toString())
+                ).use { c -> if (c.moveToFirst()) c.getLong(0) to c.getString(1) else null }
+                if (mapping != null) {
+                    require(mapping.second.equals(categoryName, ignoreCase = true)) {
+                        "ربط تصنيف المنتج يتعارض مع الاسم الأصلي"
+                    }
+                    mapping.first
+                } else {
+                    val localCategory = db.rawQuery(
+                        "SELECT id,name FROM categories WHERE lower(trim(name))=? LIMIT 1",
+                        arrayOf(categoryName.lowercase(java.util.Locale.ROOT))
+                    ).use { c -> if (c.moveToFirst()) c.getLong(0) to c.getString(1) else null }
+                    val localCategoryId = if (localCategory == null) {
+                        db.insertOrThrow("categories", null, ContentValues().apply {
+                            put("name", categoryName); put("created_at", createdAt)
+                        })
+                    } else {
+                        require(localCategory.second.equals(categoryName, ignoreCase = true)) {
+                            "اسم تصنيف المنتج يتعارض مع تصنيف محلي"
+                        }
+                        localCategory.first
+                    }
+                    db.insertOrThrow("sync_category_mappings", null, ContentValues().apply {
+                        put("primary_device_id", authority)
+                        put("primary_category_id", primaryCategoryId)
+                        put("secondary_category_id", localCategoryId)
+                        put("category_name", categoryName)
+                        put("mapped_at", timestamp())
+                    })
+                    localCategoryId
+                }
+            }
+
+            val unit = db.rawQuery(
+                "SELECT id,symbol,decimal_places FROM units WHERE lower(trim(name))=? LIMIT 2",
+                arrayOf(unitName.lowercase(java.util.Locale.ROOT))
+            ).use { c ->
+                if (!c.moveToFirst()) null else {
+                    val found = Triple(c.getLong(0), c.getString(1), c.getInt(2))
+                    require(!c.moveToNext()) { "اسم وحدة المنتج مكرر محلياً" }
+                    found
+                }
+            }
+            val unitId = if (unit == null) {
+                db.insertOrThrow("units", null, ContentValues().apply {
+                    put("name", unitName); put("symbol", unitSymbol); put("decimal_places", decimals)
+                })
+            } else {
+                require(unit.second == unitSymbol && unit.third == decimals) {
+                    "تعريف وحدة المنتج يختلف عن الوحدة المحلية؛ أوقف المزامنة للمراجعة"
+                }
+                unit.first
+            }
+
+            val existing = db.rawQuery(
+                "SELECT unit_id,track_inventory FROM products WHERE id=?", arrayOf(productId)
+            ).use { c -> if (c.moveToFirst()) c.getLong(0) to (c.getInt(1) == 1) else null }
+            if (existing != null) {
+                val hasMovement = db.rawQuery(
+                    "SELECT 1 FROM inventory_movements WHERE product_id=? LIMIT 1", arrayOf(productId)
+                ).use { it.moveToFirst() }
+                require(!hasMovement || (existing.first == unitId && existing.second == tracksInventory)) {
+                    "لا يمكن تغيير وحدة أو تتبع مخزون منتج له حركات محلية"
+                }
+                val values = ContentValues().apply {
+                    put("name", name)
+                    if (payload.isNull("barcode")) putNull("barcode") else put("barcode", payload.getString("barcode"))
+                    if (payload.isNull("sku")) putNull("sku") else put("sku", payload.getString("sku"))
+                    if (categoryId == null) putNull("category_id") else put("category_id", categoryId)
+                    put("unit_id", unitId); put("purchase_cost_usd_cents", cost)
+                    put("sale_price_usd_cents", price); put("track_inventory", if (tracksInventory) 1 else 0)
+                    put("is_active", if (payload.optBoolean("is_active", true)) 1 else 0)
+                    put("updated_at", updatedAt)
+                }
+                require(db.update("products", values, "id=?", arrayOf(productId)) == 1)
+            } else {
+                db.insertOrThrow("products", null, ContentValues().apply {
+                    put("id", productId); put("name", name)
+                    if (payload.isNull("barcode")) putNull("barcode") else put("barcode", payload.getString("barcode"))
+                    if (payload.isNull("sku")) putNull("sku") else put("sku", payload.getString("sku"))
+                    if (categoryId == null) putNull("category_id") else put("category_id", categoryId)
+                    put("unit_id", unitId); put("purchase_cost_usd_cents", cost)
+                    put("sale_price_usd_cents", price); put("track_inventory", if (tracksInventory) 1 else 0)
+                    put("is_active", if (payload.optBoolean("is_active", true)) 1 else 0)
+                    put("created_at", createdAt); put("updated_at", updatedAt)
+                })
+                if (openingQuantity > 0.0) {
+                    val warehouseId = db.rawQuery(
+                        "SELECT id FROM warehouses WHERE is_default=1 AND is_active=1 LIMIT 1", null
+                    ).use { c -> require(c.moveToFirst()) { "المستودع الافتراضي غير مهيأ على الجهاز الثانوي" }; c.getString(0) }
+                    val movementId = UUID.randomUUID().toString()
+                    db.insertOrThrow("inventory_balances", null, ContentValues().apply {
+                        put("product_id", productId); put("warehouse_id", warehouseId)
+                        put("quantity", openingQuantity); put("updated_at", updatedAt)
+                    })
+                    db.insertOrThrow("inventory_movements", null, ContentValues().apply {
+                        put("id", movementId); put("product_id", productId); put("warehouse_id", warehouseId)
+                        put("movement_type", "OPENING"); put("quantity_delta", openingQuantity)
+                        put("unit_cost_usd_cents", cost); put("source_type", "SYNC_CATALOG_OPENING")
+                        put("source_id", productId); put("operation_id", "SYNC_CATALOG_OPENING:$productId")
+                        putNull("created_by"); put("note", "رصيد افتتاحي وارد من الجهاز الأساسي")
+                        put("created_at", updatedAt)
+                    })
+                    FifoCosting.addLayer(db, movementId, productId, warehouseId, openingQuantity,
+                        cost, "SYNC_CATALOG_OPENING", productId, updatedAt)
+                }
+            }
+            db.update("sync_inbox", ContentValues().apply {
+                put("status", "APPLIED"); put("applied_at", timestamp()); putNull("rejection_reason")
+            }, "operation_id=? AND status='RECEIVED'", arrayOf(operationId)).also {
+                require(it == 1) { "تعذر تثبيت تطبيق المنتج" }
+            }
+            db.setTransactionSuccessful()
+            ApplyResult(operationId, true)
+        } finally { db.endTransaction() }
+    }
+
+    /** Applies primary-owned product activation state on the secondary. */
+    fun applyReceivedProductActive(operationId: String): ApplyResult = synchronized(APPLY_LOCK) {
+        require(operationId.isNotBlank())
+        val db = database.writableDatabase
+        val authority = db.rawQuery(
+            "SELECT state_value FROM sync_protocol_state WHERE state_key='authority_device_id'", null
+        ).use { if (it.moveToFirst()) it.getString(0) else null }
+        require(!authority.isNullOrBlank() &&
+            db.rawQuery("SELECT state_value FROM sync_protocol_state WHERE state_key='local_device_role'", null)
+                .use { it.moveToFirst() && it.getString(0) == "SECONDARY" }) {
+            "تحديث حالة المنتج الوارد مسموح على جهاز ثانوي مرتبط فقط"
+        }
+        db.beginTransaction()
+        try {
+            val row = db.rawQuery(
+                "SELECT origin_device_id,entity_type,entity_id,payload_json,status FROM sync_inbox WHERE operation_id=?",
+                arrayOf(operationId)
+            ).use { c ->
+                require(c.moveToFirst()) { "تحديث المنتج غير موجود" }
+                Array(5) { c.getString(it) }
+            }
+            require(row[0] == authority && row[1] == "PRODUCT") { "مصدر تحديث المنتج غير صالح" }
+            if (row[4] == "APPLIED") { db.setTransactionSuccessful(); return@synchronized ApplyResult(operationId, true) }
+            require(row[4] == "RECEIVED")
+            val payload = JSONObject(row[3])
+            require(payload.optString("business_operation") == "SET_PRODUCT_ACTIVE" &&
+                payload.optString("product_id") == row[2]) { "بيانات تحديث حالة المنتج غير صالحة" }
+            val updated = db.update("products", ContentValues().apply {
+                put("is_active", if (payload.optBoolean("is_active")) 1 else 0)
+                put("updated_at", payload.optString("occurred_at", timestamp()))
+            }, "id=?", arrayOf(row[2]))
+            require(updated == 1) { "المنتج المطلوب تحديثه غير موجود على الجهاز الثانوي" }
+            db.update("sync_inbox", ContentValues().apply {
+                put("status", "APPLIED"); put("applied_at", timestamp()); putNull("rejection_reason")
+            }, "operation_id=? AND status='RECEIVED'", arrayOf(operationId))
+            db.setTransactionSuccessful()
+            ApplyResult(operationId, true)
+        } finally { db.endTransaction() }
+    }
+
+    /** Applies a one-time primary opening-stock count to the secondary catalog. */
+    fun applyReceivedProductOpeningStock(operationId: String): ApplyResult = synchronized(APPLY_LOCK) {
+        require(operationId.isNotBlank())
+        val db = database.writableDatabase
+        val authority = db.rawQuery(
+            "SELECT state_value FROM sync_protocol_state WHERE state_key='authority_device_id'", null
+        ).use { if (it.moveToFirst()) it.getString(0) else null }
+        require(!authority.isNullOrBlank() &&
+            db.rawQuery("SELECT state_value FROM sync_protocol_state WHERE state_key='local_device_role'", null)
+                .use { it.moveToFirst() && it.getString(0) == "SECONDARY" }) {
+            "تطبيق الرصيد الافتتاحي الوارد مسموح على جهاز ثانوي مرتبط فقط"
+        }
+        db.beginTransaction()
+        try {
+            val row = db.rawQuery(
+                "SELECT origin_device_id,entity_type,entity_id,payload_json,status FROM sync_inbox WHERE operation_id=?",
+                arrayOf(operationId)
+            ).use { c ->
+                require(c.moveToFirst()) { "الرصيد الافتتاحي غير موجود" }
+                Array(5) { c.getString(it) }
+            }
+            require(row[0] == authority && row[1] == "PRODUCT_OPENING_STOCK") {
+                "مصدر أو نوع الرصيد الافتتاحي غير صالح"
+            }
+            if (row[4] == "APPLIED") { db.setTransactionSuccessful(); return@synchronized ApplyResult(operationId, true) }
+            require(row[4] == "RECEIVED")
+            val payload = JSONObject(row[3])
+            val productId = payload.optString("product_id")
+            val quantity = payload.optDouble("quantity", -1.0)
+            val cost = payload.optLong("unit_cost_usd_cents", 0L)
+            val occurredAt = payload.optString("occurred_at")
+            require(payload.optString("business_operation") == "SET_PRODUCT_OPENING_STOCK" &&
+                productId == row[2] && quantity > 0.0 && quantity.isFinite() && cost > 0L &&
+                occurredAt.matches(Regex("\\d{4}-\\d{2}-\\d{2}T.*"))) {
+                "بيانات الرصيد الافتتاحي غير صالحة"
+            }
+            val product = db.rawQuery(
+                "SELECT track_inventory,unit_id FROM products WHERE id=?", arrayOf(productId)
+            ).use { c ->
+                require(c.moveToFirst()) { "المنتج غير موجود على الجهاز الثانوي" }
+                c.getInt(0) == 1 to c.getLong(1)
+            }
+            require(product.first) { "المنتج لا يتتبع المخزون" }
+            val decimals = db.rawQuery("SELECT decimal_places FROM units WHERE id=?",
+                arrayOf(product.second.toString())).use { c -> require(c.moveToFirst()); c.getInt(0) }
+            require(BigDecimal.valueOf(quantity).stripTrailingZeros().scale().coerceAtLeast(0) <= decimals) {
+                "دقة الرصيد الافتتاحي تتجاوز دقة الوحدة"
+            }
+            val priorMovement = db.rawQuery(
+                "SELECT 1 FROM inventory_movements WHERE product_id=? LIMIT 1", arrayOf(productId)
+            ).use { it.moveToFirst() }
+            val priorQuantity = db.rawQuery(
+                "SELECT COALESCE(SUM(quantity),0) FROM inventory_balances WHERE product_id=?",
+                arrayOf(productId)
+            ).use { it.moveToFirst(); it.getDouble(0) }
+            require(!priorMovement && kotlin.math.abs(priorQuantity) <= 0.0000001) {
+                "يوجد رصيد أو حركة سابقة؛ لا يمكن تطبيق رصيد افتتاحي ثانٍ"
+            }
+            val warehouseId = payload.optString("warehouse_id").takeIf { it.isNotBlank() }
+                ?: throw IllegalArgumentException("المستودع الأصلي غير محدد")
+            require(db.rawQuery(
+                "SELECT 1 FROM warehouses WHERE id=? AND is_default=1 AND is_active=1",
+                arrayOf(warehouseId)
+            ).use { it.moveToFirst() }) { "المستودع الافتراضي غير مطابق بين الجهازين" }
+            val movementId = UUID.randomUUID().toString()
+            db.insertOrThrow("inventory_balances", null, ContentValues().apply {
+                put("product_id", productId); put("warehouse_id", warehouseId)
+                put("quantity", quantity); put("updated_at", occurredAt)
+            })
+            db.insertOrThrow("inventory_movements", null, ContentValues().apply {
+                put("id", movementId); put("product_id", productId); put("warehouse_id", warehouseId)
+                put("movement_type", "OPENING"); put("quantity_delta", quantity)
+                put("unit_cost_usd_cents", cost); put("source_type", "SYNC_STOCKTAKE_OPENING")
+                put("source_id", productId); put("operation_id", "SYNC_STOCKTAKE_OPENING:$productId")
+                putNull("created_by"); put("note", if (payload.isNull("note")) "رصيد افتتاحي وارد من الجهاز الأساسي" else payload.getString("note"))
+                put("created_at", occurredAt)
+            })
+            FifoCosting.addLayer(db, movementId, productId, warehouseId, quantity,
+                cost, "SYNC_STOCKTAKE_OPENING", productId, occurredAt)
+            db.update("sync_inbox", ContentValues().apply {
+                put("status", "APPLIED"); put("applied_at", timestamp()); putNull("rejection_reason")
+            }, "operation_id=? AND status='RECEIVED'", arrayOf(operationId))
+            db.setTransactionSuccessful()
+            ApplyResult(operationId, true)
         } finally { db.endTransaction() }
     }
 
