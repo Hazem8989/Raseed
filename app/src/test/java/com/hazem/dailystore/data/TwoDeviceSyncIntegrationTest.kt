@@ -94,6 +94,75 @@ class TwoDeviceSyncIntegrationTest {
         context.deleteDatabase(SECONDARY_DATABASE)
     }
 
+    @Test fun primaryOutboxNeverBroadcastsFinancialCommandsToSalesOnlySecondary() {
+        setLocalDeviceId(primaryId)
+        AppDatabase.installForTests(primaryDb)
+
+        val legacyOperationId = UUID.randomUUID().toString()
+        val now = "2026-11-04T10:30:00.000Z"
+        val db = primaryDb.writableDatabase
+        db.beginTransaction()
+        try {
+            val nextSequence = db.rawQuery(
+                "SELECT COALESCE(MAX(sequence_number),0)+1 FROM sync_operation_envelopes", null
+            ).use { c -> assertTrue(c.moveToFirst()); c.getLong(0) }
+            // Simulate a pending financial event written by an older app version.
+            db.insertOrThrow("sync_operation_envelopes", null, android.content.ContentValues().apply {
+                put("operation_id", legacyOperationId)
+                put("sequence_number", nextSequence)
+                put("origin_device_id", primaryId)
+                put("actor_user_id", primaryAdminId)
+                put("operation_type", "POST_PURCHASE_INVOICE")
+                put("entity_type", "PURCHASE_INVOICE")
+                put("entity_id", legacyOperationId)
+                put("payload_json", JSONObject().put("business_operation", "POST_PURCHASE_INVOICE").toString())
+                put("payload_sha256", "a".repeat(64))
+                put("created_at", now)
+            })
+            db.insertOrThrow("sync_queue", null, android.content.ContentValues().apply {
+                put("id", UUID.randomUUID().toString())
+                put("operation_id", legacyOperationId)
+                put("entity_type", "PURCHASE_INVOICE")
+                put("entity_id", legacyOperationId)
+                put("operation_type", "CREATE")
+                put("payload_json", "{}")
+                put("status", "PENDING")
+                put("retry_count", 0)
+                put("created_at", now)
+                put("updated_at", now)
+            })
+            db.setTransactionSuccessful()
+        } finally {
+            db.endTransaction()
+        }
+
+        val pending = primaryRepository.pendingOutboxForDevice(secondaryId)
+        assertTrue("Reference catalog events must remain deliverable",
+            pending.any { it.entityType == "CATEGORY" })
+        assertTrue("Standalone unit events must remain deliverable",
+            pending.any { it.entityType == "UNIT" })
+        assertFalse("A sales-only secondary must never receive historical purchase/financial events",
+            pending.any { it.operationId == legacyOperationId })
+
+        val newFinancialOperationId = UUID.randomUUID().toString()
+        db.beginTransaction()
+        try {
+            val queued = primaryRepository.enqueueLocalOperation(
+                db, primaryAdminId, newFinancialOperationId,
+                "POST_OPERATING_EXPENSE", "OPERATING_EXPENSE", newFinancialOperationId,
+                "CREATE", JSONObject().put("business_operation", "POST_OPERATING_EXPENSE").toString()
+            )
+            assertNull("Primary-only financial operations must not enter peer outbox", queued)
+            db.setTransactionSuccessful()
+        } finally {
+            db.endTransaction()
+        }
+        assertEquals(0, scalar(primaryDb,
+            "SELECT COUNT(*) FROM sync_operation_envelopes WHERE operation_id=?", newFinancialOperationId))
+        assertFalse(primaryRepository.pendingOutboxForDevice(secondaryId)
+            .any { it.operationId == newFinancialOperationId })
+    }
+
     @Test fun twoIndependentDevicesExchangeAuthenticatedProbeAndSignedAckExactlyOnce() {
         var ack: String? = null
         setLocalDeviceId(primaryId)
