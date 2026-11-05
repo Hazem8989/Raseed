@@ -103,9 +103,10 @@ class TwoDeviceSyncIntegrationTest {
         val db = primaryDb.writableDatabase
         db.beginTransaction()
         try {
+            // Keep the persisted allocator consistent with the legacy envelope inserted below.
             val nextSequence = db.rawQuery(
-                "SELECT COALESCE(MAX(sequence_number),0)+1 FROM sync_operation_envelopes", null
-            ).use { c -> assertTrue(c.moveToFirst()); c.getLong(0) }
+                "SELECT state_value FROM sync_protocol_state WHERE state_key='next_sequence'", null
+            ).use { c -> assertTrue(c.moveToFirst()); c.getString(0).toLong() }
             // Simulate a pending financial event written by an older app version.
             db.insertOrThrow("sync_operation_envelopes", null, android.content.ContentValues().apply {
                 put("operation_id", legacyOperationId)
@@ -131,6 +132,10 @@ class TwoDeviceSyncIntegrationTest {
                 put("created_at", now)
                 put("updated_at", now)
             })
+            db.execSQL(
+                "UPDATE sync_protocol_state SET state_value=?, updated_at=? WHERE state_key='next_sequence'",
+                arrayOf((nextSequence + 1L).toString(), now)
+            )
             db.setTransactionSuccessful()
         } finally {
             db.endTransaction()
