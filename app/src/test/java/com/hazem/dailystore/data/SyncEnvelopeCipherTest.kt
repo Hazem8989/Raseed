@@ -51,8 +51,17 @@ class SyncEnvelopeCipherTest {
 
     @Test fun malformedAndUnsupportedFramesAreRejected() {
         assertNull(SyncEnvelopeCipher.decrypt(byteArrayOf(1, 2, 3), key, context))
-        val unsupported = SyncEnvelopeCipher.encrypt(plaintext, key, context).also { it[0] = 2 }
+        val unsupported = SyncEnvelopeCipher.encrypt(plaintext, key, context).also { it[0] = 1 }
         assertNull(SyncEnvelopeCipher.decrypt(unsupported, key, context))
+    }
+
+    @Test fun derivedEncryptionKeyIsSeparatedByDirection() {
+        val forward = SyncEnvelopeCipher.encrypt(plaintext, key, context)
+        val reverseContext = context.copy(
+            senderDeviceId = context.recipientDeviceId,
+            recipientDeviceId = context.senderDeviceId
+        )
+        assertNull(SyncEnvelopeCipher.decrypt(forward, key, reverseContext))
     }
 
     @Test fun storeAndSenderIdentityAreAuthenticated() {
