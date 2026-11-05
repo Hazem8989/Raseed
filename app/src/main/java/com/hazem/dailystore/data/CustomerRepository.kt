@@ -48,6 +48,7 @@ class CustomerRepository(context: Context) {
                notes: String? = null): CustomerSummary {
         val cleanName = name.trim()
         require(cleanName.isNotEmpty()) { "اسم الزبون مطلوب" }
+        requirePrimaryMasterDataDevice()
         val db = database.writableDatabase
         PermissionPolicy.require(db, actorUserId, PermissionPolicy.CUSTOMERS_CREATE)
         val id = UUID.randomUUID().toString()
@@ -77,6 +78,7 @@ class CustomerRepository(context: Context) {
         require(customerId.isNotBlank()) { "معرّف الزبون مطلوب" }
         val cleanName = name.trim()
         require(cleanName.isNotEmpty()) { "اسم الزبون مطلوب" }
+        requirePrimaryMasterDataDevice()
         val db = database.writableDatabase
         PermissionPolicy.require(db, actorUserId, PermissionPolicy.CUSTOMERS_MANAGE)
         val values = ContentValues().apply {
@@ -126,6 +128,12 @@ class CustomerRepository(context: Context) {
         } finally {
             db.endTransaction()
             runCatching { SyncRelaySession.flushPending() }
+        }
+    }
+
+    private fun requirePrimaryMasterDataDevice() {
+        require(!SyncProtocolRepository(appContext).isConfiguredSecondary()) {
+            "إنشاء وتعديل بيانات الزبائن متاح من الجهاز الأساسي فقط"
         }
     }
 
