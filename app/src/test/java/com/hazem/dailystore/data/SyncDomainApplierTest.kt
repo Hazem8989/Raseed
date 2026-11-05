@@ -24,6 +24,7 @@ class SyncDomainApplierTest {
     private lateinit var vault: SyncCredentialVault
     private lateinit var adminId: String
     private lateinit var productId: String
+    private lateinit var customerId: String
     private lateinit var secondaryId: String
     private lateinit var primaryLocalDeviceId: String
     private lateinit var secondarySecret: ByteArray
@@ -48,6 +49,7 @@ class SyncDomainApplierTest {
             null, "منتج مزامنة اختباري", null, null, category.id, unit.id,
             100, 250, true, 10.0, adminId
         )
+        customerId = CustomerRepository(context).create(adminId, "زبون مزامنة اختباري").id
         database.writableDatabase.execSQL(
             "INSERT INTO exchange_rates(id,currency_code,rate_syp_per_usd_milli,effective_at,created_at) VALUES(?,?,?,?,?)",
             arrayOf(UUID.randomUUID().toString(), "USD", 10_000_000L,
@@ -189,6 +191,13 @@ class SyncDomainApplierTest {
         }
         assertTrue("Category must be sequenced before its product", categorySequence in 1L until event.first)
         assertTrue(protocol.pendingOutboxForDevice(secondaryId).any { it.entityId == productId && it.entityType == "PRODUCT" })
+        val customerEvent = db.rawQuery(
+            """SELECT payload_json FROM sync_operation_envelopes
+               WHERE entity_type='CUSTOMER' AND entity_id=? ORDER BY sequence_number DESC LIMIT 1""".trimIndent(),
+            arrayOf(customerId)
+        ).use { c -> assertTrue(c.moveToFirst()); JSONObject(c.getString(0)) }
+        assertEquals("UPSERT_CUSTOMER", customerEvent.getString("business_operation"))
+        assertEquals("زبون مزامنة اختباري", customerEvent.getString("name"))
     }
 
     @Test fun primaryProductAndOpeningStockAreAppliedToSecondaryOnce() {
@@ -236,6 +245,42 @@ class SyncDomainApplierTest {
             "SELECT quantity FROM inventory_balances WHERE product_id=?", arrayOf(id)
         ).use { it.moveToFirst(); it.getDouble(0) }, 0.000001)
         assertEquals(1, db.rawQuery("SELECT COUNT(*) FROM inventory_movements WHERE product_id=?", arrayOf(id))
+            .use { it.moveToFirst(); it.getInt(0) })
+
+        val syncedCustomerId = UUID.randomUUID().toString()
+        val customerOperationId = UUID.randomUUID().toString()
+        val customerPayload = JSONObject()
+            .put("business_operation", "UPSERT_CUSTOMER")
+            .put("customer_id", syncedCustomerId).put("name", "زبون وارد للاختبار")
+            .put("phone", "0999000000").put("address", "دمشق").put("notes", "مزامنة")
+            .put("is_active", true).put("created_at", now).put("updated_at", now)
+        db.execSQL(
+            """INSERT INTO sync_inbox(operation_id,origin_device_id,sequence_number,operation_type,
+               entity_type,entity_id,payload_json,payload_sha256,status,received_at,origin_created_at)
+               VALUES(?,?,2,'CREATE','CUSTOMER',?,?,?,'RECEIVED',?,?)""".trimIndent(),
+            arrayOf(customerOperationId, primaryId, syncedCustomerId, customerPayload.toString(),
+                "customer-hash-$customerOperationId", now, now)
+        )
+        assertTrue(applier.applyReceivedOperation(customerOperationId).applied)
+        assertEquals("زبون وارد للاختبار", db.rawQuery(
+            "SELECT name FROM customers WHERE id=?", arrayOf(syncedCustomerId)
+        ).use { it.moveToFirst(); it.getString(0) })
+        assertEquals("0999000000", db.rawQuery(
+            "SELECT phone FROM customers WHERE id=?", arrayOf(syncedCustomerId)
+        ).use { it.moveToFirst(); it.getString(0) })
+
+        val activeOperationId = UUID.randomUUID().toString()
+        val activePayload = JSONObject().put("business_operation", "SET_CUSTOMER_ACTIVE")
+            .put("customer_id", syncedCustomerId).put("is_active", false).put("occurred_at", now)
+        db.execSQL(
+            """INSERT INTO sync_inbox(operation_id,origin_device_id,sequence_number,operation_type,
+               entity_type,entity_id,payload_json,payload_sha256,status,received_at,origin_created_at)
+               VALUES(?,?,3,'UPDATE','CUSTOMER',?,?,?,'RECEIVED',?,?)""".trimIndent(),
+            arrayOf(activeOperationId, primaryId, syncedCustomerId, activePayload.toString(),
+                "customer-active-hash-$activeOperationId", now, now)
+        )
+        assertTrue(applier.applyReceivedOperation(activeOperationId).applied)
+        assertEquals(0, db.rawQuery("SELECT is_active FROM customers WHERE id=?", arrayOf(syncedCustomerId))
             .use { it.moveToFirst(); it.getInt(0) })
     }
 
