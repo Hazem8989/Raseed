@@ -42,6 +42,10 @@ class SyncProtocolRepository(private val context: Context, private val credentia
         db.beginTransaction()
         try {
             PermissionPolicy.require(db, actorUserId, PermissionPolicy.SYNC_MANAGE)
+            val currentRole = state(db, "local_device_role")
+            require(currentRole == null || currentRole == "PRIMARY") {
+                "لا يمكن ترقية جهاز ثانوي إلى جهاز أساسي؛ يجب إعداد جهاز أساسي مستقل"
+            }
             val deviceId = SyncDeviceIdentity.getOrCreate(context)
             val existingAuthority = state(db, "authority_device_id")
             require(existingAuthority == null || existingAuthority == deviceId) {
