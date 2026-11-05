@@ -72,6 +72,7 @@ class StoreRepository(context: Context) {
             db.setTransactionSuccessful()
         } finally {
             db.endTransaction()
+            runCatching { SyncRelaySession.flushPending() }
         }
     }
 
@@ -132,7 +133,7 @@ class StoreRepository(context: Context) {
                 """{"time_zone":"${jsonEscape(clean)}"}"""
             )
             db.setTransactionSuccessful()
-        } finally { db.endTransaction() }
+        } finally { db.endTransaction(); runCatching { SyncRelaySession.flushPending() } }
         return clean
     }
 
@@ -173,7 +174,7 @@ class StoreRepository(context: Context) {
                     .put("created_at", now).toString()
             )
             db.setTransactionSuccessful()
-        } finally { db.endTransaction() }
+        } finally { db.endTransaction(); runCatching { SyncRelaySession.flushPending() } }
         return milli
     }
 
@@ -201,7 +202,7 @@ class StoreRepository(context: Context) {
             )
             db.setTransactionSuccessful()
             return id
-        } finally { db.endTransaction() }
+        } finally { db.endTransaction(); runCatching { SyncRelaySession.flushPending() } }
     }
 
     /**
@@ -358,6 +359,7 @@ class StoreRepository(context: Context) {
             db.setTransactionSuccessful()
         } finally {
             db.endTransaction()
+            runCatching { SyncRelaySession.flushPending() }
         }
         return productId
     }
@@ -508,6 +510,7 @@ class StoreRepository(context: Context) {
             db.setTransactionSuccessful()
         } finally {
             db.endTransaction()
+            runCatching { SyncRelaySession.flushPending() }
         }
         return rows.size
     }
@@ -635,6 +638,7 @@ class StoreRepository(context: Context) {
             db.setTransactionSuccessful()
         } finally {
             db.endTransaction()
+            runCatching { SyncRelaySession.flushPending() }
         }
     }
 
@@ -673,7 +677,7 @@ class StoreRepository(context: Context) {
                 "PRODUCT", id, "UPDATE", payload.toString()
             )
             db.setTransactionSuccessful()
-        } finally { db.endTransaction() }
+        } finally { db.endTransaction(); runCatching { SyncRelaySession.flushPending() } }
     }
 
     fun listProducts(): List<StoreProduct> {
