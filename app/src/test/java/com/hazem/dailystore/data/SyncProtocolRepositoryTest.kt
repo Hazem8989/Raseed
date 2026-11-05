@@ -757,6 +757,12 @@ class SyncProtocolRepositoryTest {
 
         val operationId = UUID.randomUUID().toString()
         val db = database.writableDatabase
+        // This test simulates two devices in one SQLite file. Production devices
+        // have independent databases, while this test schema has one global sequence index.
+        val nextSecondarySequence = db.rawQuery(
+            "SELECT COALESCE(MAX(sequence_number),0)+1 FROM sync_operation_envelopes", null
+        ).use { c -> assertTrue(c.moveToFirst()); c.getLong(0) }
+        setProtocolStateForTest("secondary_next_sequence", nextSecondarySequence.toString())
         db.beginTransaction()
         val sequence = repository.enqueueSecondaryCommand(
             db, adminId, operationId, "POST_SALE_INVOICE",

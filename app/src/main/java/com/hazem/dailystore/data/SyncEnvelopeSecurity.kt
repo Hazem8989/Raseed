@@ -32,7 +32,7 @@ data class AuthenticatedSyncEnvelope(
 object SyncEnvelopeSecurity {
     const val PROTOCOL_VERSION = 1
     private val allowedEntities = setOf(
-        "PRODUCT", "CATEGORY", "UNIT", "CUSTOMER", "SUPPLIER",
+        "PRODUCT", "CATEGORY", "UNIT", "CUSTOMER", "SUPPLIER", "CASH_ACCOUNT",
         "PURCHASE_INVOICE", "SALES_INVOICE", "CUSTOMER_PAYMENT",
         "SUPPLIER_PAYMENT", "SALES_RETURN", "PURCHASE_RETURN",
         "INVENTORY_ADJUSTMENT", "OPERATING_EXPENSE", "CASH_ACCOUNT_TRANSFER",

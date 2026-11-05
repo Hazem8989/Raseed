@@ -167,6 +167,13 @@ class InvoiceRepositoryTest {
         sync.configureAsSecondary(
             adminId, "store-secondary-sale", primaryId, credential, "الجهاز الثانوي"
         )
+        // This unit test starts from a pre-existing local account rather than applying
+        // a signed primary account-reference event; seed the same trusted selection flag.
+        database.writableDatabase.insertWithOnConflict("sync_protocol_state", null, ContentValues().apply {
+            put("state_key", "cash_account_sales_allowed:$cashAccountId")
+            put("state_value", "1")
+            put("updated_at", "2026-10-31T10:00:00.000Z")
+        }, android.database.sqlite.SQLiteDatabase.CONFLICT_REPLACE)
         val draft = invoices.saveSalesDraft(
             adminId, "secondary-sale-draft", null, null, "2026-10-31", 0, null,
             listOf(InvoiceLineInput(productId, BigDecimal("2"), 250)), "CASH"
