@@ -338,18 +338,15 @@ class CustomerPaymentRepositoryTest {
     }
 
     @Test
-    fun primaryCustomerCollectionIsAddedToOutboxAtomically() {
+    fun primaryCustomerCollectionRemainsLocalToPrimaryDevice() {
         val context = RuntimeEnvironment.getApplication()
         val sync = SyncProtocolRepository(context)
         sync.configureAsPrimary(adminId, "الهاتف الرئيسي")
-        val before = sync.pendingOutbox().size
         val invoiceId = createCreditInvoice()
         payments.addPayment(adminId, invoiceId, "sync-customer-collection-" + UUID.randomUUID(),
-            cashDrawerId, 15000L, "تحصيل للمزامنة")
-        val queued = sync.pendingOutbox()
-        assertEquals(before + 2, queued.size)
-        assertTrue(queued.any { it.entityType == "CUSTOMER_PAYMENT" && it.operationType == "CREATE" &&
-            it.payloadJson.contains("CUSTOMER_CREDIT_COLLECTION") })
+            cashDrawerId, 15000L, "تحصيل محلي")
+        assertTrue("Customer collections are financial ledger entries and must remain on the primary device",
+            sync.pendingOutbox().none { it.entityType == "CUSTOMER_PAYMENT" })
     }
 
 }
