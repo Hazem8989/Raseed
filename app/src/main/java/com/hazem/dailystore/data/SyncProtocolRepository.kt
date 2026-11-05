@@ -1839,7 +1839,7 @@ class SyncProtocolRepository(private val context: Context, private val credentia
                       e.payload_json,e.payload_sha256,e.created_at,q.retry_count
                FROM sync_operation_envelopes e JOIN sync_queue q ON q.operation_id=e.operation_id
                WHERE e.origin_device_id=?
-                 AND e.entity_type IN ('CATEGORY','UNIT','PRODUCT','CUSTOMER','EXCHANGE_RATE','STORE_SETTINGS')
+                 AND e.entity_type IN ('CATEGORY','UNIT','PRODUCT','PRODUCT_OPENING_STOCK','CUSTOMER','EXCHANGE_RATE','STORE_SETTINGS')
                  AND NOT EXISTS (SELECT 1 FROM sync_acknowledgements a
                    WHERE a.operation_id=e.operation_id AND a.device_id=? AND a.status='APPLIED')
                ORDER BY e.sequence_number LIMIT ?""".trimIndent()
@@ -2044,7 +2044,7 @@ class SyncProtocolRepository(private val context: Context, private val credentia
     companion object {
         // Only reference data required by the sales-only secondary is replicated from primary.
         private val PRIMARY_TO_SECONDARY_REFERENCE_ENTITIES = setOf(
-            "CATEGORY", "UNIT", "PRODUCT", "CUSTOMER", "EXCHANGE_RATE", "STORE_SETTINGS"
+            "CATEGORY", "UNIT", "PRODUCT", "PRODUCT_OPENING_STOCK", "CUSTOMER", "EXCHANGE_RATE", "STORE_SETTINGS"
         )
         private const val INVITATION_TTL_MS = 10 * 60 * 1000L
         private const val MAX_PAYLOAD_CHARS = 128 * 1024

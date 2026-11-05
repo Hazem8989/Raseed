@@ -136,7 +136,22 @@ class TwoDeviceSyncIntegrationTest {
             db.endTransaction()
         }
 
+        val openingStockOperationId = UUID.randomUUID().toString()
+        db.beginTransaction()
+        try {
+            primaryRepository.enqueueLocalOperation(
+                db, primaryAdminId, openingStockOperationId,
+                "SET_PRODUCT_OPENING_STOCK", "PRODUCT_OPENING_STOCK", "existing-product",
+                "CREATE", JSONObject().put("business_operation", "SET_PRODUCT_OPENING_STOCK").toString()
+            )
+            db.setTransactionSuccessful()
+        } finally {
+            db.endTransaction()
+        }
+
         val pending = primaryRepository.pendingOutboxForDevice(secondaryId)
+        assertTrue("Primary opening-stock updates must remain deliverable",
+            pending.any { it.operationId == openingStockOperationId })
         assertTrue("Reference catalog events must remain deliverable",
             pending.any { it.entityType == "CATEGORY" })
         assertTrue("Standalone unit events must remain deliverable",
