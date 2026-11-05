@@ -893,13 +893,14 @@ class SyncProtocolRepository(private val context: Context, private val credentia
             // metadata to impersonate that operation ID.
             val existing = db.rawQuery(
                 """SELECT payload_sha256,origin_device_id,sequence_number,operation_type,
-                          entity_type,entity_id,origin_created_at,payload_json
+                          entity_type,entity_id,origin_created_at,payload_json,actor_user_id,status
                    FROM sync_inbox WHERE operation_id=?""".trimIndent(),
                 arrayOf(envelope.operationId)
             ).use { c ->
                 if (!c.moveToFirst()) null else arrayOf(
                     c.getString(0), c.getString(1), c.getLong(2).toString(), c.getString(3),
-                    c.getString(4), c.getString(5), c.getString(6), c.getString(7)
+                    c.getString(4), c.getString(5), c.getString(6), c.getString(7),
+                    c.getString(8), c.getString(9)
                 )
             }
             if (existing != null) {
@@ -909,7 +910,9 @@ class SyncProtocolRepository(private val context: Context, private val credentia
                     existing[3] == envelope.operationType &&
                     existing[4] == envelope.entityType &&
                     existing[5] == envelope.entityId &&
-                    existing[6] == envelope.createdAt
+                    existing[6] == envelope.createdAt &&
+                    (existing[8] == envelope.actorUserId ||
+                        (existing[8] == null && existing[9] == "APPLIED"))
                 if (exactReplay) {
                     db.setTransactionSuccessful()
                     return SyncInboxDisposition.DUPLICATE
@@ -968,6 +971,7 @@ class SyncProtocolRepository(private val context: Context, private val credentia
                 put("operation_id", envelope.operationId); put("origin_device_id", envelope.originDeviceId)
                 put("sequence_number", envelope.sequenceNumber); put("operation_type", envelope.operationType)
                 put("entity_type", envelope.entityType); put("entity_id", envelope.entityId)
+                put("actor_user_id", envelope.actorUserId)
                 put("payload_json", envelope.payloadJson); put("payload_sha256", envelope.payloadSha256)
                 put("status", "RECEIVED"); put("received_at", now)
                 put("origin_created_at", envelope.createdAt)
