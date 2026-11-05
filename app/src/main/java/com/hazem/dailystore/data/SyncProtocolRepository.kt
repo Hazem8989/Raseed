@@ -360,9 +360,21 @@ class SyncProtocolRepository(private val context: Context, private val credentia
         return credentialVault.load(SyncDeviceIdentity.getOrCreate(context))
     }
 
-    fun isConfiguredSecondary(): Boolean =
-        state(database.readableDatabase, "local_device_role") == "SECONDARY" &&
-            !state(database.readableDatabase, "authority_device_id").isNullOrBlank()
+    /**
+     * Resolve secondary status from both the mutable protocol flags and the durable
+     * enrolled-device record. Losing local_device_role or authority_device_id must
+     * never make an enrolled secondary look like a primary installation.
+     */
+    fun isConfiguredSecondary(): Boolean {
+        val db = database.readableDatabase
+        if (state(db, "local_device_role") == "SECONDARY") return true
+        val localId = state(db, "local_device_id") ?: return false
+        val enrolledRole = db.rawQuery(
+            "SELECT device_role FROM sync_devices WHERE device_id=?",
+            arrayOf(localId)
+        ).use { c -> if (c.moveToFirst()) c.getString(0) else null }
+        return enrolledRole == "SECONDARY"
+    }
 
     /** Public root configuration to provision in the relay Worker after primary setup. */
     fun primaryRelayTrustRootJson(): String {
