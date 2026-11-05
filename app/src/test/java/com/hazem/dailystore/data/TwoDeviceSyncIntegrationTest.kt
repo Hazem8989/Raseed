@@ -657,6 +657,35 @@ class TwoDeviceSyncIntegrationTest {
 
 
     @Test fun twoIndependentDevicesCollectCustomerDebtThroughSignedAckExactlyOnce() {
+        // The fixture creates secondary sequence 1 as a transport probe. Deliver
+        // and acknowledge it before later commands; the primary correctly rejects
+        // sequence 2 if sequence 1 has not been committed to its inbound cursor.
+        var probeAck: String? = null
+        var probeError: String? = null
+        setLocalDeviceId(primaryId)
+        AppDatabase.installForTests(primaryDb)
+        val primaryProbeProcessor = SyncRelayProcessor(
+            primaryRepository, SyncDomainApplier(context),
+            listener = object : SyncRelayProcessor.Listener {
+                override fun onProtocolError(operationId: String?, message: String) { probeError = message }
+            },
+            sendFrame = { id, recipient, frame ->
+                assertEquals(operationId, id)
+                assertEquals(secondaryId, recipient)
+                probeAck = frame
+                true
+            }
+        )
+        primaryProbeProcessor.onEncryptedFrame(secondaryId, operationId, outgoingFrame)
+        assertEquals("تعذر تطبيق أمر التهيئة السابق: $probeError", null, probeError)
+        assertEquals("APPLIED", inboxStatus(primaryDb, operationId))
+        val signedProbeAck = probeAck ?: throw AssertionError("لم يصدر الأساسي ACK لأمر التهيئة")
+        setLocalDeviceId(secondaryId)
+        AppDatabase.installForTests(secondaryDb)
+        SyncRelayProcessor(secondaryRepository, SyncDomainApplier(context), sendFrame = { _, _, _ -> true })
+            .onEncryptedFrame(primaryId, operationId, signedProbeAck)
+        assertEquals("SYNCED", queueStatus(secondaryDb, operationId))
+
         setLocalDeviceId(primaryId)
         AppDatabase.installForTests(primaryDb)
         val rateId = UUID.randomUUID().toString()
