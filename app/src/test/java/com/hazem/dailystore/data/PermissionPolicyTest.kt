@@ -75,7 +75,6 @@ class PermissionPolicyTest {
             PermissionPolicy.CUSTOMERS_CREATE,
             PermissionPolicy.CUSTOMERS_MANAGE,
             PermissionPolicy.CUSTOMERS_COLLECT,
-            PermissionPolicy.SALES_CHECKOUT,
             PermissionPolicy.DAILY_CASH_MANAGE,
             PermissionPolicy.SERVICE_TRANSFERS_MANAGE,
             PermissionPolicy.SERVICE_TRANSFERS_EXECUTE,
@@ -97,6 +96,12 @@ class PermissionPolicyTest {
             } catch (error: IllegalArgumentException) {
                 assertTrue(error.message.orEmpty().contains("الجهاز الثانوي"))
             }
+        }
+        try {
+            PermissionPolicy.require(database.readableDatabase, adminId, PermissionPolicy.SALES_CHECKOUT)
+            fail("A secondary must not locally authorize the generic sales-posting permission")
+        } catch (error: IllegalArgumentException) {
+            assertTrue(error.message.orEmpty().contains("الجهاز ثانوي"))
         }
         // POS checkout uses the assigned permission directly; ordinary require()
         // remains primary-only for any local financial posting path.
