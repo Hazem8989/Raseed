@@ -423,6 +423,51 @@ class SyncProtocolRepositoryTest {
         assertNull(repository.localDeviceRole())
     }
 
+    @Test fun enrolledPrimaryCannotDowngradeToSecondaryWhenLocalRoleStateIsMissing() {
+        repository.configureAsPrimary(adminId, "الجهاز الأساسي")
+        val context = RuntimeEnvironment.getApplication()
+        val localId = SyncDeviceIdentity.getOrCreate(context)
+        val storeId = database.readableDatabase.rawQuery(
+            "SELECT state_value FROM sync_protocol_state WHERE state_key='store_id'", null
+        ).use { c -> assertTrue(c.moveToFirst()); c.getString(0) }
+        database.writableDatabase.delete(
+            "sync_protocol_state", "state_key='local_device_role'", null
+        )
+
+        val proposedPrimaryId = UUID.randomUUID().toString()
+        val proposedPrimary = SyncDeviceAuthenticator.getOrCreate(context, proposedPrimaryId)
+        val localIdentity = SyncDeviceAuthenticator.getOrCreate(context, localId)
+        val localPublic = android.util.Base64.encodeToString(
+            localIdentity.public.encoded, android.util.Base64.NO_WRAP
+        )
+        val primaryPublic = android.util.Base64.encodeToString(
+            proposedPrimary.public.encoded, android.util.Base64.NO_WRAP
+        )
+        val certificate = SyncDeviceCertificate.issue(
+            storeId, proposedPrimaryId, localId, localPublic, proposedPrimary.private
+        )
+        val credential = android.util.Base64.encodeToString(
+            ByteArray(32) { 13 },
+            android.util.Base64.URL_SAFE or android.util.Base64.NO_WRAP or android.util.Base64.NO_PADDING
+        )
+
+        var denied = false
+        try {
+            repository.configureAsSecondary(
+                adminId, storeId, proposedPrimaryId, credential, "محاولة تحويل",
+                primaryPublicKeyBase64 = primaryPublic,
+                deviceCertificateJson = certificate
+            )
+        } catch (_: IllegalArgumentException) {
+            denied = true
+        }
+
+        assertTrue("يجب منع تحويل الجهاز الأساسي اعتماداً على سجل الجهاز حتى عند فقدان الحالة", denied)
+        database.readableDatabase.rawQuery(
+            "SELECT device_role FROM sync_devices WHERE device_id=?", arrayOf(localId)
+        ).use { c -> assertTrue(c.moveToFirst()); assertEquals("PRIMARY", c.getString(0)) }
+    }
+
     @Test fun cashierCannotConfigurePrimaryOrCreateInvitations() {
         val auth = AuthRepository(RuntimeEnvironment.getApplication())
         val cashierId = auth.createUser("ADMIN", adminId, "sync-cashier", "Cashier", "Cashier12345", "CASHIER")
