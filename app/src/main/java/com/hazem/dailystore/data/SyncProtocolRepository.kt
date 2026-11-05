@@ -844,15 +844,9 @@ class SyncProtocolRepository(private val context: Context, private val credentia
     private fun requiredPermissionForBusinessOperation(operation: String): String =
         when (operation) {
             "POST_SALES_INVOICE" -> PermissionPolicy.SALES_CHECKOUT
-            "POST_PURCHASE_INVOICE" -> PermissionPolicy.PURCHASES_MANAGE
-            "COLLECT_CUSTOMER_PAYMENT" -> PermissionPolicy.CUSTOMERS_COLLECT
-            "POST_SUPPLIER_PAYMENT" -> PermissionPolicy.SUPPLIER_PAYMENTS_MANAGE
-            "POST_OPERATING_EXPENSE" -> PermissionPolicy.EXPENSES_MANAGE
-            "EXECUTE_SERVICE_TRANSFER" -> PermissionPolicy.SERVICE_TRANSFERS_EXECUTE
-            "SET_SUPPLIER_ROLLOVER" -> PermissionPolicy.DAILY_CASH_MANAGE
-            "POST_SALES_RETURN", "POST_PURCHASE_RETURN" -> PermissionPolicy.RETURNS_PROCESS
-            "POST_INVENTORY_ADJUSTMENT", "ADJUST_INVENTORY" -> PermissionPolicy.INVENTORY_ADJUST
-            else -> throw IllegalArgumentException("نوع العملية غير مدعوم للاعتماد عن بعد")
+            else -> throw IllegalArgumentException(
+                "الجهاز الثانوي مخول بإرسال فواتير البيع واختبارات المزامنة فقط"
+            )
         }
 
     /**
@@ -909,6 +903,10 @@ class SyncProtocolRepository(private val context: Context, private val credentia
 
             val payload = JSONObject(envelope.payloadJson)
             val businessOperation = payload.optString("business_operation")
+            require(businessOperation == "POST_SALES_INVOICE" ||
+                businessOperation == "SYNC_TRANSPORT_PROBE") {
+                "الجهاز الثانوي مخول بإرسال فواتير البيع واختبارات المزامنة فقط"
+            }
             if (businessOperation == "SYNC_TRANSPORT_PROBE") {
                 // A transport probe is deliberately non-financial. It proves the
                 // authenticated route and signed ACK without requiring business
