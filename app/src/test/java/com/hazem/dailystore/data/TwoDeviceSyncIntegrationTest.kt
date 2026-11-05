@@ -943,6 +943,92 @@ class TwoDeviceSyncIntegrationTest {
             "SELECT COUNT(*) FROM cash_transactions WHERE operation_id=?", operationId))
     }
 
+    @Test fun secondaryOutboxWaitsDuringNetworkOutageAndCompletesAfterReconnect() {
+        // Simulate a network outage by withholding delivery to the primary.
+        // The durable command must remain pending and be deliverable after reconnect.
+        assertEquals("PENDING", queueStatus(secondaryDb, operationId))
+        assertTrue(secondaryRepository.pendingOutboxForDevice(primaryId)
+            .any { it.operationId == operationId })
+
+        var ack: String? = null
+        var protocolError: String? = null
+        setLocalDeviceId(primaryId)
+        AppDatabase.installForTests(primaryDb)
+        val primaryProcessor = SyncRelayProcessor(
+            primaryRepository, SyncDomainApplier(context),
+            listener = object : SyncRelayProcessor.Listener {
+                override fun onProtocolError(operationId: String?, message: String) {
+                    protocolError = message
+                }
+            },
+            sendFrame = { id, recipient, frame ->
+                assertEquals(operationId, id)
+                assertEquals(secondaryId, recipient)
+                ack = frame
+                true
+            }
+        )
+        primaryProcessor.onEncryptedFrame(secondaryId, operationId, outgoingFrame)
+        assertEquals("لم يستعد الأمر بعد عودة الاتصال: $protocolError", null, protocolError)
+        assertEquals("APPLIED", inboxStatus(primaryDb, operationId))
+
+        setLocalDeviceId(secondaryId)
+        AppDatabase.installForTests(secondaryDb)
+        SyncRelayProcessor(secondaryRepository, SyncDomainApplier(context), sendFrame = { _, _, _ -> true })
+            .onEncryptedFrame(primaryId, operationId, ack
+                ?: throw AssertionError("لم يصل ACK بعد استعادة الاتصال"))
+        assertEquals("SYNCED", queueStatus(secondaryDb, operationId))
+        assertEquals(1, scalar(primaryDb, "SELECT COUNT(*) FROM sync_inbox WHERE operation_id=?", operationId))
+    }
+
+    @Test fun pendingSecondaryOutboxSurvivesDatabaseReopenAndProcessRecreation() {
+        // Reopen the named SQLite database and recreate the repository, as after
+        // the app process is killed and Android starts it again.
+        secondaryDb.close()
+        secondaryDb = AppDatabase(context, SECONDARY_DATABASE)
+        AppDatabase.installForTests(secondaryDb)
+        setLocalDeviceId(secondaryId)
+        secondaryRepository = SyncProtocolRepository(
+            context, SyncCredentialVault(context) { vaultKey }
+        )
+
+        assertEquals("PENDING", queueStatus(secondaryDb, operationId))
+        val persisted = secondaryRepository.pendingOutboxForDevice(primaryId)
+            .single { it.operationId == operationId }
+        assertEquals(operationId, persisted.operationId)
+        val restoredFrame = secondaryRepository.encryptedAuthenticatedOutbox(operationId, primaryId)
+
+        var ack: String? = null
+        var protocolError: String? = null
+        setLocalDeviceId(primaryId)
+        AppDatabase.installForTests(primaryDb)
+        val primaryProcessor = SyncRelayProcessor(
+            primaryRepository, SyncDomainApplier(context),
+            listener = object : SyncRelayProcessor.Listener {
+                override fun onProtocolError(operationId: String?, message: String) {
+                    protocolError = message
+                }
+            },
+            sendFrame = { id, recipient, frame ->
+                assertEquals(operationId, id)
+                assertEquals(secondaryId, recipient)
+                ack = frame
+                true
+            }
+        )
+        primaryProcessor.onEncryptedFrame(secondaryId, operationId, restoredFrame)
+        assertEquals("رفض الأساسي الأمر المستعاد: $protocolError", null, protocolError)
+        assertEquals("APPLIED", inboxStatus(primaryDb, operationId))
+
+        setLocalDeviceId(secondaryId)
+        AppDatabase.installForTests(secondaryDb)
+        SyncRelayProcessor(secondaryRepository, SyncDomainApplier(context), sendFrame = { _, _, _ -> true })
+            .onEncryptedFrame(primaryId, operationId, ack
+                ?: throw AssertionError("لم يصدر ACK للأمر المستعاد"))
+        assertEquals("SYNCED", queueStatus(secondaryDb, operationId))
+        assertEquals(1, scalar(primaryDb, "SELECT COUNT(*) FROM sync_inbox WHERE operation_id=?", operationId))
+    }
+
     private fun createReadyAdmin(): String {
         val auth = AuthRepository(context)
         auth.ensureInitialAdmin()
