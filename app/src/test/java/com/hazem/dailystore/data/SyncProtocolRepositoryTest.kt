@@ -429,7 +429,7 @@ class SyncProtocolRepositoryTest {
         val recipientSecret = vault.load(remoteId)!!
         assertTrue(SyncEnvelopeSecurity.verify(envelope, recipientSecret))
         assertEquals("CREATE", envelope.operationType)
-        assertEquals("SALE_POSTED", org.json.JSONObject(envelope.payloadJson).getString("business_operation"))
+        assertEquals("UPSERT_PRODUCT", org.json.JSONObject(envelope.payloadJson).getString("business_operation"))
         recipientSecret.fill(0)
     }
 
@@ -720,7 +720,7 @@ class SyncProtocolRepositoryTest {
         db.beginTransaction()
         val result = repository.enqueueLocalOperation(
             db, adminId, UUID.randomUUID().toString(), "UPSERT_PRODUCT", "PRODUCT", "product-1",
-            "CREATE", """{"invoice_id":"sale-1"}"""
+            "CREATE", """{"product_id":"product-1"}"""
         )
         db.setTransactionSuccessful()
         db.endTransaction()
