@@ -1636,7 +1636,7 @@ class SyncDomainApplier(context: Context) {
                 "SELECT track_inventory,unit_id FROM products WHERE id=?", arrayOf(productId)
             ).use { c ->
                 require(c.moveToFirst()) { "المنتج غير موجود على الجهاز الثانوي" }
-                c.getInt(0) == 1 to c.getLong(1)
+                (c.getInt(0) == 1) to c.getLong(1)
             }
             require(product.first) { "المنتج لا يتتبع المخزون" }
             val decimals = db.rawQuery("SELECT decimal_places FROM units WHERE id=?",
