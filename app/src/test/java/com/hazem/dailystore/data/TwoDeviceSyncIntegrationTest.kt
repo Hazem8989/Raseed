@@ -176,7 +176,8 @@ class TwoDeviceSyncIntegrationTest {
         AppDatabase.installForTests(secondaryDb)
         secondaryProcessor.onEncryptedFrame(primaryId, probeId, probeAck!!)
         assertEquals("SYNCED", queueStatus(secondaryDb, probeId))
-        assertEquals(0, scalar(primaryDb, "SELECT COUNT(*) FROM operating_expenses", null))
+        assertEquals(0, primaryDb.readableDatabase.rawQuery("SELECT COUNT(*) FROM operating_expenses", null)
+            .use { it.moveToFirst(); it.getInt(0) })
     }
 
     @Test fun twoIndependentDevicesSyncCashSaleStockAndFinancialEffectsExactlyOnce() {
@@ -369,6 +370,19 @@ class TwoDeviceSyncIntegrationTest {
             )
         } catch (_: IllegalArgumentException) { rejected = true }
         assertTrue("Secondary must not collect customer debt", rejected)
+        val secondarySql = secondaryDb.writableDatabase
+        var directCommandRejected = false
+        secondarySql.beginTransaction()
+        try {
+            try {
+                secondaryRepository.enqueueSecondaryCommand(
+                    secondarySql, secondaryAdminId, "forged-expense-" + UUID.randomUUID(),
+                    "POST_OPERATING_EXPENSE", "OPERATING_EXPENSE", "forged-expense", "{}"
+                )
+            } catch (_: IllegalArgumentException) { directCommandRejected = true }
+            assertTrue("Outbox must independently reject non-sale command types", directCommandRejected)
+            secondarySql.setTransactionSuccessful()
+        } finally { secondarySql.endTransaction() }
         assertEquals(beforeOutbox, scalar(secondaryDb,
             "SELECT COUNT(*) FROM sync_operation_envelopes WHERE origin_device_id=?", secondaryId))
         assertEquals(0, scalar(secondaryDb,
