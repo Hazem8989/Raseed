@@ -213,6 +213,7 @@ class InvoiceRepository(context: Context) {
         val invoiceForeignKey = if (type == "PURCHASE") "purchase_invoice_id" else "sales_invoice_id"
         val operationType = "POST_${type}_INVOICE"
         val payloadHash = hash(if (cashAccountId == null) "$type|$invoiceId" else "$type|$invoiceId|$cashAccountId")
+        var flushAfterCommit = false
         db.beginTransaction()
         try {
             val syncRepository = SyncProtocolRepository(context)
@@ -363,6 +364,7 @@ class InvoiceRepository(context: Context) {
                     queuedEventAt, queuedOperatingDate
                 )
                 db.setTransactionSuccessful()
+                flushAfterCommit = true
                 return true
             }
             db.rawQuery(
@@ -469,9 +471,11 @@ class InvoiceRepository(context: Context) {
             )
             registerOperation(db, operationId, operationType, payloadHash, invoiceId, now)
             db.setTransactionSuccessful()
+            flushAfterCommit = true
             return true
         } finally {
             db.endTransaction()
+            if (flushAfterCommit) runCatching { SyncRelaySession.flushPending() }
         }
     }
 
