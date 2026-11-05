@@ -149,6 +149,11 @@ object PermissionPolicy {
         permissionKey: String, allowed: Boolean
     ) {
         require(db.rawQuery(
+            "SELECT state_value FROM sync_protocol_state WHERE state_key='local_device_role'", null
+        ).use { c -> !c.moveToFirst() || c.getString(0) != "SECONDARY" }) {
+            "إدارة صلاحيات المستخدمين متاحة من الجهاز الأساسي فقط"
+        }
+        require(db.rawQuery(
             """SELECT 1 FROM users
                WHERE id=? AND role_key='ADMIN' AND is_active=1 AND must_change_password=0""".trimIndent(),
             arrayOf(actorUserId)
