@@ -46,7 +46,7 @@ class SyncDeviceManagementActivity : Activity() {
         render()
         val savedEndpoint = preferences.getString(KEY_RELAY_WSS, null)
         if (!savedEndpoint.isNullOrBlank() && repository.localDeviceRole() != null) {
-            runCatching { SyncRelaySession.connect(applicationContext, savedEndpoint, repository) }
+            runCatching { SyncForegroundService.start(this) }
                 .onFailure { status.text = "تعذر بدء اتصال الوسيط: ${it.message ?: "عنوان غير صالح"}" }
         }
     }
@@ -116,8 +116,8 @@ class SyncDeviceManagementActivity : Activity() {
             status.text = if (SyncRelaySession.isConnected()) "الاتصال المشفر جاهز." else "الاتصال غير جاهز؛ ستستمر إعادة المحاولة تلقائياً عند وجود إعداد صالح."
         }
         addButton(root, "قطع اتصال المزامنة") {
-            SyncRelaySession.disconnect()
             preferences.edit().remove(KEY_RELAY_WSS).apply()
+            SyncForegroundService.stop(this)
             status.text = "تم قطع الاتصال وإيقاف إعادة الاتصال التلقائية."
         }
         addButton(root, "عودة") { finish() }
@@ -308,7 +308,7 @@ class SyncDeviceManagementActivity : Activity() {
                     val wss = https.replaceFirst(Regex("^https://", RegexOption.IGNORE_CASE), "wss://")
                     require(wss.startsWith("wss://"))
                     preferences.edit().putString(KEY_RELAY_WSS, wss).apply()
-                    SyncRelaySession.connect(applicationContext, wss, repository)
+                    SyncForegroundService.start(this)
                 }
             }.setNegativeButton("إلغاء", null).show()
     }
@@ -350,8 +350,8 @@ class SyncDeviceManagementActivity : Activity() {
         prompt("عنوان وسيط المزامنة", "wss://your-worker.workers.dev") { endpoint ->
             runTask("حفظ عنوان الوسيط وبدء المصادقة") {
                 require(endpoint.startsWith("wss://", ignoreCase = true)) { "يجب إدخال عنوان WSS مشفر" }
-                SyncRelaySession.connect(applicationContext, endpoint, repository)
                 preferences.edit().putString(KEY_RELAY_WSS, endpoint).apply()
+                SyncForegroundService.start(this)
             }
         }
     }
