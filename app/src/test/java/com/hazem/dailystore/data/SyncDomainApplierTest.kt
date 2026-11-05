@@ -152,6 +152,41 @@ class SyncDomainApplierTest {
         assertEquals("RECEIVED", inboxStatus(conflictId))
     }
 
+    @Test fun pairingQueuesOrderedCategoryAndProductBootstrapSnapshot() {
+        val db = database.readableDatabase
+        val event = db.rawQuery(
+            """SELECT sequence_number,payload_json FROM sync_operation_envelopes
+               WHERE entity_type='PRODUCT' AND entity_id=? ORDER BY sequence_number DESC LIMIT 1""".trimIndent(),
+            arrayOf(productId)
+        ).use { c -> assertTrue(c.moveToFirst()); c.getLong(0) to JSONObject(c.getString(1)) }
+        assertEquals("UPSERT_PRODUCT", event.second.getString("business_operation"))
+        assertEquals(productId, event.second.getString("product_id"))
+        assertEquals(10.0, event.second.getDouble("opening_quantity"), 0.000001)
+        assertEquals("منتج مزامنة اختباري", event.second.getString("name"))
+        assertTrue(event.second.getString("unit_name").isNotBlank())
+        val primaryCategoryId = event.second.getLong("primary_category_id")
+        val categorySequence = db.rawQuery(
+            "SELECT sequence_number FROM sync_operation_envelopes WHERE entity_type='CATEGORY' AND sequence_number<? ORDER BY sequence_number",
+            arrayOf(event.first.toString())
+        ).use { c ->
+            var found = false
+            var sequence = 0L
+            while (c.moveToNext()) {
+                val candidateSequence = c.getLong(0)
+                val payload = db.rawQuery(
+                    "SELECT payload_json FROM sync_operation_envelopes WHERE sequence_number=?",
+                    arrayOf(candidateSequence.toString())
+                ).use { p -> p.moveToFirst(); JSONObject(p.getString(0)) }
+                if (payload.optLong("primary_category_id") == primaryCategoryId) {
+                    found = true; sequence = candidateSequence; break
+                }
+            }
+            if (found) sequence else 0L
+        }
+        assertTrue("Category must be sequenced before its product", categorySequence in 1 until event.first)
+        assertTrue(protocol.pendingOutboxForDevice(secondaryId).any { it.entityId == productId && it.entityType == "PRODUCT" })
+    }
+
     @Test fun primaryProductAndOpeningStockAreAppliedToSecondaryOnce() {
         val primaryId = SyncDeviceIdentity.getOrCreate(context)
         check(context.getSharedPreferences("the_daily_shop_sync_identity", Context.MODE_PRIVATE)
