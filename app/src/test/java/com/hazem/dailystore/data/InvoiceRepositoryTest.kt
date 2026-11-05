@@ -112,7 +112,7 @@ class InvoiceRepositoryTest {
     }
 
     @Test
-    fun primaryDeviceWritesInvoiceAndOutboxEnvelopeInTheSamePostingTransaction() {
+    fun primaryPurchaseInvoiceRemainsLocalToPrimaryDevice() {
         SyncProtocolRepository(RuntimeEnvironment.getApplication())
             .configureAsPrimary(adminId, "الهاتف الرئيسي")
         val draft = invoices.savePurchaseDraft(
@@ -121,11 +121,8 @@ class InvoiceRepositoryTest {
         )
         assertTrue(invoices.postPurchase(adminId, draft.invoiceId, "sync-purchase-post"))
         val outbox = SyncProtocolRepository(RuntimeEnvironment.getApplication()).pendingOutbox()
-        assertEquals(1, outbox.size)
-        assertEquals("CREATE", outbox.single().operationType)
-        assertTrue(outbox.single().payloadJson.contains("POST_PURCHASE_INVOICE"))
-        assertTrue(outbox.single().payloadJson.contains(draft.invoiceId))
-        assertEquals(1L, outbox.single().sequence)
+        assertTrue("Purchase invoices and their financial/stock postings remain on the primary device",
+            outbox.isEmpty())
     }
 
     @Test
