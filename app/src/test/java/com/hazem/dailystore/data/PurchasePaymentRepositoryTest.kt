@@ -286,42 +286,24 @@ class PurchasePaymentRepositoryTest {
     }
 
     @Test
-    fun secondarySupplierPaymentQueuesWithoutChangingCashOrInvoiceLocally() {
+    fun secondarySupplierPaymentIsRejectedBySalesOnlyPolicy() {
         val context = RuntimeEnvironment.getApplication()
         val vault = SyncCredentialVault(context) { SecretKeySpec(ByteArray(32) { 19 }, "AES") }
         val sync = SyncProtocolRepository(context, vault)
         val primaryId = UUID.randomUUID().toString()
-        val credential = android.util.Base64.encodeToString(
-            ByteArray(32) { (it + 5).toByte() },
-            android.util.Base64.URL_SAFE or android.util.Base64.NO_WRAP or android.util.Base64.NO_PADDING
-        )
-        sync.configureAsSecondary(
-            adminId, "supplier-payment-store", primaryId, credential, "الجهاز الثانوي", "Asia/Damascus"
-        )
-
+        val credential = android.util.Base64.encodeToString(ByteArray(32) { (it + 5).toByte() },
+            android.util.Base64.URL_SAFE or android.util.Base64.NO_WRAP or android.util.Base64.NO_PADDING)
+        sync.configureAsSecondary(adminId, "supplier-payment-store", primaryId, credential, "الجهاز الثانوي", "Asia/Damascus")
         val beforeBalance = cashAccounts.balance(accountId)
         val beforeStatus = payments.listPurchaseInvoices().first { it.id == invoiceId }.invoiceStatus
-        val operationId = "secondary-supplier-payment-" + UUID.randomUUID()
-        val result = payments.addPayment(adminId, invoiceId, operationId, accountId, 1000L, "دفعة معلقة")
-
-        assertEquals("pending-payment-$operationId", result.paymentId)
+        var rejected = false
+        try { payments.addPayment(adminId, invoiceId, "secondary-supplier-payment-" + UUID.randomUUID(),
+            accountId, 1_000L, "دفعة ممنوعة") }
+        catch (_: IllegalArgumentException) { rejected = true }
+        assertTrue(rejected)
         assertEquals(beforeBalance, cashAccounts.balance(accountId))
         assertEquals(beforeStatus, payments.listPurchaseInvoices().first { it.id == invoiceId }.invoiceStatus)
-        database.readableDatabase.rawQuery(
-            "SELECT COUNT(*) FROM invoice_payments WHERE invoice_type='PURCHASE' AND invoice_id=?",
-            arrayOf(invoiceId)
-        ).use { assertTrue(it.moveToFirst()); assertEquals(0, it.getInt(0)) }
-        database.readableDatabase.rawQuery(
-            "SELECT COUNT(*) FROM cash_transactions WHERE operation_id=?",
-            arrayOf(operationId)
-        ).use { assertTrue(it.moveToFirst()); assertEquals(0, it.getInt(0)) }
-
-        val queued = sync.pendingOutbox().single()
-        assertEquals(operationId, queued.operationId)
-        assertEquals("SUPPLIER_PAYMENT", queued.entityType)
-        assertEquals("CREATE", queued.operationType)
-        assertTrue(queued.payloadJson.contains("POST_SUPPLIER_PAYMENT"))
-        assertTrue(queued.payloadJson.contains("دفعة معلقة"))
+        assertTrue(sync.pendingOutbox().isEmpty())
     }
 
     @Test
