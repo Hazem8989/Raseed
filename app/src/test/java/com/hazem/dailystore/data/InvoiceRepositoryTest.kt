@@ -129,7 +129,7 @@ class InvoiceRepositoryTest {
     }
 
     @Test
-    fun secondaryPurchasePostingQueuesIdempotentlyWithoutChangingStockOrInvoiceStatus() {
+    fun secondaryDeviceCannotCreateOrPostPurchaseInvoices() {
         val context = RuntimeEnvironment.getApplication()
         val primaryId = UUID.randomUUID().toString()
         val secret = ByteArray(32) { (it + 17).toByte() }
@@ -142,31 +142,17 @@ class InvoiceRepositoryTest {
         sync.configureAsSecondary(
             adminId, "store-secondary-purchase", primaryId, credential, "الجهاز الثانوي"
         )
-        val draft = invoices.savePurchaseDraft(
-            adminId, "secondary-purchase-draft", null, null, "2026-10-31", 0, null,
-            listOf(InvoiceLineInput(productId, BigDecimal("3"), 125))
-        )
-        val beforeStock = stock()
-        assertTrue(invoices.postPurchase(adminId, draft.invoiceId, "ui-post-attempt-1"))
-        assertEquals(beforeStock, stock(), 0.000001)
-        assertEquals("DRAFT", invoices.listPurchaseInvoices().single { it.id == draft.invoiceId }.status)
-        assertEquals(1, sync.pendingOutbox().size)
-        val firstPayload = org.json.JSONObject(sync.pendingOutbox().single().payloadJson)
-        assertEquals("POST_PURCHASE_INVOICE", firstPayload.getString("business_operation"))
-        assertEquals(draft.invoiceId, firstPayload.getString("id"))
-        assertEquals(1, firstPayload.getJSONArray("items").length())
-        val firstEventAt = firstPayload.getString("posted_at")
-        val firstOperatingDate = firstPayload.getString("posted_operating_date")
-
-        assertTrue(invoices.postPurchase(adminId, draft.invoiceId, "ui-post-attempt-2"))
-        assertEquals(1, sync.pendingOutbox().size)
-        val retryPayload = org.json.JSONObject(sync.pendingOutbox().single().payloadJson)
-        assertEquals(firstEventAt, retryPayload.getString("posted_at"))
-        assertEquals(firstOperatingDate, retryPayload.getString("posted_operating_date"))
-        val envelope = sync.authenticatedOutbox(
-            "secondary-invoice-post:${draft.invoiceId}", primaryId
-        )
-        assertTrue(SyncEnvelopeSecurity.verify(envelope, secret))
+        try {
+            invoices.savePurchaseDraft(
+                adminId, "secondary-purchase-draft", null, null, "2026-10-31", 0, null,
+                listOf(InvoiceLineInput(productId, BigDecimal("3"), 125))
+            )
+            throw AssertionError("Secondary device must not create purchase drafts")
+        } catch (expected: IllegalArgumentException) {
+            assertTrue(expected.message!!.contains("الجهاز الرئيسي"))
+        }
+        assertTrue(sync.pendingOutbox().isEmpty())
+        assertEquals(10.0, stock(), 0.000001)
         secret.fill(0)
     }
 
