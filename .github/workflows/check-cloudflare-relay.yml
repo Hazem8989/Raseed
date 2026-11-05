@@ -6,6 +6,9 @@ on:
       - the-daily-shop-development
     paths:
       - 'cloudflare-relay/**'
+      - 'app/src/main/java/com/hazem/dailystore/data/Sync*.kt'
+      - 'app/src/test/java/com/hazem/dailystore/data/Sync*.kt'
+      - 'app/src/test/java/com/hazem/dailystore/data/TwoDeviceSyncIntegrationTest.kt'
       - '.github/workflows/check-cloudflare-relay.yml'
   workflow_dispatch:
 
