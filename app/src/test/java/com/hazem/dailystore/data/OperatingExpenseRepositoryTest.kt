@@ -139,17 +139,14 @@ class OperatingExpenseRepositoryTest {
         assertEquals(0,repository.listExpenses().size)
     }
 
-    @Test fun primaryOperatingExpenseIsAddedToOutboxAtomically() {
+    @Test fun primaryOperatingExpenseRemainsLocalToPrimaryDevice() {
         val context=RuntimeEnvironment.getApplication()
         val sync=SyncProtocolRepository(context)
         sync.configureAsPrimary(adminId,"الهاتف الرئيسي")
         repository.postExpense(adminId,"sync-expense-"+UUID.randomUUID(),categoryId,sypAccountId,
             10000L,"2026-11-02","مصروف للمزامنة",null)
-        val queued=sync.pendingOutbox().single()
-        assertEquals("OPERATING_EXPENSE",queued.entityType)
-        assertEquals("CREATE",queued.operationType)
-        assertTrue(queued.payloadJson.contains("POST_OPERATING_EXPENSE"))
-        assertTrue(queued.payloadJson.contains("amount_usd_cents"))
+        assertTrue("Operating expenses are primary-only financial operations",
+            sync.pendingOutbox().isEmpty())
     }
 
     // Sync-domain coverage is added below.
