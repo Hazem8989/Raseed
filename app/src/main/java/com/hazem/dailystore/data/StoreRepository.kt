@@ -505,15 +505,6 @@ class StoreRepository(context: Context) {
                 put("created_at", now)
             }
             db.insertOrThrow("audit_log", null, audit)
-            val openingPayload = org.json.JSONObject()
-                .put("business_operation", "SET_PRODUCT_OPENING_STOCK")
-                .put("product_id", productId).put("quantity", quantity)
-                .put("unit_cost_usd_cents", product.second).put("warehouse_id", warehouseId)
-                .put("note", note ?: org.json.JSONObject.NULL).put("occurred_at", now)
-            SyncProtocolRepository(appContext).enqueueLocalOperation(
-                db, actorUserId, "opening-stock-sync-$productId", "SET_PRODUCT_OPENING_STOCK",
-                "PRODUCT_OPENING_STOCK", productId, "CREATE", openingPayload.toString()
-            )
             db.setTransactionSuccessful()
         } finally {
             db.endTransaction()
@@ -632,6 +623,15 @@ class StoreRepository(context: Context) {
                 put("created_at", now)
             }
             db.insertOrThrow("audit_log", null, audit)
+            val openingPayload = org.json.JSONObject()
+                .put("business_operation", "SET_PRODUCT_OPENING_STOCK")
+                .put("product_id", productId).put("quantity", quantity)
+                .put("unit_cost_usd_cents", product.second).put("warehouse_id", warehouseId)
+                .put("note", note ?: org.json.JSONObject.NULL).put("occurred_at", now)
+            SyncProtocolRepository(appContext).enqueueLocalOperation(
+                db, actorUserId, "opening-stock-sync-$productId", "SET_PRODUCT_OPENING_STOCK",
+                "PRODUCT_OPENING_STOCK", productId, "CREATE", openingPayload.toString()
+            )
             db.setTransactionSuccessful()
         } finally {
             db.endTransaction()
