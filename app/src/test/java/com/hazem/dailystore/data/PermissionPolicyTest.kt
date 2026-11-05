@@ -221,4 +221,208 @@ class PermissionPolicyTest {
             fail("Expected administrator permission lock")
         } catch (_: IllegalArgumentException) { }
     }
+
+    private fun assertSecondaryDenied(label: String, action: () -> Unit) {
+        var denied = false
+        try {
+            action()
+        } catch (_: IllegalArgumentException) {
+            denied = true
+        }
+        assertTrue("$label must be denied on a secondary device", denied)
+    }
+
+    private fun financialMutationCounts(): Map<String, Int> {
+        val tables = listOf(
+            "cash_transactions", "invoice_payments", "inventory_movements",
+            "inventory_adjustments", "operating_expenses", "returns",
+            "service_transfers", "service_wallet_transactions", "cash_account_transfers",
+            "daily_supplier_rollovers", "sync_operation_envelopes", "sync_queue"
+        )
+        return tables.associateWith { table ->
+            database.readableDatabase.rawQuery("SELECT COUNT(*) FROM $table", null).use { c ->
+                assertTrue(c.moveToFirst())
+                c.getInt(0)
+            }
+        }
+    }
+
+    @Test
+    fun everyFinancialRepositoryRejectsDirectSecondaryWritesBeforeMutation() {
+        val context = RuntimeEnvironment.getApplication()
+        database.writableDatabase.execSQL(
+            "INSERT INTO sync_protocol_state(state_key,state_value,updated_at) VALUES('local_device_role','SECONDARY','2026-11-06T00:00:00Z')"
+        )
+        val before = financialMutationCounts()
+
+        assertSecondaryDenied("purchase invoice posting") {
+            InvoiceRepository(context).postPurchase(adminId, "missing-invoice", "secondary-purchase-post")
+        }
+        assertSecondaryDenied("supplier payment") {
+            PurchasePaymentRepository(context).addPayment(
+                adminId, "missing-invoice", "secondary-supplier-payment", "missing-account", 1L
+            )
+        }
+        assertSecondaryDenied("supplier payment correction") {
+            PurchasePaymentRepository(context).editPayment(
+                "ADMIN", adminId, "missing-payment", "missing-account", 1L, null
+            )
+        }
+        assertSecondaryDenied("sales return") {
+            SalesReturnRepository(context).postSalesReturn(
+                adminId, "missing-invoice", "secondary-sales-return", "2026-11-06",
+                "test", listOf(SalesReturnItemInput("missing-item", java.math.BigDecimal.ONE)),
+                emptyList()
+            )
+        }
+        assertSecondaryDenied("purchase return") {
+            PurchaseReturnRepository(context).postPurchaseReturn(
+                adminId, "missing-invoice", "secondary-purchase-return", "2026-11-06",
+                "test", listOf(PurchaseReturnItemInput("missing-item", java.math.BigDecimal.ONE)),
+                emptyList()
+            )
+        }
+        assertSecondaryDenied("expense category creation") {
+            OperatingExpenseRepository(context).createCategory(adminId, "secondary-category")
+        }
+        assertSecondaryDenied("operating expense") {
+            OperatingExpenseRepository(context).postExpense(
+                adminId, "secondary-expense", "missing-category", "missing-account",
+                1L, "2026-11-06"
+            )
+        }
+        assertSecondaryDenied("inventory adjustment") {
+            InventoryAdjustmentRepository(context).postAdjustment(
+                adminId, "missing-product", java.math.BigDecimal.ONE, "test",
+                "secondary-adjustment", 1L
+            )
+        }
+
+        val daily = DailyBalanceRepository(context)
+        assertSecondaryDenied("supplier rollover allocation") {
+            daily.setSupplierRollover(adminId, "missing-account", 1L)
+        }
+        assertSecondaryDenied("cash-box transfer") {
+            daily.transferCashBetweenBoxes(adminId, "source", "destination", 1L, "secondary-cash-transfer")
+        }
+        assertSecondaryDenied("cash-to-wallet transfer") {
+            daily.transferCashToWallet(adminId, "source", "wallet", 1L, "secondary-wallet-funding")
+        }
+        assertSecondaryDenied("wallet-to-drawer transfer") {
+            daily.transferWalletToDrawer(adminId, "wallet", "destination", 1L, "secondary-wallet-draw")
+        }
+        assertSecondaryDenied("personal withdrawal") {
+            daily.addPersonalWithdrawal(adminId, "missing-account", 1L, "secondary-withdrawal")
+        }
+        assertSecondaryDenied("wallet opening balance") {
+            daily.setWalletOpening(adminId, "missing-wallet", 1L)
+        }
+
+        val accounts = CashAccountRepository(context)
+        assertSecondaryDenied("cash account creation") {
+            accounts.create(adminId, "secondary-account", "CASH_BOX", "SYP", 0L)
+        }
+        assertSecondaryDenied("cash account editing") {
+            accounts.updateDetails("ADMIN", adminId, "missing-account", "changed", "CASH_BOX", "SYP")
+        }
+        assertSecondaryDenied("daily primary drawer assignment") {
+            accounts.setCurrentDayPrimaryDrawer("ADMIN", adminId, "missing-account")
+        }
+
+        val services = ServiceTransferRepository(context)
+        assertSecondaryDenied("service recharge-account configuration") {
+            services.setRechargeAccount(adminId, "missing-account")
+        }
+        assertSecondaryDenied("service wallet recharge") {
+            services.recharge(
+                adminId, ServiceTransferRepository.SYRIATEL_SHARED, "missing-account",
+                1L, "secondary-service-recharge"
+            )
+        }
+        assertSecondaryDenied("customer service transfer") {
+            services.executeTransfer(
+                adminId, ServiceTransferRepository.SYRIATEL_BALANCE, 1L, 0L,
+                "missing-account", "secondary-service-transfer"
+            )
+        }
+        assertSecondaryDenied("service transfer reversal") {
+            services.reverseTransfer(adminId, "missing-transfer", "secondary-service-reversal", "test")
+        }
+
+        assertSecondaryDenied("supplier creation") {
+            SupplierRepository(context).create(adminId, "secondary-supplier")
+        }
+        assertSecondaryDenied("customer creation") {
+            CustomerRepository(context).create(adminId, "secondary-customer")
+        }
+        assertSecondaryDenied("customer editing") {
+            CustomerRepository(context).update(adminId, "missing-customer", "changed")
+        }
+        assertSecondaryDenied("employee administration") {
+            auth.createUser(adminId, adminId, "secondary-user", "Secondary user", "SecondaryPass123", "CASHIER")
+        }
+
+        assertEquals("No financial ledger or sync command may be written by a rejected direct call",
+            before, financialMutationCounts())
+    }
+
+    @Test
+    fun directFinancialRepositoriesRemainDeniedWhenRoleFlagIsLost() {
+        val context = RuntimeEnvironment.getApplication()
+        val localDeviceId = java.util.UUID.randomUUID().toString()
+        database.writableDatabase.execSQL(
+            """INSERT INTO sync_devices(
+                device_id,display_name,device_role,status,created_at,last_seen_at
+            ) VALUES(?,?,?,'ACTIVE','2026-11-06T00:00:00Z','2026-11-06T00:00:00Z')""",
+            arrayOf(localDeviceId, "الثانوي", "SECONDARY")
+        )
+        database.writableDatabase.execSQL(
+            """INSERT INTO sync_protocol_state(state_key,state_value,updated_at)
+               VALUES('local_device_id',?,'2026-11-06T00:00:00Z')""",
+            arrayOf(localDeviceId)
+        )
+        // Deliberately omit local_device_role: repository-level gates must use the enrolled role.
+        assertSecondaryDenied("expense posting after role-state loss") {
+            OperatingExpenseRepository(context).postExpense(
+                adminId, "lost-role-expense", "category", "account", 1L, "2026-11-06"
+            )
+        }
+        assertSecondaryDenied("supplier payment after role-state loss") {
+            PurchasePaymentRepository(context).addPayment(
+                adminId, "invoice", "lost-role-payment", "account", 1L
+            )
+        }
+        assertSecondaryDenied("inventory adjustment after role-state loss") {
+            InventoryAdjustmentRepository(context).postAdjustment(
+                adminId, "product", java.math.BigDecimal.ONE, "test", "lost-role-adjustment", 1L
+            )
+        }
+        assertSecondaryDenied("sales return after role-state loss") {
+            SalesReturnRepository(context).postSalesReturn(
+                adminId, "invoice", "lost-role-sales-return", "2026-11-06", "test",
+                listOf(SalesReturnItemInput("item", java.math.BigDecimal.ONE)), emptyList()
+            )
+        }
+        assertSecondaryDenied("purchase return after role-state loss") {
+            PurchaseReturnRepository(context).postPurchaseReturn(
+                adminId, "invoice", "lost-role-purchase-return", "2026-11-06", "test",
+                listOf(PurchaseReturnItemInput("item", java.math.BigDecimal.ONE)), emptyList()
+            )
+        }
+        assertSecondaryDenied("cash transfer after role-state loss") {
+            DailyBalanceRepository(context).transferCashBetweenBoxes(
+                adminId, "source", "destination", 1L, "lost-role-transfer"
+            )
+        }
+        assertSecondaryDenied("service transfer after role-state loss") {
+            ServiceTransferRepository(context).executeTransfer(
+                adminId, ServiceTransferRepository.SYRIATEL_BALANCE, 1L, 0L,
+                "account", "lost-role-service-transfer"
+            )
+        }
+        assertSecondaryDenied("purchase posting after role-state loss") {
+            InvoiceRepository(context).postPurchase(adminId, "invoice", "lost-role-purchase-post")
+        }
+    }
+
 }
