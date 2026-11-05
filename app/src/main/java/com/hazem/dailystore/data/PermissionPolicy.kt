@@ -91,17 +91,32 @@ object PermissionPolicy {
      * data. This is a fail-closed safety gate, not the final secondary workflow.
      */
     private val primaryOnlyPermissions = setOf(
-        CATALOG_MANAGE, EXCHANGE_RATE_MANAGE, ACCOUNTS_MANAGE, SUPPLIERS_MANAGE,
-        PURCHASES_MANAGE, SUPPLIER_PAYMENTS_MANAGE, SUPPLIER_PAYMENTS_CORRECT,
-        CUSTOMERS_CREATE, CUSTOMERS_MANAGE, CUSTOMERS_COLLECT, SALES_CHECKOUT,
-        DAILY_CASH_MANAGE, SERVICE_TRANSFERS_MANAGE, SERVICE_TRANSFERS_EXECUTE,
+        USERS_MANAGE, CATALOG_MANAGE, EXCHANGE_RATE_MANAGE, ACCOUNTS_MANAGE,
+        SUPPLIERS_MANAGE, PURCHASES_MANAGE, SUPPLIER_PAYMENTS_MANAGE,
+        SUPPLIER_PAYMENTS_CORRECT, CUSTOMERS_CREATE, CUSTOMERS_MANAGE,
+        CUSTOMERS_COLLECT, SALES_CHECKOUT, DAILY_CASH_MANAGE,
+        SERVICE_TRANSFERS_MANAGE, SERVICE_TRANSFERS_EXECUTE, BACKUP_MANAGE,
         INVENTORY_ADJUST, RETURNS_PROCESS, EXPENSES_MANAGE
+    )
+
+    // A secondary is a sales terminal, not a second financial workstation.
+    // Customer lookup is needed by POS; only sales checkout and sync controls
+    // may authorize writes/actions there. Every other permission fails closed.
+    private val secondaryAllowedPermissions = setOf(
+        SALES_CHECKOUT, CUSTOMERS_READ, SYNC_MANAGE
     )
 
     /** Checks the user's assigned permission without deciding where a write may be committed. */
     fun requireAssigned(db: SQLiteDatabase, userId: String, permissionKey: String) {
         require(userId.isNotBlank()) { "جلسة المستخدم غير صالحة" }
         require(permissionKey in descriptions) { "الصلاحية المطلوبة غير معروفة" }
+        val role = db.rawQuery(
+            "SELECT state_value FROM sync_protocol_state WHERE state_key='local_device_role'",
+            null
+        ).use { c -> if (c.moveToFirst()) c.getString(0) else null }
+        require(role != "SECONDARY" || permissionKey in secondaryAllowedPermissions) {
+            "الجهاز الثانوي مخصص للبيع والمزامنة فقط؛ هذه العملية متاحة من الجهاز الأساسي"
+        }
         val allowed = db.rawQuery(
             """SELECT 1
                FROM users u
