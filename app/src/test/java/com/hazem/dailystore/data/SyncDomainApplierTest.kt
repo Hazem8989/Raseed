@@ -1024,12 +1024,29 @@ class SyncDomainApplierTest {
             "SET_SUPPLIER_ROLLOVER" -> "DAILY_SUPPLIER_ROLLOVER"
             else -> "SALES_INVOICE"
         }
-        val envelope = SyncEnvelopeSecurity.create(
-            storeId, operationId, nextSequence(), secondaryId, "remote-admin",
-            "CREATE", entityType, resolvedEntityId, 0L, payload.toString(), "2026-11-03T12:00:00Z", secondarySecret
-        )
-        assertEquals(SyncInboxDisposition.RECEIVED,
-            protocol.recordIncomingFromSecondary(SyncEnvelopeSecurity.encode(envelope)))
+        val occurredAt = "2026-11-03T12:00:00Z"
+        if (operation in setOf("POST_SALES_INVOICE", "SYNC_TRANSPORT_PROBE")) {
+            val envelope = SyncEnvelopeSecurity.create(
+                storeId, operationId, nextSequence(), secondaryId, "remote-admin",
+                "CREATE", entityType, resolvedEntityId, 0L, payload.toString(), occurredAt, secondarySecret
+            )
+            assertEquals(SyncInboxDisposition.RECEIVED,
+                protocol.recordIncomingFromSecondary(SyncEnvelopeSecurity.encode(envelope)))
+        } else {
+            // These domain-applier fixtures intentionally exercise legacy internal handlers.
+            // The public secondary ingress rejects them under the sales-only device policy.
+            val sequence = database.readableDatabase.rawQuery(
+                "SELECT COALESCE(MAX(sequence_number),0)+1 FROM sync_inbox WHERE origin_device_id=?",
+                arrayOf(secondaryId)
+            ).use { c -> assertTrue(c.moveToFirst()); c.getLong(0) }
+            database.writableDatabase.insertOrThrow("sync_inbox", null, android.content.ContentValues().apply {
+                put("operation_id", operationId); put("origin_device_id", secondaryId)
+                put("sequence_number", sequence); put("operation_type", "CREATE")
+                put("entity_type", entityType); put("entity_id", resolvedEntityId)
+                put("payload_json", payload.toString()); put("payload_sha256", "internal-test-$operationId")
+                put("status", "RECEIVED"); put("received_at", occurredAt); put("origin_created_at", occurredAt)
+            })
+        }
         return operationId
     }
 
