@@ -109,6 +109,15 @@ class PermissionPolicyTest {
         PermissionPolicy.requireAssigned(database.readableDatabase, adminId, PermissionPolicy.CUSTOMERS_COLLECT)
         PermissionPolicy.requireAssigned(database.readableDatabase, adminId, PermissionPolicy.CUSTOMERS_READ)
         PermissionPolicy.requireAssigned(database.readableDatabase, adminId, PermissionPolicy.SYNC_MANAGE)
+        // A cashier on the secondary gets only the two business actions assigned by policy.
+        PermissionPolicy.requireAssigned(database.readableDatabase, cashierId, PermissionPolicy.SALES_CHECKOUT)
+        PermissionPolicy.requireAssigned(database.readableDatabase, cashierId, PermissionPolicy.CUSTOMERS_COLLECT)
+        assertSecondaryDenied("cashier customer creation") {
+            PermissionPolicy.requireAssigned(database.readableDatabase, cashierId, PermissionPolicy.CUSTOMERS_CREATE)
+        }
+        assertSecondaryDenied("cashier service transfer") {
+            PermissionPolicy.requireAssigned(database.readableDatabase, cashierId, PermissionPolicy.SERVICE_TRANSFERS_EXECUTE)
+        }
         assertTrue(allowed(adminId, PermissionPolicy.SYNC_MANAGE))
     }
 
