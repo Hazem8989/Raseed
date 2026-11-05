@@ -28,6 +28,10 @@ class ServiceTransferRepository(context:Context) {
     }
 
     fun ensureSystemAccounts() {
+        // Service-wallet setup and legacy-ledger migration are primary-owned writes.
+        // A secondary may read already-synchronized links, but must never seed local
+        // wallets/accounts or materialize financial movements as a side effect of a read.
+        if (SyncProtocolRepository(appContext).isConfiguredSecondary()) return
         CashAccountRepository(appContext).ensureSystemCashAccounts()
         val db=database.writableDatabase
         db.beginTransaction()
