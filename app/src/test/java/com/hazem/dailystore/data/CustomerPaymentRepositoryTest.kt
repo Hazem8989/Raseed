@@ -317,7 +317,7 @@ class CustomerPaymentRepositoryTest {
         ).use { it.moveToFirst(); it.getInt(0) }
 
     @Test
-    fun secondaryCustomerCollectionIsRejectedBySalesOnlyPolicy() {
+    fun secondaryCustomerCollectionQueuesForPrimaryWithoutLocalFinancialPosting() {
         val context = RuntimeEnvironment.getApplication()
         val invoiceId = createCreditInvoice()
         val sync = SyncProtocolRepository(context, SyncCredentialVault(context) { SecretKeySpec(ByteArray(32) { 13 }, "AES") })
@@ -326,15 +326,24 @@ class CustomerPaymentRepositoryTest {
         val credential = android.util.Base64.encodeToString(ByteArray(32) { 11 },
             android.util.Base64.URL_SAFE or android.util.Base64.NO_WRAP or android.util.Base64.NO_PADDING)
         sync.configureAsSecondary(adminId, storeId, primaryDeviceId, credential, "جهاز ثانوي اختباري")
-        var rejected = false
-        try { payments.addPayment(adminId, invoiceId, "secondary-customer-collection-" + UUID.randomUUID(), cashDrawerId, 15_000L) }
-        catch (_: IllegalArgumentException) { rejected = true }
-        assertTrue(rejected)
-        assertTrue(payments.listPayments(invoiceId).isEmpty())
+
+        val result = payments.addPayment(
+            adminId, invoiceId, "secondary-customer-collection-" + UUID.randomUUID(),
+            cashDrawerId, 15_000L, "تحصيل من الجهاز الثانوي"
+        )
+
+        assertFalse(result.replayed)
+        assertEquals(400L, result.outstandingUsdCents)
+        assertTrue("A secondary collection must remain pending until the primary applies it",
+            payments.listPayments(invoiceId).isEmpty())
         assertEquals(0, database.readableDatabase.rawQuery(
             "SELECT COUNT(*) FROM cash_transactions WHERE transaction_type='CUSTOMER_CREDIT_COLLECTION'", null
         ).use { c -> c.moveToFirst(); c.getInt(0) })
-        assertTrue(sync.pendingOutbox().isEmpty())
+        val queued = sync.pendingOutbox()
+        assertEquals(1, queued.size)
+        assertEquals("COLLECT_CUSTOMER_PAYMENT", queued.single().operationType)
+        assertEquals("CUSTOMER_PAYMENT", queued.single().entityType)
+        assertTrue(queued.single().payloadJson.contains("\"business_operation\":\"COLLECT_CUSTOMER_PAYMENT\""))
     }
 
     @Test
