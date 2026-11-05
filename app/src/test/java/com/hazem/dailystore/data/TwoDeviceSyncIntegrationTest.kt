@@ -733,6 +733,9 @@ class TwoDeviceSyncIntegrationTest {
     private fun scalar(db: AppDatabase, sql: String, arg: String): Int =
         db.readableDatabase.rawQuery(sql, arrayOf(arg)).use { c -> assertTrue(c.moveToFirst()); c.getInt(0) }
 
+    private fun scalar(db: AppDatabase, sql: String, first: String, second: String): Int =
+        db.readableDatabase.rawQuery(sql, arrayOf(first, second)).use { c -> assertTrue(c.moveToFirst()); c.getInt(0) }
+
     private fun scalarLong(db: AppDatabase, sql: String, first: String, second: String): Long =
         db.readableDatabase.rawQuery(sql, arrayOf(first, second)).use { c -> assertTrue(c.moveToFirst()); c.getLong(0) }
 
