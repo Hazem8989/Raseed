@@ -353,6 +353,8 @@ class StoreRepository(context: Context) {
             val after = """{"name":"${jsonEscape(cleanName)}","purchase_cost_usd_cents":$purchaseCostUsdCents,"sale_price_usd_cents":$salePriceUsdCents,"track_inventory":${if (tracksInventory) 1 else 0},"opening_quantity":$openingQuantity}"""
             insertAudit(db, actorUserId, if (id == null) "CREATE_PRODUCT" else "UPDATE_PRODUCT",
                 "PRODUCT", productId, before, after, now)
+            enqueueProductSync(db, actorUserId, productId, if (id == null) "CREATE" else "UPDATE",
+                includeOpeningStock = id == null && openingQuantity > 0.0)
             db.setTransactionSuccessful()
         } finally {
             db.endTransaction()
@@ -473,8 +475,9 @@ class StoreRepository(context: Context) {
                     }
                 }
 
+                val importedProductId = UUID.randomUUID().toString()
                 val product = ContentValues().apply {
-                    put("id", UUID.randomUUID().toString())
+                    put("id", importedProductId)
                     putNullable("barcode", barcode)
                     putNullable("sku", sku)
                     put("name", cleanName)
@@ -487,6 +490,7 @@ class StoreRepository(context: Context) {
                     put("updated_at", now)
                 }
                 db.insertOrThrow("products", null, product)
+                enqueueProductSync(db, actorUserId, importedProductId, "CREATE", includeOpeningStock = false)
                 // No stock is imported. The user will enter a verified physical count later.
             }
             val batchId = UUID.randomUUID().toString()
@@ -501,6 +505,15 @@ class StoreRepository(context: Context) {
                 put("created_at", now)
             }
             db.insertOrThrow("audit_log", null, audit)
+            val openingPayload = org.json.JSONObject()
+                .put("business_operation", "SET_PRODUCT_OPENING_STOCK")
+                .put("product_id", productId).put("quantity", quantity)
+                .put("unit_cost_usd_cents", product.second).put("warehouse_id", warehouseId)
+                .put("note", note ?: org.json.JSONObject.NULL).put("occurred_at", now)
+            SyncProtocolRepository(appContext).enqueueLocalOperation(
+                db, actorUserId, "opening-stock-sync-$productId", "SET_PRODUCT_OPENING_STOCK",
+                "PRODUCT_OPENING_STOCK", productId, "CREATE", openingPayload.toString()
+            )
             db.setTransactionSuccessful()
         } finally {
             db.endTransaction()
@@ -653,6 +666,12 @@ class StoreRepository(context: Context) {
             insertAudit(db, actorUserId, if (active) "ACTIVATE_PRODUCT" else "DEACTIVATE_PRODUCT",
                 "PRODUCT", id, """{"name":"${jsonEscape(old.first)}","is_active":${old.second}}""",
                 """{"name":"${jsonEscape(old.first)}","is_active":${if (active) 1 else 0}}""", now)
+            val payload = org.json.JSONObject().put("business_operation", "SET_PRODUCT_ACTIVE")
+                .put("product_id", id).put("is_active", active).put("occurred_at", now)
+            SyncProtocolRepository(appContext).enqueueLocalOperation(
+                db, actorUserId, UUID.randomUUID().toString(), "SET_PRODUCT_ACTIVE",
+                "PRODUCT", id, "UPDATE", payload.toString()
+            )
             db.setTransactionSuccessful()
         } finally { db.endTransaction() }
     }
@@ -699,6 +718,49 @@ class StoreRepository(context: Context) {
 
     private fun ContentValues.putNullable(key: String, value: String?) {
         if (value == null) putNull(key) else put(key, value)
+    }
+
+    private fun enqueueProductSync(
+        db: android.database.sqlite.SQLiteDatabase,
+        actorUserId: String,
+        productId: String,
+        changeKind: String,
+        includeOpeningStock: Boolean
+    ) {
+        val product = db.rawQuery(
+            """SELECT p.name,p.barcode,p.sku,p.category_id,c.name,u.name,u.symbol,u.decimal_places,
+                      p.purchase_cost_usd_cents,p.sale_price_usd_cents,p.track_inventory,p.is_active,
+                      p.created_at,p.updated_at,
+                      COALESCE((SELECT SUM(ib.quantity) FROM inventory_balances ib WHERE ib.product_id=p.id),0)
+               FROM products p JOIN units u ON u.id=p.unit_id
+               LEFT JOIN categories c ON c.id=p.category_id WHERE p.id=?""".trimIndent(),
+            arrayOf(productId)
+        ).use { cursor ->
+            require(cursor.moveToFirst()) { "المنتج غير موجود عند تجهيز المزامنة" }
+            org.json.JSONObject().apply {
+                put("business_operation", "UPSERT_PRODUCT")
+                put("product_id", productId)
+                put("name", cursor.getString(0))
+                put("barcode", if (cursor.isNull(1)) org.json.JSONObject.NULL else cursor.getString(1))
+                put("sku", if (cursor.isNull(2)) org.json.JSONObject.NULL else cursor.getString(2))
+                put("primary_category_id", if (cursor.isNull(3)) org.json.JSONObject.NULL else cursor.getLong(3))
+                put("category_name", if (cursor.isNull(4)) org.json.JSONObject.NULL else cursor.getString(4))
+                put("unit_name", cursor.getString(5))
+                put("unit_symbol", cursor.getString(6))
+                put("unit_decimal_places", cursor.getInt(7))
+                put("purchase_cost_usd_cents", cursor.getLong(8))
+                put("sale_price_usd_cents", cursor.getLong(9))
+                put("tracks_inventory", cursor.getInt(10) == 1)
+                put("is_active", cursor.getInt(11) == 1)
+                put("created_at", cursor.getString(12))
+                put("updated_at", cursor.getString(13))
+                put("opening_quantity", if (includeOpeningStock) cursor.getDouble(14) else 0.0)
+            }
+        }
+        SyncProtocolRepository(appContext).enqueueLocalOperation(
+            db, actorUserId, UUID.randomUUID().toString(), "UPSERT_PRODUCT",
+            "PRODUCT", productId, changeKind, product.toString()
+        )
     }
 
     private fun requirePrimaryCatalogAuthority() {
