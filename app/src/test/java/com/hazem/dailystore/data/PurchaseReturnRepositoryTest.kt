@@ -240,29 +240,22 @@ class PurchaseReturnRepositoryTest {
     }
 
 
-    @Test fun secondaryPurchaseReturnQueuesWithoutChangingStockOrSupplierLedger() {
-        val context=RuntimeEnvironment.getApplication()
-        val stockBefore=stock()
-        val vault=SyncCredentialVault(context) { javax.crypto.spec.SecretKeySpec(ByteArray(32){29},"AES") }
-        val sync=SyncProtocolRepository(context,vault)
-        val credential=android.util.Base64.encodeToString(ByteArray(32){(it+9).toByte()},
+    @Test fun secondaryPurchaseReturnIsRejectedBySalesOnlyPolicy() {
+        val context = RuntimeEnvironment.getApplication()
+        val stockBefore = stock()
+        val vault = SyncCredentialVault(context) { javax.crypto.spec.SecretKeySpec(ByteArray(32) { 29 }, "AES") }
+        val sync = SyncProtocolRepository(context, vault)
+        val credential = android.util.Base64.encodeToString(ByteArray(32) { (it + 9).toByte() },
             android.util.Base64.URL_SAFE or android.util.Base64.NO_WRAP or android.util.Base64.NO_PADDING)
-        sync.configureAsSecondary(adminId,"purchase-return-sync-store",UUID.randomUUID().toString(),credential,
-            "جهاز مرتجعات مورد ثانوي","Asia/Damascus")
-        val operationId="secondary-purchase-return-"+UUID.randomUUID()
-        val first=returns.postPurchaseReturn(adminId,invoiceId,operationId,"2026-11-03",
-            "مرتجع على جهاز ثانوي",item("1"),emptyList())
-        val queued=sync.pendingOutbox().single()
-        val originalTime=org.json.JSONObject(queued.payloadJson).getString("occurred_at")
-        val replay=returns.postPurchaseReturn(adminId,invoiceId,operationId,"2026-11-03",
-            "مرتجع على جهاز ثانوي",item("1"),emptyList())
-        assertEquals("pending-return-$operationId",first.returnId)
-        assertEquals(first.returnId,replay.returnId)
-        assertEquals(queued.payloadJson,sync.pendingOutbox().single().payloadJson)
-        assertEquals(stockBefore,stock(),0.000001)
-        assertEquals(0,db.readableDatabase.rawQuery("SELECT COUNT(*) FROM returns WHERE operation_id=?",
-            arrayOf(operationId)).use { it.moveToFirst();it.getInt(0) })
-        assertEquals(originalTime,org.json.JSONObject(sync.pendingOutbox().single().payloadJson).getString("occurred_at"))
+        sync.configureAsSecondary(adminId, "purchase-return-sync-store", UUID.randomUUID().toString(),
+            credential, "جهاز مرتجعات ثانوي", "Asia/Damascus")
+        var rejected = false
+        try { returns.postPurchaseReturn(adminId, invoiceId, "secondary-purchase-return-" + UUID.randomUUID(),
+            "2026-11-03", "مرتجع ممنوع", item("1"), emptyList()) }
+        catch (_: IllegalArgumentException) { rejected = true }
+        assertTrue(rejected)
+        assertEquals(stockBefore, stock(), 0.000001)
+        assertTrue(sync.pendingOutbox().isEmpty())
     }
 
     @Test fun primaryPurchaseReturnIsAddedToOutboxAtomically() {
