@@ -718,12 +718,12 @@ class SyncProtocolRepository(private val context: Context, private val credentia
             "إرسال الأوامر المعلقة متاح للجهاز الثانوي المسجل فقط"
         }
         require(state(db, "authority_device_id").isNullOrBlank().not()) { "الجهاز الأساسي غير محدد" }
-        require(businessOperation in setOf("POST_SALES_INVOICE", "SYNC_TRANSPORT_PROBE")) {
+        require(businessOperation in setOf("POST_SALE_INVOICE", "SYNC_TRANSPORT_PROBE")) {
             "الجهاز الثانوي مخول بإرسال فواتير البيع واختبارات المزامنة فقط"
         }
         PermissionPolicy.requireAssigned(
             db, actorUserId,
-            if (businessOperation == "POST_SALES_INVOICE") PermissionPolicy.SALES_CHECKOUT
+            if (businessOperation == "POST_SALE_INVOICE") PermissionPolicy.SALES_CHECKOUT
             else PermissionPolicy.SYNC_MANAGE
         )
         require(operationId.isNotBlank() && businessOperation.isNotBlank() &&
@@ -857,7 +857,7 @@ class SyncProtocolRepository(private val context: Context, private val credentia
 
     private fun requiredPermissionForBusinessOperation(operation: String): String =
         when (operation) {
-            "POST_SALES_INVOICE" -> PermissionPolicy.SALES_CHECKOUT
+            "POST_SALE_INVOICE" -> PermissionPolicy.SALES_CHECKOUT
             else -> throw IllegalArgumentException(
                 "الجهاز الثانوي مخول بإرسال فواتير البيع واختبارات المزامنة فقط"
             )
@@ -917,7 +917,7 @@ class SyncProtocolRepository(private val context: Context, private val credentia
 
             val payload = JSONObject(envelope.payloadJson)
             val businessOperation = payload.optString("business_operation")
-            require(businessOperation == "POST_SALES_INVOICE" ||
+            require(businessOperation == "POST_SALE_INVOICE" ||
                 businessOperation == "SYNC_TRANSPORT_PROBE") {
                 "الجهاز الثانوي مخول بإرسال فواتير البيع واختبارات المزامنة فقط"
             }
