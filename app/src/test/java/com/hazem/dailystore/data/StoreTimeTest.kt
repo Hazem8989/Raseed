@@ -98,6 +98,17 @@ class StoreTimeTest {
         assertEquals("2026-11-03", transferDate)
         assertEquals("2026-11-03", walletDate)
         assertEquals(AppDatabase.DATABASE_VERSION, database.readableDatabase.version)
+        // Version-22 fixture predates the sync protocol tables. The upgrade must
+        // recreate the protocol base schema before adding actor_user_id.
+        val inboxColumns = mutableSetOf<String>()
+        database.readableDatabase.rawQuery("PRAGMA table_info(sync_inbox)", null).use { c ->
+            while (c.moveToNext()) inboxColumns.add(c.getString(1))
+        }
+        assertTrue(inboxColumns.contains("actor_user_id"))
+        assertTrue(inboxColumns.contains("origin_created_at"))
+        assertTrue(database.readableDatabase.rawQuery(
+            "SELECT 1 FROM sqlite_master WHERE type='table' AND name='sync_actor_mappings'", null
+        ).use { it.moveToFirst() })
     }
 
 }
