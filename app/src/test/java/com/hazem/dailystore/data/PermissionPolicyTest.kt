@@ -113,6 +113,42 @@ class PermissionPolicyTest {
     }
 
     @Test
+    fun enrolledSecondaryRemainsRestrictedWhenRoleFlagIsMissing() {
+        val localDeviceId = java.util.UUID.randomUUID().toString()
+        database.writableDatabase.execSQL(
+            """INSERT INTO sync_devices(
+                device_id,display_name,device_role,status,created_at,last_seen_at
+            ) VALUES(?,?,?,'ACTIVE','2026-11-06T00:00:00Z','2026-11-06T00:00:00Z')""",
+            arrayOf(localDeviceId, "الثانوي", "SECONDARY")
+        )
+        database.writableDatabase.execSQL(
+            """INSERT INTO sync_protocol_state(state_key,state_value,updated_at)
+               VALUES('local_device_id',?,'2026-11-06T00:00:00Z')""",
+            arrayOf(localDeviceId)
+        )
+
+        try {
+            PermissionPolicy.require(
+                database.readableDatabase, adminId, PermissionPolicy.PURCHASES_MANAGE
+            )
+            fail("An enrolled secondary must remain blocked without the role flag")
+        } catch (_: IllegalArgumentException) { }
+        try {
+            PermissionPolicy.setRolePermission(
+                database.writableDatabase, adminId, "CASHIER",
+                PermissionPolicy.PURCHASES_MANAGE, true
+            )
+            fail("An enrolled secondary must not manage role permissions")
+        } catch (_: IllegalArgumentException) { }
+        PermissionPolicy.requireAssigned(
+            database.readableDatabase, adminId, PermissionPolicy.SALES_CHECKOUT
+        )
+        PermissionPolicy.requireAssigned(
+            database.readableDatabase, adminId, PermissionPolicy.CUSTOMERS_COLLECT
+        )
+    }
+
+    @Test
     fun managerCanGrantAndRevokeCashierPermissionWithAuditTrail() {
         PermissionPolicy.setRolePermission(
             database.writableDatabase, adminId, "CASHIER",
