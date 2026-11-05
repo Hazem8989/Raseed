@@ -60,7 +60,7 @@ class TwoDeviceSyncIntegrationTest {
         val enrollment = primaryRepository.enrollSecondaryDevice(
             primaryAdminId, invitation.token, secondaryId, "جهاز التكامل الثانوي", remotePublicKey
         )
-remove manual account map        secondaryDb = AppDatabase(context, SECONDARY_DATABASE)
+        secondaryDb = AppDatabase(context, SECONDARY_DATABASE)
         AppDatabase.installForTests(secondaryDb)
         StoreRepository(context).ensureBaseSetup()
         secondaryAdminId = createReadyAdmin()
