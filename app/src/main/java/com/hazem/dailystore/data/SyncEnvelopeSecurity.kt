@@ -30,7 +30,7 @@ data class AuthenticatedSyncEnvelope(
  * enrollment, replay, primary authority, and entity revision checks.
  */
 object SyncEnvelopeSecurity {
-    const val PROTOCOL_VERSION = 1
+    const val PROTOCOL_VERSION = 2
     private val allowedEntities = setOf(
         "PRODUCT", "CATEGORY", "UNIT", "CUSTOMER", "SUPPLIER", "CASH_ACCOUNT",
         "PURCHASE_INVOICE", "SALES_INVOICE", "CUSTOMER_PAYMENT",
@@ -145,9 +145,19 @@ object SyncEnvelopeSecurity {
             put("payload_sha256", envelope.payloadSha256)
             put("created_at", envelope.createdAt)
         }
-        val mac = Mac.getInstance("HmacSHA256")
-        mac.init(SecretKeySpec(secret, "HmacSHA256"))
-        return bytesToHex(mac.doFinal(canonical(fields).toByteArray(StandardCharsets.UTF_8)))
+        val info = listOf(
+            "THE_DAILY_SHOP_SYNC_ENVELOPE_HMAC_V2",
+            envelope.storeId,
+            envelope.originDeviceId
+        ).joinToString("\u0000").toByteArray(StandardCharsets.UTF_8)
+        val hmacKey = SyncKeyDerivation.derive(secret, info)
+        try {
+            val mac = Mac.getInstance("HmacSHA256")
+            mac.init(SecretKeySpec(hmacKey, "HmacSHA256"))
+            return bytesToHex(mac.doFinal(canonical(fields).toByteArray(StandardCharsets.UTF_8)))
+        } finally {
+            hmacKey.fill(0)
+        }
     }
 
     private fun sha256(value: String): String =
