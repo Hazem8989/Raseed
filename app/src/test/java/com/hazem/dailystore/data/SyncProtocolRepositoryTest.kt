@@ -731,6 +731,7 @@ class SyncProtocolRepositoryTest {
     private data class AckAcceptanceScenario(
         val secondaryDeviceId: String,
         val operationId: String,
+        val sequenceNumber: Long,
         val frameJson: String
     )
 
@@ -808,7 +809,7 @@ class SyncProtocolRepositoryTest {
         setProtocolStateForTest("local_device_role", "SECONDARY")
         setProtocolStateForTest("authority_device_id", primaryId)
         assertEquals(storeId, org.json.JSONObject(ackFrame).getString("store_id"))
-        return AckAcceptanceScenario(secondaryId, operationId, ackFrame)
+        return AckAcceptanceScenario(secondaryId, operationId, sequence, ackFrame)
     }
 
     private fun setProtocolStateForTest(key: String, value: String) {
@@ -837,7 +838,7 @@ class SyncProtocolRepositoryTest {
         ).use { cursor ->
             assertTrue(cursor.moveToFirst())
             assertEquals("APPLIED", cursor.getString(0))
-            assertEquals(1L, cursor.getLong(1))
+            assertEquals(scenario.sequenceNumber, cursor.getLong(1))
         }
     }
 
@@ -980,8 +981,20 @@ class SyncProtocolRepositoryTest {
         database.readableDatabase.rawQuery(
             "SELECT status FROM sync_queue WHERE operation_id=?", arrayOf(operationId)
         ).use { cursor -> assertTrue(cursor.moveToFirst()); assertEquals("PENDING", cursor.getString(0)) }
-        assertTrue(repository.pendingOutboxForDevice(secondaryIds[0]).isEmpty())
-        assertEquals(operationId, repository.pendingOutboxForDevice(secondaryIds[1]).single().operationId)
+        val firstDevicePending = repository.pendingOutboxForDevice(secondaryIds[0])
+        val secondDevicePending = repository.pendingOutboxForDevice(secondaryIds[1])
+        // Each secondary enrollment emits catalog bootstrap events into the shared
+        // primary outbox. These unrelated events must not affect this operation's ACK.
+        assertTrue(firstDevicePending.none { it.operationId == operationId })
+        assertTrue(secondDevicePending.any { it.operationId == operationId })
+        assertEquals(1, db.rawQuery(
+            "SELECT COUNT(*) FROM sync_acknowledgements WHERE operation_id=? AND device_id=? AND status='APPLIED'",
+            arrayOf(operationId, secondaryIds[0])
+        ).use { cursor -> cursor.moveToFirst(); cursor.getInt(0) })
+        assertEquals(0, db.rawQuery(
+            "SELECT COUNT(*) FROM sync_acknowledgements WHERE operation_id=? AND device_id=? AND status='APPLIED'",
+            arrayOf(operationId, secondaryIds[1])
+        ).use { cursor -> cursor.moveToFirst(); cursor.getInt(0) })
 
         val secondAck = makeSecondaryAck(secondaryIds[1])
         context.getSharedPreferences(
@@ -994,8 +1007,8 @@ class SyncProtocolRepositoryTest {
         database.readableDatabase.rawQuery(
             "SELECT status FROM sync_queue WHERE operation_id=?", arrayOf(operationId)
         ).use { cursor -> assertTrue(cursor.moveToFirst()); assertEquals("SYNCED", cursor.getString(0)) }
-        assertTrue(repository.pendingOutboxForDevice(secondaryIds[0]).isEmpty())
-        assertTrue(repository.pendingOutboxForDevice(secondaryIds[1]).isEmpty())
+        assertTrue(repository.pendingOutboxForDevice(secondaryIds[0]).none { it.operationId == operationId })
+        assertTrue(repository.pendingOutboxForDevice(secondaryIds[1]).none { it.operationId == operationId })
 
         // A newly enrolled device must receive the primary's already-acknowledged
         // history; SYNCED is per the currently enrolled peer set, not a global
@@ -1009,7 +1022,7 @@ class SyncProtocolRepositoryTest {
         repository.enrollSecondaryDevice(
             adminId, lateInvitation.token, lateDeviceId, "ثانوي جديد", latePublicKey
         )
-        assertEquals(operationId, repository.pendingOutboxForDevice(lateDeviceId).single().operationId)
+        assertTrue(repository.pendingOutboxForDevice(lateDeviceId).any { it.operationId == operationId })
     }
 
     @Test fun forwardedApplicationAcksAdvanceInBoundedBatchesAndRetryAfterCooldown() {
