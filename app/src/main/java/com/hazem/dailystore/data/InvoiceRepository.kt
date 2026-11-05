@@ -355,10 +355,21 @@ class InvoiceRepository(context: Context) {
                         }
                     }
                 }
-                val pendingOperationId = "secondary-invoice-post:$invoiceId"
+                // The POS-supplied operation ID is the canonical end-to-end ID:
+                // it must be identical in the operation registry, outbox, queue, inbox and ACK.
+                // A different token must never enqueue a second command for the same invoice.
+                val priorInvoiceCommand = db.rawQuery(
+                    """SELECT operation_id FROM sync_operation_envelopes
+                       WHERE entity_type='SALES_INVOICE' AND entity_id=?
+                       ORDER BY sequence_number LIMIT 1""".trimIndent(),
+                    arrayOf(invoiceId)
+                ).use { cursor -> if (cursor.moveToFirst()) cursor.getString(0) else null }
+                require(priorInvoiceCommand == null || priorInvoiceCommand == operationId) {
+                    "فاتورة البيع لديها أمر مزامنة سابق؛ لن يُنشأ أمر مكرر بمعرّف مختلف"
+                }
                 val priorPendingPayload = db.rawQuery(
                     "SELECT payload_json FROM sync_operation_envelopes WHERE operation_id=?",
-                    arrayOf(pendingOperationId)
+                    arrayOf(operationId)
                 ).use { cursor ->
                     if (cursor.moveToFirst()) JSONObject(cursor.getString(0)) else null
                 }
@@ -368,9 +379,10 @@ class InvoiceRepository(context: Context) {
                     ?.takeIf { it.matches(Regex("\\d{4}-\\d{2}-\\d{2}")) }
                     ?: movementOperatingDate
                 syncRepository.enqueueInvoicePosting(
-                    db, actorUserId, pendingOperationId, type, invoiceId, cashAccountId,
+                    db, actorUserId, operationId, type, invoiceId, cashAccountId,
                     queuedEventAt, queuedOperatingDate
                 )
+                registerOperation(db, operationId, operationType, payloadHash, invoiceId, now)
                 db.setTransactionSuccessful()
                 flushAfterCommit = true
                 return true
