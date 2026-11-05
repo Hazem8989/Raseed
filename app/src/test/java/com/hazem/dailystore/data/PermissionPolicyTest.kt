@@ -74,7 +74,6 @@ class PermissionPolicyTest {
             PermissionPolicy.SUPPLIER_PAYMENTS_CORRECT,
             PermissionPolicy.CUSTOMERS_CREATE,
             PermissionPolicy.CUSTOMERS_MANAGE,
-            PermissionPolicy.CUSTOMERS_COLLECT,
             PermissionPolicy.DAILY_CASH_MANAGE,
             PermissionPolicy.SERVICE_TRANSFERS_MANAGE,
             PermissionPolicy.SERVICE_TRANSFERS_EXECUTE,
@@ -103,9 +102,11 @@ class PermissionPolicyTest {
         } catch (error: IllegalArgumentException) {
             assertTrue(error.message.orEmpty().contains("الجهاز ثانوي"))
         }
-        // POS checkout uses the assigned permission directly; ordinary require()
-        // remains primary-only for any local financial posting path.
+        // POS checkout and customer debt collection may be authorized on the secondary,
+        // but their financial effects must be queued for primary-side application.
+        // Ordinary require() remains primary-only for local financial posting paths.
         PermissionPolicy.requireAssigned(database.readableDatabase, adminId, PermissionPolicy.SALES_CHECKOUT)
+        PermissionPolicy.requireAssigned(database.readableDatabase, adminId, PermissionPolicy.CUSTOMERS_COLLECT)
         PermissionPolicy.requireAssigned(database.readableDatabase, adminId, PermissionPolicy.CUSTOMERS_READ)
         PermissionPolicy.requireAssigned(database.readableDatabase, adminId, PermissionPolicy.SYNC_MANAGE)
         assertTrue(allowed(adminId, PermissionPolicy.SYNC_MANAGE))
