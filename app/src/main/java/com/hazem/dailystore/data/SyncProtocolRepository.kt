@@ -1400,6 +1400,45 @@ class SyncProtocolRepository(private val context: Context, private val credentia
                 )
             }
         }
+        db.rawQuery(
+            """SELECT id,name,phone,address,notes,is_active,created_at,updated_at
+               FROM customers ORDER BY id""".trimIndent(), null
+        ).use { c ->
+            while (c.moveToNext()) {
+                val customerId = c.getString(0)
+                val payload = JSONObject()
+                    .put("business_operation", "UPSERT_CUSTOMER")
+                    .put("customer_id", customerId)
+                    .put("name", c.getString(1))
+                    .put("phone", if (c.isNull(2)) JSONObject.NULL else c.getString(2))
+                    .put("address", if (c.isNull(3)) JSONObject.NULL else c.getString(3))
+                    .put("notes", if (c.isNull(4)) JSONObject.NULL else c.getString(4))
+                    .put("is_active", c.getInt(5) == 1)
+                    .put("created_at", c.getString(6))
+                    .put("updated_at", c.getString(7))
+                enqueueLocalOperation(
+                    db, actorUserId, UUID.randomUUID().toString(), "UPSERT_CUSTOMER",
+                    "CUSTOMER", customerId, "CREATE", payload.toString()
+                )
+            }
+        }
+        val latestRate = db.rawQuery(
+            """SELECT id,currency_code,rate_syp_per_usd_milli,effective_at,created_at
+               FROM exchange_rates WHERE currency_code='USD'
+               ORDER BY effective_at DESC,created_at DESC LIMIT 1""".trimIndent(), null
+        ).use { c ->
+            if (!c.moveToFirst()) null else JSONObject()
+                .put("business_operation", "SET_EXCHANGE_RATE")
+                .put("id", c.getString(0)).put("currency_code", c.getString(1))
+                .put("rate_syp_per_usd_milli", c.getLong(2))
+                .put("effective_at", c.getString(3)).put("created_at", c.getString(4))
+        }
+        if (latestRate != null) {
+            enqueueLocalOperation(
+                db, actorUserId, UUID.randomUUID().toString(), "SET_EXCHANGE_RATE",
+                "EXCHANGE_RATE", latestRate.getString("id"), "CREATE", latestRate.toString()
+            )
+        }
     }
 
     fun enqueueInvoicePosting(
