@@ -101,12 +101,16 @@ class SyncForegroundService : Service() {
         private const val NOTIFICATION_ID = 7401
 
         fun start(context: Context) {
+            context.getSharedPreferences(PREFS, MODE_PRIVATE).edit()
+                .putBoolean("sync_enabled", true).apply()
             val intent = Intent(context, SyncForegroundService::class.java).setAction(ACTION_START)
             if (Build.VERSION.SDK_INT >= 26) context.startForegroundService(intent)
             else context.startService(intent)
         }
 
         fun stop(context: Context) {
+            context.getSharedPreferences(PREFS, MODE_PRIVATE).edit()
+                .putBoolean("sync_enabled", false).apply()
             context.stopService(Intent(context, SyncForegroundService::class.java))
         }
     }
