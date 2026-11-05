@@ -189,7 +189,7 @@ class OperatingExpenseRepositoryTest {
             .put("expense_id", "pending-expense-$operationId").put("amount_minor", 25_000L)
             .put("occurred_at", occurredAt)
         val secret = vault.load(secondaryId)!!
-        val storeId = database.readableDatabase.rawQuery(
+        val storeId = db.readableDatabase.rawQuery(
             "SELECT state_value FROM sync_protocol_state WHERE state_key='store_id'", null
         ).use { assertTrue(it.moveToFirst()); it.getString(0) }
         val envelope = SyncEnvelopeSecurity.create(storeId, operationId, 1L, secondaryId,
