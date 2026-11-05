@@ -47,6 +47,13 @@ class SyncProtocolRepository(private val context: Context, private val credentia
                 "لا يمكن ترقية جهاز ثانوي إلى جهاز أساسي؛ يجب إعداد جهاز أساسي مستقل"
             }
             val deviceId = SyncDeviceIdentity.getOrCreate(context)
+            val enrolledRole = db.rawQuery(
+                "SELECT device_role FROM sync_devices WHERE device_id=?",
+                arrayOf(deviceId)
+            ).use { cursor -> if (cursor.moveToFirst()) cursor.getString(0) else null }
+            require(enrolledRole == null || enrolledRole == "PRIMARY") {
+                "سجل هذا الجهاز يثبت أنه ثانوي؛ لا يمكن ترقيته إلى أساسي"
+            }
             val existingAuthority = state(db, "authority_device_id")
             require(existingAuthority == null || existingAuthority == deviceId) {
                 "يوجد جهاز أساسي آخر؛ لا يمكن نقل سلطة الاعتماد تلقائياً"
@@ -225,6 +232,13 @@ class SyncProtocolRepository(private val context: Context, private val credentia
         require(secret.size == 32) { "بيانات اعتماد الجهاز يجب أن تكون 256 بت" }
         val localDeviceId = SyncDeviceIdentity.getOrCreate(context)
         require(localDeviceId != primaryDeviceId) { "هذا الهاتف هو الجهاز الأساسي بالفعل" }
+        val enrolledRole = database.readableDatabase.rawQuery(
+            "SELECT device_role FROM sync_devices WHERE device_id=?",
+            arrayOf(localDeviceId)
+        ).use { cursor -> if (cursor.moveToFirst()) cursor.getString(0) else null }
+        require(enrolledRole == null || enrolledRole == "SECONDARY") {
+            "سجل هذا الجهاز يثبت أنه أساسي؛ لا يمكن تحويله إلى ثانوي تلقائياً"
+        }
         val localIdentity = SyncDeviceAuthenticator.getOrCreate(context, localDeviceId)
         val localPublicKeyBase64 = Base64.encodeToString(localIdentity.public.encoded, Base64.NO_WRAP)
         require(SyncDeviceCertificate.verify(
