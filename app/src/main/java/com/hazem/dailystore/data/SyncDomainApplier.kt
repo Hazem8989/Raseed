@@ -42,6 +42,7 @@ class SyncDomainApplier(context: Context) {
         }
         return when (JSONObject(payloadJson).optString("business_operation")) {
             "UPDATE_STORE_TIME_ZONE" -> applyReceivedStoreTimeZone(operationId)
+            "UPSERT_UNIT" -> applyReceivedUnit(operationId)
             "CREATE_CATEGORY" -> applyReceivedCategory(operationId)
             "UPSERT_PRODUCT" -> applyReceivedProduct(operationId)
             "SET_PRODUCT_ACTIVE" -> applyReceivedProductActive(operationId)
@@ -1591,25 +1592,54 @@ class SyncDomainApplier(context: Context) {
                 }
             }
 
-            val unit = db.rawQuery(
-                "SELECT id,symbol,decimal_places FROM units WHERE lower(trim(name))=? LIMIT 2",
-                arrayOf(unitName.lowercase(java.util.Locale.ROOT))
-            ).use { c ->
-                if (!c.moveToFirst()) null else {
-                    val found = Triple(c.getLong(0), c.getString(1), c.getInt(2))
-                    require(!c.moveToNext()) { "اسم وحدة المنتج مكرر محلياً" }
-                    found
+            val primaryUnitId = payload.optLong("primary_unit_id", 0L)
+            val unitId = if (primaryUnitId > 0L) {
+                val mapping = db.rawQuery(
+                    """SELECT secondary_unit_id,unit_name,unit_symbol,decimal_places
+                       FROM sync_unit_mappings WHERE primary_device_id=? AND primary_unit_id=?""".trimIndent(),
+                    arrayOf(authority, primaryUnitId.toString())
+                ).use { c ->
+                    require(c.moveToFirst()) { "لم تصل الوحدة الأصلية قبل المنتج؛ أوقف التطبيق وانتظر مزامنة الوحدات" }
+                    arrayOf(c.getLong(0).toString(), c.getString(1), c.getString(2), c.getInt(3).toString())
                 }
-            }
-            val unitId = if (unit == null) {
-                db.insertOrThrow("units", null, ContentValues().apply {
-                    put("name", unitName); put("symbol", unitSymbol); put("decimal_places", decimals)
-                })
+                require(mapping[1] == unitName && mapping[2] == unitSymbol &&
+                    mapping[3] == decimals.toString()) {
+                    "تعريف وحدة المنتج لا يطابق ربط الوحدة الأصلي"
+                }
+                val localUnit = db.rawQuery(
+                    "SELECT name,symbol,decimal_places FROM units WHERE id=?",
+                    arrayOf(mapping[0])
+                ).use { c ->
+                    require(c.moveToFirst()) { "الوحدة المحلية المرتبطة بالمنتج غير موجودة" }
+                    arrayOf(c.getString(0), c.getString(1), c.getInt(2).toString())
+                }
+                require(localUnit[0] == unitName && localUnit[1] == unitSymbol &&
+                    localUnit[2] == decimals.toString()) {
+                    "تعريف الوحدة المحلية المرتبط بالمنتج تغير"
+                }
+                mapping[0].toLong()
             } else {
-                require(unit.second == unitSymbol && unit.third == decimals) {
-                    "تعريف وحدة المنتج يختلف عن الوحدة المحلية؛ أوقف المزامنة للمراجعة"
+                // Compatibility for already queued legacy product envelopes without a unit ID.
+                val unit = db.rawQuery(
+                    "SELECT id,symbol,decimal_places FROM units WHERE lower(trim(name))=? LIMIT 2",
+                    arrayOf(unitName.lowercase(java.util.Locale.ROOT))
+                ).use { c ->
+                    if (!c.moveToFirst()) null else {
+                        val found = Triple(c.getLong(0), c.getString(1), c.getInt(2))
+                        require(!c.moveToNext()) { "اسم وحدة المنتج مكرر محلياً" }
+                        found
+                    }
                 }
-                unit.first
+                if (unit == null) {
+                    db.insertOrThrow("units", null, ContentValues().apply {
+                        put("name", unitName); put("symbol", unitSymbol); put("decimal_places", decimals)
+                    })
+                } else {
+                    require(unit.second == unitSymbol && unit.third == decimals) {
+                        "تعريف وحدة المنتج يختلف عن الوحدة المحلية؛ أوقف المزامنة للمراجعة"
+                    }
+                    unit.first
+                }
             }
 
             val existing = db.rawQuery(
@@ -1809,6 +1839,115 @@ class SyncDomainApplier(context: Context) {
     }
 
     /** Accepts a signed transport probe on the primary without changing business ledgers. */
+    /** Applies an independently versioned primary-owned unit definition on a secondary. */
+    fun applyReceivedUnit(operationId: String): ApplyResult = synchronized(APPLY_LOCK) {
+        require(operationId.isNotBlank()) { "معرّف الأمر مطلوب" }
+        val db = database.writableDatabase
+        val localId = SyncDeviceIdentity.getOrCreate(appContext)
+        val authority = db.rawQuery(
+            "SELECT state_value FROM sync_protocol_state WHERE state_key='authority_device_id'", null
+        ).use { c -> if (c.moveToFirst()) c.getString(0) else null }
+        val role = db.rawQuery(
+            "SELECT state_value FROM sync_protocol_state WHERE state_key='local_device_role'", null
+        ).use { c -> if (c.moveToFirst()) c.getString(0) else null }
+        require(role == "SECONDARY" && !authority.isNullOrBlank() && authority != localId) {
+            "تطبيق الوحدات الواردة مسموح على جهاز ثانوي مرتبط فقط"
+        }
+        db.beginTransaction()
+        try {
+            val row = db.rawQuery(
+                """SELECT origin_device_id,operation_type,entity_type,entity_id,payload_json,status
+                   FROM sync_inbox WHERE operation_id=?""".trimIndent(), arrayOf(operationId)
+            ).use { c ->
+                require(c.moveToFirst()) { "الوحدة غير موجودة في صندوق الوارد" }
+                Array(6) { c.getString(it) }
+            }
+            require(row[0] == authority && row[1] == "CREATE" && row[2] == "UNIT") {
+                "مصدر أو نوع الوحدة الواردة غير صالح"
+            }
+            if (row[5] == "APPLIED") {
+                db.setTransactionSuccessful()
+                return@synchronized ApplyResult(operationId, true)
+            }
+            require(row[5] == "RECEIVED") { "حالة الوحدة لا تسمح بالتطبيق" }
+            val payload = JSONObject(row[4])
+            val primaryUnitId = payload.optLong("primary_unit_id", 0L)
+            val name = payload.optString("unit_name").trim()
+            val symbol = payload.optString("unit_symbol").trim()
+            val decimals = payload.optInt("decimal_places", -1)
+            require(payload.optString("business_operation") == "UPSERT_UNIT" &&
+                primaryUnitId > 0L && row[3] == primaryUnitId.toString() &&
+                name.isNotEmpty() && name.length <= 80 && symbol.isNotEmpty() && symbol.length <= 16 &&
+                decimals in 0..3) {
+                "تعريف الوحدة الوارد أو معرّفها الأصلي غير صالح"
+            }
+
+            val existingMapping = db.rawQuery(
+                """SELECT secondary_unit_id,unit_name,unit_symbol,decimal_places
+                   FROM sync_unit_mappings WHERE primary_device_id=? AND primary_unit_id=?""".trimIndent(),
+                arrayOf(authority, primaryUnitId.toString())
+            ).use { c ->
+                if (!c.moveToFirst()) null
+                else arrayOf(c.getLong(0).toString(), c.getString(1), c.getString(2), c.getInt(3).toString())
+            }
+            if (existingMapping != null) {
+                require(existingMapping[1] == name && existingMapping[2] == symbol &&
+                    existingMapping[3] == decimals.toString()) {
+                    "معرّف الوحدة الأصلي مرتبط مسبقاً بتعريف وحدة مختلف"
+                }
+                val mappedUnit = db.rawQuery(
+                    "SELECT name,symbol,decimal_places FROM units WHERE id=?",
+                    arrayOf(existingMapping[0])
+                ).use { c ->
+                    require(c.moveToFirst()) { "الوحدة المحلية المرتبطة غير موجودة" }
+                    arrayOf(c.getString(0), c.getString(1), c.getInt(2).toString())
+                }
+                require(mappedUnit[0] == name && mappedUnit[1] == symbol &&
+                    mappedUnit[2] == decimals.toString()) {
+                    "تعريف الوحدة المحلية تغير بعد ربطه بالجهاز الأساسي"
+                }
+            } else {
+                val localUnit = db.rawQuery(
+                    "SELECT id,name,symbol,decimal_places FROM units WHERE lower(trim(name))=? LIMIT 2",
+                    arrayOf(name.lowercase(java.util.Locale.ROOT))
+                ).use { c ->
+                    if (!c.moveToFirst()) null
+                    else {
+                        val found = arrayOf(c.getLong(0).toString(), c.getString(1),
+                            c.getString(2), c.getInt(3).toString())
+                        require(!c.moveToNext()) { "اسم الوحدة موجود أكثر من مرة محلياً" }
+                        found
+                    }
+                }
+                val secondaryUnitId = if (localUnit == null) {
+                    db.insertOrThrow("units", null, ContentValues().apply {
+                        put("name", name); put("symbol", symbol); put("decimal_places", decimals)
+                    })
+                } else {
+                    require(localUnit[1] == name && localUnit[2] == symbol &&
+                        localUnit[3] == decimals.toString()) {
+                        "تعريف الوحدة الموجودة محلياً يتعارض مع تعريف الجهاز الأساسي"
+                    }
+                    localUnit[0].toLong()
+                }
+                db.insertOrThrow("sync_unit_mappings", null, ContentValues().apply {
+                    put("primary_device_id", authority)
+                    put("primary_unit_id", primaryUnitId)
+                    put("secondary_unit_id", secondaryUnitId)
+                    put("unit_name", name); put("unit_symbol", symbol)
+                    put("decimal_places", decimals); put("mapped_at", timestamp())
+                })
+            }
+            db.update("sync_inbox", ContentValues().apply {
+                put("status", "APPLIED"); put("applied_at", timestamp()); putNull("rejection_reason")
+            }, "operation_id=? AND status='RECEIVED'", arrayOf(operationId)).also {
+                require(it == 1) { "تعذر تثبيت تطبيق الوحدة" }
+            }
+            db.setTransactionSuccessful()
+            ApplyResult(operationId, true)
+        } finally { db.endTransaction() }
+    }
+
     /** Applies a primary-owned category create on a secondary without echoing it back. */
     fun applyReceivedCategory(operationId: String): ApplyResult = synchronized(APPLY_LOCK) {
         require(operationId.isNotBlank()) { "معرّف الأمر مطلوب" }
