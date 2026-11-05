@@ -317,30 +317,24 @@ class CustomerPaymentRepositoryTest {
         ).use { it.moveToFirst(); it.getInt(0) }
 
     @Test
-    fun secondaryCustomerCollectionIsQueuedWithoutLocalFinancialPosting() {
+    fun secondaryCustomerCollectionIsRejectedBySalesOnlyPolicy() {
         val context = RuntimeEnvironment.getApplication()
         val invoiceId = createCreditInvoice()
         val sync = SyncProtocolRepository(context, SyncCredentialVault(context) { SecretKeySpec(ByteArray(32) { 13 }, "AES") })
-        // Give this isolated secondary fixture a store identity without changing its local role to PRIMARY.
         val storeId = UUID.randomUUID().toString()
         val primaryDeviceId = UUID.randomUUID().toString()
-        val credential = android.util.Base64.encodeToString(
-            ByteArray(32) { 11 },
-            android.util.Base64.URL_SAFE or android.util.Base64.NO_WRAP or android.util.Base64.NO_PADDING
-        )
+        val credential = android.util.Base64.encodeToString(ByteArray(32) { 11 },
+            android.util.Base64.URL_SAFE or android.util.Base64.NO_WRAP or android.util.Base64.NO_PADDING)
         sync.configureAsSecondary(adminId, storeId, primaryDeviceId, credential, "جهاز ثانوي اختباري")
-
-        val operationId = "secondary-customer-collection-" + UUID.randomUUID()
-        val result = payments.addPayment(adminId, invoiceId, operationId, cashDrawerId, 15_000L)
-
-        assertFalse(result.replayed)
+        var rejected = false
+        try { payments.addPayment(adminId, invoiceId, "secondary-customer-collection-" + UUID.randomUUID(), cashDrawerId, 15_000L) }
+        catch (_: IllegalArgumentException) { rejected = true }
+        assertTrue(rejected)
         assertTrue(payments.listPayments(invoiceId).isEmpty())
         assertEquals(0, database.readableDatabase.rawQuery(
-            "SELECT COUNT(*) FROM cash_transactions WHERE operation_id=?", arrayOf(operationId)
+            "SELECT COUNT(*) FROM cash_transactions WHERE transaction_type='CUSTOMER_CREDIT_COLLECTION'", null
         ).use { c -> c.moveToFirst(); c.getInt(0) })
-        val queued = sync.pendingOutbox().single { it.operationId == operationId }
-        assertEquals("CUSTOMER_PAYMENT", queued.entityType)
-        assertTrue(queued.payloadJson.contains("\"usd_reference_reduction_cents\":100"))
+        assertTrue(sync.pendingOutbox().isEmpty())
     }
 
     @Test
