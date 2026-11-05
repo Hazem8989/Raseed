@@ -56,6 +56,34 @@ class CustomerRepositoryTest {
     }
 
     @Test
+    fun secondaryCannotCreateUpdateOrDeactivateCustomerMasterData() {
+        val existing = customers.create(adminId, "زبون أساسي ${UUID.randomUUID()}")
+        val db = database.writableDatabase
+        db.insertOrThrow("sync_protocol_state", null, ContentValues().apply {
+            put("state_key", "local_device_role"); put("state_value", "SECONDARY")
+            put("updated_at", "2026-11-05T12:00:00.000Z")
+        })
+        db.insertOrThrow("sync_protocol_state", null, ContentValues().apply {
+            put("state_key", "authority_device_id"); put("state_value", UUID.randomUUID().toString())
+            put("updated_at", "2026-11-05T12:00:00.000Z")
+        })
+        var createRejected = false
+        try { customers.create(adminId, "محاولة إنشاء ثانوي") }
+        catch (_: IllegalArgumentException) { createRejected = true }
+        var updateRejected = false
+        try { customers.update(adminId, existing.id, "محاولة تعديل ثانوي") }
+        catch (_: IllegalArgumentException) { updateRejected = true }
+        var deactivateRejected = false
+        try { customers.setActive(adminId, existing.id, false) }
+        catch (_: IllegalArgumentException) { deactivateRejected = true }
+        assertTrue(createRejected)
+        assertTrue(updateRejected)
+        assertTrue(deactivateRejected)
+        assertEquals("زبون أساسي", customers.get(existing.id)?.name?.substringBefore(" "))
+        assertEquals(1, customers.listAll().size)
+    }
+
+    @Test
     fun primaryCustomerCreateUpdateAndDeactivationAreQueuedForSecondary() {
         val context = RuntimeEnvironment.getApplication()
         SyncDeviceTestKeyProvider.install()
