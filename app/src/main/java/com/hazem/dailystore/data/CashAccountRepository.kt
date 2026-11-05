@@ -24,6 +24,8 @@ class CashAccountRepository(context: Context) {
     }
 
     fun ensureSystemCashAccounts() {
+        // The secondary consumes the primary's account catalogue; do not seed independent drawers.
+        if (SyncProtocolRepository(appContext).isConfiguredSecondary()) return
         val db=database.writableDatabase
         db.beginTransaction()
         try {
@@ -253,7 +255,15 @@ class CashAccountRepository(context: Context) {
 
     private fun listAccounts(activeOnly: Boolean): List<CashAccountSummary> {
         val result = mutableListOf<CashAccountSummary>()
-        val where = if (activeOnly) "WHERE is_active=1" else ""
+        val secondary = SyncProtocolRepository(appContext).isConfiguredSecondary()
+        val where = when {
+            secondary && activeOnly ->
+                "WHERE is_active=1 AND EXISTS (SELECT 1 FROM sync_protocol_state s WHERE s.state_key='cash_account_sales_allowed:' || cash_accounts.id AND s.state_value='1')"
+            secondary ->
+                "WHERE EXISTS (SELECT 1 FROM sync_protocol_state s WHERE s.state_key='cash_account_sales_allowed:' || cash_accounts.id)"
+            activeOnly -> "WHERE is_active=1"
+            else -> ""
+        }
         database.readableDatabase.rawQuery(
             """SELECT id,name,account_type,currency_code,opening_balance_minor,is_active
                FROM cash_accounts $where ORDER BY name COLLATE NOCASE""".trimIndent(), null
@@ -302,8 +312,10 @@ class CashAccountRepository(context: Context) {
                 put("after_json", after); put("created_at", now)
             }
             db.insertOrThrow("audit_log", null, audit)
+            SyncProtocolRepository(appContext).enqueueCashAccountReference(db, actorUserId, id)
             db.setTransactionSuccessful()
         } finally { db.endTransaction() }
+        runCatching { SyncRelaySession.flushPending() }
         return CashAccountSummary(id, cleanName, accountType, currency, openingBalanceMinor, true)
     }
 
@@ -373,8 +385,10 @@ class CashAccountRepository(context: Context) {
                 put("before_json", beforeJson); put("after_json", afterJson); put("created_at", now)
             }
             db.insertOrThrow("audit_log", null, audit)
+            SyncProtocolRepository(appContext).enqueueCashAccountReference(db, actorUserId, accountId)
             db.setTransactionSuccessful()
         } finally { db.endTransaction() }
+        runCatching { SyncRelaySession.flushPending() }
     }
 
     private fun requireManager(db: android.database.sqlite.SQLiteDatabase, actorUserId: String) {

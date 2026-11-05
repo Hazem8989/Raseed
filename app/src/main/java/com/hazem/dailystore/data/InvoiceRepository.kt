@@ -298,7 +298,15 @@ class InvoiceRepository(context: Context) {
                     val accountType=account.first
                     val accountCurrency=account.second
                     require(accountCurrency == "USD" || accountCurrency == "SYP") { "عملة حساب القبض غير مدعومة" }
-                    if(accountType=="CASH_BOX" && accountCurrency=="SYP") {
+                    if (syncRepository.isConfiguredSecondary()) {
+                        val allowed = db.rawQuery(
+                            "SELECT state_value FROM sync_protocol_state WHERE state_key=?",
+                            arrayOf("cash_account_sales_allowed:$selectedAccountId")
+                        ).use { c -> c.moveToFirst() && c.getString(0) == "1" }
+                        require(allowed) { "هذا الحساب غير مخصص لقبض مبيعات الجهاز الثانوي" }
+                    }
+                    if(accountType=="CASH_BOX" && accountCurrency=="SYP" &&
+                        !syncRepository.isConfiguredSecondary()) {
                         val date = movementOperatingDate
                         val primary=db.rawQuery("SELECT primary_cash_account_id FROM daily_cash_sessions WHERE operating_date=?",arrayOf(date)).use {
                             if(it.moveToFirst())it.getString(0)else null

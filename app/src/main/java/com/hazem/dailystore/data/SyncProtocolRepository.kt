@@ -111,6 +111,9 @@ class SyncProtocolRepository(private val context: Context, private val credentia
         require(remoteDeviceId != SyncDeviceIdentity.getOrCreate(context)) { "لا يمكن تسجيل الجهاز الأساسي كجهاز ثانوي" }
         require(invitationToken.length in 32..128) { "رمز الاقتران غير صالح" }
         require(remotePublicKeyBase64.isNotBlank()) { "يجب استلام المفتاح العام للجهاز قبل تسجيله" }
+        // Validate the caller before seeding deterministic primary-owned account records.
+        requirePrimaryManager(database.readableDatabase, actorUserId)
+        CashAccountRepository(context).ensureSystemCashAccounts()
         val db = database.writableDatabase
         val secretBytes = ByteArray(32)
         var credentialSaved = false
@@ -1352,6 +1355,74 @@ class SyncProtocolRepository(private val context: Context, private val credentia
     }
 
     /**
+     * Replicates account identity and selection metadata only. Balances, opening amounts,
+     * and cash movements remain exclusively on the primary.
+     */
+    fun enqueueCashAccountReference(
+        db: SQLiteDatabase, actorUserId: String, accountId: String
+    ): Long? {
+        require(db.inTransaction()) { "يجب تسجيل مرجع الحساب المالي ضمن معاملة" }
+        val account = db.rawQuery(
+            "SELECT name,account_type,currency_code,is_active,created_at FROM cash_accounts WHERE id=?",
+            arrayOf(accountId)
+        ).use { c ->
+            require(c.moveToFirst()) { "الحساب المالي غير موجود عند تجهيز المزامنة" }
+            arrayOf(c.getString(0), c.getString(1), c.getString(2), c.getInt(3).toString(), c.getString(4))
+        }
+        require(account[1] in setOf("CASH_BOX", "WALLET", "BANK", "OTHER")) {
+            "نوع الحساب المالي غير مدعوم للمزامنة"
+        }
+        require(account[2] in setOf("USD", "SYP")) { "عملة الحساب المالي غير مدعومة للمزامنة" }
+        val active = account[3] == "1"
+        val dailyDrawerId = db.rawQuery(
+            "SELECT account_id FROM system_cash_account_roles WHERE role_key='DAILY_DRAWER'", null
+        ).use { if (it.moveToFirst()) it.getString(0) else null }
+        val supplierRolloverId = db.rawQuery(
+            "SELECT account_id FROM system_cash_account_roles WHERE role_key='SUPPLIER_ROLLOVER'", null
+        ).use { if (it.moveToFirst()) it.getString(0) else null }
+        val salesReceiptAllowed = active && when (account[1]) {
+            "WALLET" -> true
+            "CASH_BOX" -> account[2] == "USD" ||
+                (account[2] == "SYP" && accountId == dailyDrawerId && accountId != supplierRolloverId)
+            else -> false
+        }
+        val mappingActive = active && account[1] in setOf("CASH_BOX", "WALLET")
+        val payload = JSONObject()
+            .put("business_operation", "UPSERT_CASH_ACCOUNT")
+            .put("cash_account_id", accountId)
+            .put("name", account[0])
+            .put("account_type", account[1])
+            .put("currency_code", account[2])
+            .put("is_active", active)
+            .put("sales_receipt_allowed", salesReceiptAllowed)
+            .put("created_at", account[4])
+        val sequence = enqueueLocalOperation(
+            db, actorUserId, UUID.randomUUID().toString(), "UPSERT_CASH_ACCOUNT",
+            "CASH_ACCOUNT", accountId, "UPDATE", payload.toString()
+        )
+        if (state(db, "authority_device_id") == SyncDeviceIdentity.getOrCreate(context)) {
+            val now = timestamp()
+            db.rawQuery(
+                "SELECT device_id FROM sync_devices WHERE device_role='SECONDARY' AND status='ACTIVE'",
+                null
+            ).use { c ->
+                while (c.moveToNext()) {
+                    val deviceId = c.getString(0)
+                    db.insertWithOnConflict("sync_cash_account_mappings", null, ContentValues().apply {
+                        put("device_id", deviceId)
+                        put("remote_cash_account_id", accountId)
+                        put("primary_cash_account_id", accountId)
+                        put("is_active", if (mappingActive) 1 else 0)
+                        put("mapped_by", actorUserId)
+                        put("mapped_at", now)
+                    }, SQLiteDatabase.CONFLICT_REPLACE)
+                }
+            }
+        }
+        return sequence
+    }
+
+    /**
      * Queues an authoritative catalog snapshot after pairing. Product events carry
      * semantic unit data and category IDs, never SQLite row IDs for local units.
      * The secondary resolves those values into its own database identifiers.
@@ -1450,6 +1521,13 @@ class SyncProtocolRepository(private val context: Context, private val credentia
                     "CUSTOMER", customerId, "CREATE", payload.toString()
                 )
             }
+        }
+        // Account IDs remain stable across devices; only selection metadata is mirrored.
+        db.rawQuery(
+            "SELECT id FROM cash_accounts ORDER BY id",
+            null
+        ).use { c ->
+            while (c.moveToNext()) enqueueCashAccountReference(db, actorUserId, c.getString(0))
         }
         val latestRate = db.rawQuery(
             """SELECT id,currency_code,rate_syp_per_usd_milli,effective_at,created_at
@@ -1839,7 +1917,7 @@ class SyncProtocolRepository(private val context: Context, private val credentia
                       e.payload_json,e.payload_sha256,e.created_at,q.retry_count
                FROM sync_operation_envelopes e JOIN sync_queue q ON q.operation_id=e.operation_id
                WHERE e.origin_device_id=?
-                 AND e.entity_type IN ('CATEGORY','UNIT','PRODUCT','PRODUCT_OPENING_STOCK','CUSTOMER','EXCHANGE_RATE','STORE_SETTINGS')
+                 AND e.entity_type IN ('CATEGORY','UNIT','PRODUCT','PRODUCT_OPENING_STOCK','CUSTOMER','CASH_ACCOUNT','EXCHANGE_RATE','STORE_SETTINGS')
                  AND NOT EXISTS (SELECT 1 FROM sync_acknowledgements a
                    WHERE a.operation_id=e.operation_id AND a.device_id=? AND a.status='APPLIED')
                ORDER BY e.sequence_number LIMIT ?""".trimIndent()
@@ -2116,7 +2194,7 @@ class SyncProtocolRepository(private val context: Context, private val credentia
     companion object {
         // Only reference data required by the sales-only secondary is replicated from primary.
         private val PRIMARY_TO_SECONDARY_REFERENCE_ENTITIES = setOf(
-            "CATEGORY", "UNIT", "PRODUCT", "PRODUCT_OPENING_STOCK", "CUSTOMER", "EXCHANGE_RATE", "STORE_SETTINGS"
+            "CATEGORY", "UNIT", "PRODUCT", "PRODUCT_OPENING_STOCK", "CUSTOMER", "CASH_ACCOUNT", "EXCHANGE_RATE", "STORE_SETTINGS"
         )
         private const val INVITATION_TTL_MS = 10 * 60 * 1000L
         private const val MAX_PAYLOAD_CHARS = 128 * 1024

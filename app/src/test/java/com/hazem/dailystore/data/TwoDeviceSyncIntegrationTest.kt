@@ -11,6 +11,7 @@ import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.RuntimeEnvironment
 import java.util.UUID
+import java.math.BigDecimal
 import javax.crypto.spec.SecretKeySpec
 
 /** Real two-database sync path: ECDSA/AES-GCM, domain posting, signed ACK and replay. */
@@ -49,6 +50,9 @@ class TwoDeviceSyncIntegrationTest {
         val primaryVault = SyncCredentialVault(context) { vaultKey }
         primaryRepository = SyncProtocolRepository(context, primaryVault)
         primaryRepository.configureAsPrimary(primaryAdminId, "جهاز التكامل الأساسي")
+        cashAccountId = CashAccountRepository(context).create(
+            primaryAdminId, "صندوق اختبار التكامل", "CASH_BOX", "USD", 50000L
+        ).id
 
         val invitation = primaryRepository.createPairingInvitation(primaryAdminId)
         val remoteIdentity = SyncDeviceAuthenticator.getOrCreate(context, secondaryId)
@@ -56,15 +60,7 @@ class TwoDeviceSyncIntegrationTest {
         val enrollment = primaryRepository.enrollSecondaryDevice(
             primaryAdminId, invitation.token, secondaryId, "جهاز التكامل الثانوي", remotePublicKey
         )
-        cashAccountId = UUID.randomUUID().toString()
-        primaryDb.writableDatabase.execSQL(
-            """INSERT INTO cash_accounts(id,name,account_type,currency_code,opening_balance_minor,is_active,created_at)
-               VALUES(?,?, 'CASH_BOX','USD',50000,1,?)""",
-            arrayOf(cashAccountId, "صندوق اختبار التكامل", "2026-11-04T10:00:00Z")
-        )
-        primaryRepository.mapSecondaryCashAccount(primaryAdminId, secondaryId, "secondary-cash-usd", cashAccountId)
-
-        secondaryDb = AppDatabase(context, SECONDARY_DATABASE)
+remove manual account map        secondaryDb = AppDatabase(context, SECONDARY_DATABASE)
         AppDatabase.installForTests(secondaryDb)
         StoreRepository(context).ensureBaseSetup()
         secondaryAdminId = createReadyAdmin()
@@ -196,6 +192,16 @@ class TwoDeviceSyncIntegrationTest {
             arrayOf("وحدة مستقلة غير مستخدمة", "وحدة")
         )
 
+        val updatedWalletId = CashAccountRepository(context).create(
+            primaryAdminId, "محفظة اختبار", "WALLET", "USD", 7500L
+        ).id
+        CashAccountRepository(context).updateDetails(
+            "ADMIN", primaryAdminId, updatedWalletId, "محفظة اختبار محدثة", "WALLET", "USD"
+        )
+        val bankAccountId = CashAccountRepository(context).create(
+            primaryAdminId, "حساب بنكي اختباري", "BANK", "SYP", 2500L
+        ).id
+
         db.beginTransaction()
         try {
             for ((unitId, name, symbol) in listOf(
@@ -225,6 +231,10 @@ class TwoDeviceSyncIntegrationTest {
         )
         val pending = primaryRepository.pendingOutboxForDevice(secondaryId)
         val productItem = pending.single { it.entityType == "PRODUCT" && it.entityId == productId }
+        assertTrue("Pairing and account mutations must queue account metadata",
+            pending.any { it.entityType == "CASH_ACCOUNT" && JSONObject(it.payloadJson).optString("cash_account_id") == cashAccountId })
+        assertTrue(pending.any { it.entityType == "CASH_ACCOUNT" && JSONObject(it.payloadJson).optString("cash_account_id") == updatedWalletId })
+        assertTrue(pending.any { it.entityType == "CASH_ACCOUNT" && JSONObject(it.payloadJson).optString("cash_account_id") == bankAccountId })
         val productEnvelope = primaryRepository.authenticatedOutbox(productItem.operationId, secondaryId)
         assertEquals(500L, JSONObject(productEnvelope.payloadJson).getLong("primary_unit_id"))
         val customUnitIndex = pending.indexOfFirst { it.entityType == "UNIT" && it.entityId == "500" }
@@ -296,6 +306,36 @@ class TwoDeviceSyncIntegrationTest {
         assertEquals(1, scalar(secondaryDb,
             "SELECT COUNT(*) FROM inventory_movements WHERE product_id=? AND movement_type='OPENING'",
             productId))
+        val mirroredCash = secondaryDb.readableDatabase.rawQuery(
+            "SELECT name,account_type,currency_code,opening_balance_minor,is_active FROM cash_accounts WHERE id=?",
+            arrayOf(cashAccountId)
+        ).use { c ->
+            assertTrue(c.moveToFirst())
+            listOf(c.getString(0), c.getString(1), c.getString(2), c.getLong(3).toString(), c.getInt(4).toString())
+        }
+        assertEquals(listOf("صندوق اختبار التكامل", "CASH_BOX", "USD", "0", "1"), mirroredCash)
+        val mirroredWallet = secondaryDb.readableDatabase.rawQuery(
+            "SELECT name,account_type,currency_code,opening_balance_minor FROM cash_accounts WHERE id=?",
+            arrayOf(updatedWalletId)
+        ).use { c -> assertTrue(c.moveToFirst()); listOf(c.getString(0),c.getString(1),c.getString(2),c.getLong(3).toString()) }
+        assertEquals(listOf("محفظة اختبار محدثة", "WALLET", "USD", "0"), mirroredWallet)
+        assertEquals(1, scalar(secondaryDb,
+            "SELECT COUNT(*) FROM cash_accounts WHERE id=? AND account_type='BANK' AND opening_balance_minor=0",
+            bankAccountId))
+        assertEquals("1", secondaryDb.readableDatabase.rawQuery(
+            "SELECT state_value FROM sync_protocol_state WHERE state_key=?",
+            arrayOf("cash_account_sales_allowed:$cashAccountId")
+        ).use { c -> assertTrue(c.moveToFirst()); c.getString(0) })
+        assertEquals("0", secondaryDb.readableDatabase.rawQuery(
+            "SELECT state_value FROM sync_protocol_state WHERE state_key=?",
+            arrayOf("cash_account_sales_allowed:$bankAccountId")
+        ).use { c -> assertTrue(c.moveToFirst()); c.getString(0) })
+        assertFalse("Bank accounts must not appear as secondary POS receipt choices",
+            CashAccountRepository(context).listActive().any { it.id == bankAccountId })
+        assertEquals(1, primaryDb.readableDatabase.rawQuery(
+            "SELECT COUNT(*) FROM sync_cash_account_mappings WHERE device_id=? AND remote_cash_account_id=? AND primary_cash_account_id=? AND is_active=1",
+            arrayOf(secondaryId, cashAccountId, cashAccountId)
+        ).use { c -> assertTrue(c.moveToFirst()); c.getInt(0) })
 
         val repeatedProductFrame = frames[productItem.operationId]!!
         secondaryProcessor.onEncryptedFrame(primaryId, productItem.operationId, repeatedProductFrame)
@@ -395,43 +435,58 @@ class TwoDeviceSyncIntegrationTest {
     }
 
     @Test fun twoIndependentDevicesSyncCashSaleStockAndFinancialEffectsExactlyOnce() {
-        // The shared setup queued an expense as sequence 1. Deliver and ACK it
-        // before the sale (sequence 2), preserving the receiver's strict cursor.
-        var priorExpenseAck: String? = null
-        var priorExpenseProtocolError: String? = null
+        // Consume the secondary probe first so the sale is the next command in sequence.
+        var probeAck: String? = null
+        var probeError: String? = null
         setLocalDeviceId(primaryId)
         AppDatabase.installForTests(primaryDb)
-        val priorExpenseProcessor = SyncRelayProcessor(
+        val probeProcessor = SyncRelayProcessor(
             primaryRepository, SyncDomainApplier(context),
             listener = object : SyncRelayProcessor.Listener {
-                override fun onProtocolError(operationId: String?, message: String) {
-                    priorExpenseProtocolError = message
-                }
+                override fun onProtocolError(operationId: String?, message: String) { probeError = message }
             },
-            sendFrame = { id, recipient, frame ->
-                assertEquals(operationId, id)
+            sendFrame = { _, recipient, frame ->
                 assertEquals(secondaryId, recipient)
-                priorExpenseAck = frame
+                probeAck = frame
                 true
             }
         )
-        priorExpenseProcessor.onEncryptedFrame(secondaryId, operationId, outgoingFrame)
-        assertEquals("لا ينبغي رفض الأمر السابق: $priorExpenseProtocolError", null, priorExpenseProtocolError)
-        assertEquals("APPLIED", inboxStatus(primaryDb, operationId))
-        val acceptedPriorAck = priorExpenseAck
-            ?: throw AssertionError("Primary did not issue the prior expense application ACK")
-
+        probeProcessor.onEncryptedFrame(secondaryId, operationId, outgoingFrame)
+        assertEquals("لم يقبل الجهاز الأساسي اختبار النقل: $probeError", null, probeError)
         setLocalDeviceId(secondaryId)
         AppDatabase.installForTests(secondaryDb)
-        val priorAckProcessor = SyncRelayProcessor(
+        val secondaryProcessor = SyncRelayProcessor(
             secondaryRepository, SyncDomainApplier(context), sendFrame = { _, _, _ -> true }
         )
-        priorAckProcessor.onEncryptedFrame(primaryId, operationId, acceptedPriorAck)
+        secondaryProcessor.onEncryptedFrame(primaryId, operationId, probeAck!!)
         assertEquals("SYNCED", queueStatus(secondaryDb, operationId))
 
-        // Prepare authoritative product and opening stock only on the primary database.
+        // Create an authoritative exchange rate and product/opening stock on primary.
         setLocalDeviceId(primaryId)
         AppDatabase.installForTests(primaryDb)
+        val rateId = UUID.randomUUID().toString()
+        val rateAt = "2026-11-04T11:00:00Z"
+        val ratePayload = JSONObject()
+            .put("business_operation", "SET_EXCHANGE_RATE")
+            .put("id", rateId)
+            .put("currency_code", "USD")
+            .put("rate_syp_per_usd_milli", 10_000_000L)
+            .put("effective_at", rateAt)
+            .put("created_at", rateAt)
+        val primarySql = primaryDb.writableDatabase
+        primarySql.beginTransaction()
+        try {
+            primarySql.execSQL(
+                "INSERT INTO exchange_rates(id,currency_code,rate_syp_per_usd_milli,effective_at,created_by,created_at) VALUES(?, 'USD', ?, ?, NULL, ?)",
+                arrayOf(rateId, 10_000_000L, rateAt, rateAt)
+            )
+            primaryRepository.enqueueLocalOperation(
+                primarySql, primaryAdminId, "exchange-rate-$rateId", "SET_EXCHANGE_RATE",
+                "EXCHANGE_RATE", rateId, "CREATE", ratePayload.toString()
+            )
+            primarySql.setTransactionSuccessful()
+        } finally { primarySql.endTransaction() }
+
         val store = StoreRepository(context)
         val unit = store.getUnits().first()
         val category = store.getCategories().first()
@@ -442,56 +497,88 @@ class TwoDeviceSyncIntegrationTest {
         val warehouseId = primaryDb.readableDatabase.rawQuery(
             "SELECT id FROM warehouses WHERE is_default=1 AND is_active=1 LIMIT 1", null
         ).use { c -> assertTrue(c.moveToFirst()); c.getString(0) }
-        // saveProduct(... openingQuantity = 10.0) creates the opening balance,
-        // movement and FIFO cost layer atomically; do not insert a duplicate balance.
 
-        val invoiceId = "secondary-sale-" + UUID.randomUUID()
-        val saleOperationId = UUID.randomUUID().toString()
-        val payload = JSONObject()
-            .put("business_operation", "POST_SALE_INVOICE")
-            .put("id", invoiceId)
-            .put("party_id", JSONObject.NULL)
-            .put("sale_type", "CASH")
-            .put("invoice_date", "2026-11-04")
-            .put("discount_usd_cents", 0L)
-            .put("total_usd_cents", 300L)
-            .put("notes", JSONObject.NULL)
-            .put("exchange_rate_syp_per_usd_milli", 10_000_000L)
-            .put("posted_at", "2026-11-04T11:15:00Z")
-            .put("posted_operating_date", "2026-11-04")
-            .put("cash_account_id", "secondary-cash-usd")
-            .put("cash_account_type", "CASH_BOX")
-            .put("cash_account_currency_code", "USD")
-            .put("cash_receipts", org.json.JSONArray().put(JSONObject()
-                .put("cash_transaction_id", "remote-sale-receipt-$invoiceId")
-                .put("amount_minor", 300L)
-                .put("currency_code", "USD")
-                .put("exchange_rate_syp_per_usd_milli", 10_000_000L)))
-            .put("items", org.json.JSONArray().put(JSONObject()
-                .put("product_id", productId)
-                .put("quantity", "2")
-                .put("unit_price_or_cost_usd_cents", 150L))
-            )
+        // Deliver all primary reference events in order, including account metadata.
+        val referenceItems = primaryRepository.pendingOutboxForDevice(secondaryId)
+        assertTrue(referenceItems.any { it.entityType == "CASH_ACCOUNT" && it.entityId == cashAccountId })
+        assertTrue(referenceItems.any { it.entityType == "PRODUCT" && it.entityId == productId })
+        val referenceAcks = mutableMapOf<String, String>()
+        var secondaryReferenceError: String? = null
         setLocalDeviceId(secondaryId)
         AppDatabase.installForTests(secondaryDb)
-        secondaryDb.writableDatabase.beginTransaction()
-        try {
-            secondaryRepository.enqueueSecondaryCommand(
-                secondaryDb.writableDatabase, secondaryAdminId, saleOperationId,
-                "POST_SALE_INVOICE", "SALES_INVOICE", invoiceId, payload.toString()
+        val secondaryReferenceProcessor = SyncRelayProcessor(
+            secondaryRepository, SyncDomainApplier(context),
+            listener = object : SyncRelayProcessor.Listener {
+                override fun onProtocolError(operationId: String?, message: String) {
+                    secondaryReferenceError = "$operationId: $message"
+                }
+            },
+            sendFrame = { id, recipient, frame ->
+                assertEquals(primaryId, recipient)
+                referenceAcks[id] = frame
+                true
+            }
+        )
+        for (item in referenceItems) {
+            setLocalDeviceId(primaryId)
+            AppDatabase.installForTests(primaryDb)
+            val frame = primaryRepository.encryptedAuthenticatedOutbox(item.operationId, secondaryId)
+            setLocalDeviceId(secondaryId)
+            AppDatabase.installForTests(secondaryDb)
+            secondaryReferenceProcessor.onEncryptedFrame(primaryId, item.operationId, frame)
+            assertEquals("تعذر تطبيق المرجع الوارد: $secondaryReferenceError", null, secondaryReferenceError)
+            assertEquals("APPLIED", inboxStatus(secondaryDb, item.operationId))
+            val ack = referenceAcks[item.operationId]
+                ?: throw AssertionError("لم يصدر إقرار تطبيق للمرجع ${item.operationId}")
+            setLocalDeviceId(primaryId)
+            AppDatabase.installForTests(primaryDb)
+            val primaryAckProcessor = SyncRelayProcessor(
+                primaryRepository, SyncDomainApplier(context), sendFrame = { _, _, _ -> true }
             )
-            secondaryDb.writableDatabase.setTransactionSuccessful()
-        } finally {
-            secondaryDb.writableDatabase.endTransaction()
+            primaryAckProcessor.onEncryptedFrame(secondaryId, item.operationId, ack)
+            assertEquals("SYNCED", queueStatus(primaryDb, item.operationId))
         }
-        val saleFrame = secondaryRepository.encryptedAuthenticatedOutbox(saleOperationId, primaryId)
+
+        setLocalDeviceId(secondaryId)
+        AppDatabase.installForTests(secondaryDb)
+        val secondaryCash = secondaryDb.readableDatabase.rawQuery(
+            "SELECT account_type,currency_code,opening_balance_minor FROM cash_accounts WHERE id=?",
+            arrayOf(cashAccountId)
+        ).use { c -> assertTrue(c.moveToFirst()); Triple(c.getString(0),c.getString(1),c.getLong(2)) }
+        assertEquals(Triple("CASH_BOX", "USD", 0L), secondaryCash)
+        assertEquals("1", secondaryDb.readableDatabase.rawQuery(
+            "SELECT state_value FROM sync_protocol_state WHERE state_key=?",
+            arrayOf("cash_account_sales_allowed:$cashAccountId")
+        ).use { c -> assertTrue(c.moveToFirst()); c.getString(0) })
+        assertEquals(10.0, secondaryDb.readableDatabase.rawQuery(
+            "SELECT COALESCE(SUM(quantity),0) FROM inventory_balances WHERE product_id=?",
+            arrayOf(productId)
+        ).use { c -> assertTrue(c.moveToFirst()); c.getDouble(0) }, 0.000001)
+
+        // Exercise the real POS repository: save draft, post cash sale, then sync.
+        val invoiceId = "secondary-sale-" + UUID.randomUUID()
+        val saveOperationId = UUID.randomUUID().toString()
+        val saleOperationId = UUID.randomUUID().toString()
+        val saved = InvoiceRepository(context).saveSalesDraft(
+            secondaryAdminId, saveOperationId, invoiceId, null, "2026-11-04",
+            0L, null, listOf(InvoiceLineInput(productId, BigDecimal("2"), 150L)), "CASH"
+        )
+        assertEquals(invoiceId, saved.invoiceId)
+        InvoiceRepository(context).postCashSale(
+            secondaryAdminId, invoiceId, saleOperationId, cashAccountId,
+            "2026-11-04T11:15:00Z", "2026-11-04"
+        )
         assertEquals("PENDING", queueStatus(secondaryDb, saleOperationId))
+        assertEquals(0, scalar(secondaryDb,
+            "SELECT COUNT(*) FROM cash_transactions WHERE source_type='SALES_INVOICE' AND source_id=?",
+            invoiceId))
+        val saleFrame = secondaryRepository.encryptedAuthenticatedOutbox(saleOperationId, primaryId)
 
         var saleAck: String? = null
         var saleProtocolError: String? = null
         setLocalDeviceId(primaryId)
         AppDatabase.installForTests(primaryDb)
-        val primaryProcessor = SyncRelayProcessor(
+        val primarySaleProcessor = SyncRelayProcessor(
             primaryRepository, SyncDomainApplier(context),
             listener = object : SyncRelayProcessor.Listener {
                 override fun onProtocolError(operationId: String?, message: String) {
@@ -505,9 +592,8 @@ class TwoDeviceSyncIntegrationTest {
                 true
             }
         )
-        primaryProcessor.onEncryptedFrame(secondaryId, saleOperationId, saleFrame)
-        // Keep the primary-side rejection visible in the CI JUnit XML report.
-        assertEquals("لا ينبغي رفض أمر البيع: $saleProtocolError", null, saleProtocolError)
+        primarySaleProcessor.onEncryptedFrame(secondaryId, saleOperationId, saleFrame)
+        assertEquals("لا ينبغي رفض البيع الناتج من InvoiceRepository: $saleProtocolError", null, saleProtocolError)
         assertEquals("PAID", primaryDb.readableDatabase.rawQuery(
             "SELECT status FROM sales_invoices WHERE id=?", arrayOf(invoiceId)
         ).use { c -> assertTrue(c.moveToFirst()); c.getString(0) })
@@ -521,21 +607,18 @@ class TwoDeviceSyncIntegrationTest {
             "SELECT COUNT(*) FROM cash_transactions WHERE source_type='SALES_INVOICE' AND source_id=?", invoiceId))
         assertEquals("APPLIED", inboxStatus(primaryDb, saleOperationId))
 
-        val ack = saleAck ?: throw AssertionError("Primary did not issue the sales application ACK")
+        val ack = saleAck ?: throw AssertionError("لم يرسل الأساسي إقرار تطبيق البيع")
         setLocalDeviceId(secondaryId)
         AppDatabase.installForTests(secondaryDb)
-        val secondaryProcessor = SyncRelayProcessor(
-            secondaryRepository, SyncDomainApplier(context), sendFrame = { _, _, _ -> true }
-        )
         secondaryProcessor.onEncryptedFrame(primaryId, saleOperationId, ack)
         assertEquals("SYNCED", queueStatus(secondaryDb, saleOperationId))
 
-        // A replay after the ACK must not post another invoice, stock movement, or receipt.
+        // Replayed delivery and repeated signed ACK must not post financial or stock effects twice.
         saleAck = null
         setLocalDeviceId(primaryId)
         AppDatabase.installForTests(primaryDb)
-        primaryProcessor.onEncryptedFrame(secondaryId, saleOperationId, saleFrame)
-        val repeatedAck = saleAck ?: throw AssertionError("Primary did not re-issue the duplicate sales ACK")
+        primarySaleProcessor.onEncryptedFrame(secondaryId, saleOperationId, saleFrame)
+        val repeatedAck = saleAck ?: throw AssertionError("لم يُعد الأساسي إرسال ACK للبيع المكرر")
         setLocalDeviceId(secondaryId)
         AppDatabase.installForTests(secondaryDb)
         secondaryProcessor.onEncryptedFrame(primaryId, saleOperationId, repeatedAck)
