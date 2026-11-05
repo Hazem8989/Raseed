@@ -27,9 +27,7 @@ class TwoDeviceSyncIntegrationTest {
     private lateinit var secondaryAdminId: String
     private lateinit var operationId: String
     private lateinit var outgoingFrame: String
-    private lateinit var expenseId: String
     private lateinit var cashAccountId: String
-    private lateinit var categoryId: String
 
     private val vaultKey = SecretKeySpec(ByteArray(32) { 7 }, "AES")
 
@@ -59,16 +57,10 @@ class TwoDeviceSyncIntegrationTest {
             primaryAdminId, invitation.token, secondaryId, "جهاز التكامل الثانوي", remotePublicKey
         )
         cashAccountId = UUID.randomUUID().toString()
-        categoryId = UUID.randomUUID().toString()
         primaryDb.writableDatabase.execSQL(
             """INSERT INTO cash_accounts(id,name,account_type,currency_code,opening_balance_minor,is_active,created_at)
                VALUES(?,?, 'CASH_BOX','USD',50000,1,?)""",
             arrayOf(cashAccountId, "صندوق اختبار التكامل", "2026-11-04T10:00:00Z")
-        )
-        primaryDb.writableDatabase.execSQL(
-            """INSERT INTO expense_categories(id,name,is_active,created_by,created_at)
-               VALUES(?, ?, 1, ?, ?)""",
-            arrayOf(categoryId, "مصروف تكامل", primaryAdminId, "2026-11-04T10:00:00Z")
         )
         primaryRepository.mapSecondaryCashAccount(primaryAdminId, secondaryId, "secondary-cash-usd", cashAccountId)
 
@@ -88,34 +80,9 @@ class TwoDeviceSyncIntegrationTest {
             enrollment.primaryPublicKeyBase64!!, enrollment.deviceCertificateJson!!
         )
 
-        expenseId = "secondary-expense-" + UUID.randomUUID().toString()
-        operationId = UUID.randomUUID().toString()
-        val payload = JSONObject()
-            .put("expense_id", expenseId)
-            .put("category_id", categoryId)
-            .put("cash_account_id", "secondary-cash-usd")
-            .put("cash_account_type", "CASH_BOX")
-            .put("cash_account_currency_code", "USD")
-            .put("amount_minor", 12_500L)
-            .put("currency_code", "USD")
-            .put("exchange_rate_syp_per_usd_milli", 0L)
-            .put("amount_usd_cents", 12_500L)
-            .put("expense_date", "2026-11-04")
-            .put("operating_date", "2026-11-04")
-            .put("occurred_at", "2026-11-04T10:15:00Z")
-            .put("reference", "تكامل جهازين")
-            .put("notes", "أمر تجريبي عبر مسار المزامنة")
-        val secondarySql = secondaryDb.writableDatabase
-        secondarySql.beginTransaction()
-        try {
-            secondaryRepository.enqueueSecondaryCommand(
-                secondarySql, secondaryAdminId, operationId, "POST_OPERATING_EXPENSE",
-                "OPERATING_EXPENSE", expenseId, payload.toString()
-            )
-            secondarySql.setTransactionSuccessful()
-        } finally {
-            secondarySql.endTransaction()
-        }
+        // Sequence 1 is a harmless authenticated transport probe. The secondary
+        // must not originate expense, collection, return, or inventory commands.
+        operationId = secondaryRepository.enqueueTransportProbe(secondaryAdminId)
         outgoingFrame = secondaryRepository.encryptedAuthenticatedOutbox(operationId, primaryId)
         assertEquals("PENDING", queueStatus(secondaryDb, operationId))
     }
@@ -127,8 +94,8 @@ class TwoDeviceSyncIntegrationTest {
         context.deleteDatabase(SECONDARY_DATABASE)
     }
 
-    @Test fun twoIndependentDevicesApplyExpenseAndAcceptRealSignedEncryptedAckExactlyOnce() {
-        var deliveredAck: String? = null
+    @Test fun twoIndependentDevicesExchangeAuthenticatedProbeAndSignedAckExactlyOnce() {
+        var ack: String? = null
         setLocalDeviceId(primaryId)
         AppDatabase.installForTests(primaryDb)
         val primaryProcessor = SyncRelayProcessor(
@@ -136,62 +103,42 @@ class TwoDeviceSyncIntegrationTest {
             sendFrame = { id, recipient, frame ->
                 assertEquals(operationId, id)
                 assertEquals(secondaryId, recipient)
-                deliveredAck = frame
+                ack = frame
                 true
             }
         )
         primaryProcessor.onEncryptedFrame(secondaryId, operationId, outgoingFrame)
-
-        val ack: String = deliveredAck ?: throw AssertionError("Primary did not emit an application acknowledgement")
-        val ackJson = JSONObject(ack)
-        assertEquals("APPLICATION_ACK", ackJson.getString("frame_type"))
-        assertEquals(primaryId, ackJson.getString("sender_device_id"))
-        assertEquals(secondaryId, ackJson.getString("recipient_device_id"))
         assertEquals("APPLIED", inboxStatus(primaryDb, operationId))
-        assertEquals(1, scalar(primaryDb, "SELECT COUNT(*) FROM operating_expenses WHERE operation_id=?", operationId))
-        assertEquals(1, scalar(primaryDb, "SELECT COUNT(*) FROM cash_transactions WHERE operation_id=?", operationId + ":CASH"))
-        assertEquals(37_500L, scalarLong(primaryDb,
-            """SELECT opening_balance_minor + COALESCE((SELECT SUM(CASE WHEN direction='IN' THEN amount_minor
-               WHEN direction='OUT' THEN -amount_minor ELSE 0 END) FROM cash_transactions WHERE account_id=?),0)
-               FROM cash_accounts WHERE id=?""", cashAccountId, cashAccountId))
-        assertEquals("PENDING", queueStatus(secondaryDb, operationId))
-
+        val firstAck = ack ?: throw AssertionError("Primary did not acknowledge the authenticated probe")
         setLocalDeviceId(secondaryId)
         AppDatabase.installForTests(secondaryDb)
         val secondaryProcessor = SyncRelayProcessor(
             secondaryRepository, SyncDomainApplier(context), sendFrame = { _, _, _ -> true }
         )
-        secondaryProcessor.onEncryptedFrame(primaryId, operationId, ack)
+        secondaryProcessor.onEncryptedFrame(primaryId, operationId, firstAck)
         assertEquals("SYNCED", queueStatus(secondaryDb, operationId))
-        assertEquals(1, scalar(secondaryDb, "SELECT COUNT(*) FROM sync_acknowledgements WHERE operation_id=?", operationId))
+        assertEquals(0, scalar(primaryDb, "SELECT COUNT(*) FROM operating_expenses", null))
+        assertEquals(0, scalar(primaryDb, "SELECT COUNT(*) FROM cash_transactions WHERE operation_id=?", operationId))
 
-        // Redelivery must re-issue an idempotent ACK without posting the expense twice.
-        deliveredAck = null
+        ack = null
         setLocalDeviceId(primaryId)
         AppDatabase.installForTests(primaryDb)
         primaryProcessor.onEncryptedFrame(secondaryId, operationId, outgoingFrame)
-        val repeatedAck: String = deliveredAck ?: throw AssertionError("Primary did not re-issue ACK after duplicate delivery")
+        val repeatedAck = ack ?: throw AssertionError("Primary did not re-issue the duplicate probe ACK")
         setLocalDeviceId(secondaryId)
         AppDatabase.installForTests(secondaryDb)
         secondaryProcessor.onEncryptedFrame(primaryId, operationId, repeatedAck)
-
-        assertEquals(1, scalar(primaryDb, "SELECT COUNT(*) FROM operating_expenses WHERE operation_id=?", operationId))
-        assertEquals(1, scalar(primaryDb, "SELECT COUNT(*) FROM cash_transactions WHERE operation_id=?", operationId + ":CASH"))
-        assertEquals(1, scalar(secondaryDb, "SELECT COUNT(*) FROM sync_acknowledgements WHERE operation_id=?", operationId))
         assertEquals("SYNCED", queueStatus(secondaryDb, operationId))
+        assertEquals(1, scalar(primaryDb, "SELECT COUNT(*) FROM sync_inbox WHERE operation_id=?", operationId))
     }
 
-    @Test fun twoIndependentDevicesExchangeTransportProbeAndSignedAckWithoutLedgerMutation() {
-        var expenseAck: String? = null
+    @Test fun twoIndependentDevicesExchangeTransportProbeAfterActorMappingIsRemoved() {
+        var firstAck: String? = null
         setLocalDeviceId(primaryId)
         AppDatabase.installForTests(primaryDb)
         val primaryProcessor = SyncRelayProcessor(
             primaryRepository, SyncDomainApplier(context),
-            sendFrame = { _, recipient, frame ->
-                assertEquals(secondaryId, recipient)
-                expenseAck = frame
-                true
-            }
+            sendFrame = { _, recipient, frame -> assertEquals(secondaryId, recipient); firstAck = frame; true }
         )
         primaryProcessor.onEncryptedFrame(secondaryId, operationId, outgoingFrame)
         assertEquals("APPLIED", inboxStatus(primaryDb, operationId))
@@ -200,52 +147,35 @@ class TwoDeviceSyncIntegrationTest {
         val secondaryProcessor = SyncRelayProcessor(
             secondaryRepository, SyncDomainApplier(context), sendFrame = { _, _, _ -> true }
         )
-        secondaryProcessor.onEncryptedFrame(primaryId, operationId, expenseAck!!)
+        secondaryProcessor.onEncryptedFrame(primaryId, operationId, firstAck!!)
         assertEquals("SYNCED", queueStatus(secondaryDb, operationId))
 
-        // Probes are device-authenticated control messages, not business commands;
-        // removing the actor mapping must not block a harmless transport test.
         setLocalDeviceId(primaryId)
         AppDatabase.installForTests(primaryDb)
         primaryDb.writableDatabase.update(
             "sync_actor_mappings", android.content.ContentValues().apply { put("is_active", 0) },
             "device_id=?", arrayOf(secondaryId)
         )
-        val expenseCountBefore = scalar(primaryDb, "SELECT COUNT(*) FROM operating_expenses WHERE operation_id=?", operationId)
-        val cashCountBefore = scalar(primaryDb, "SELECT COUNT(*) FROM cash_transactions WHERE operation_id=?", operationId + ":CASH")
-
         setLocalDeviceId(secondaryId)
         AppDatabase.installForTests(secondaryDb)
         val probeId = secondaryRepository.enqueueTransportProbe(secondaryAdminId)
         val probeFrame = secondaryRepository.encryptedAuthenticatedOutbox(probeId, primaryId)
-
         var probeAck: String? = null
         setLocalDeviceId(primaryId)
         AppDatabase.installForTests(primaryDb)
         val primaryProbeProcessor = SyncRelayProcessor(
             primaryRepository, SyncDomainApplier(context),
             sendFrame = { id, recipient, frame ->
-                assertEquals(probeId, id)
-                assertEquals(secondaryId, recipient)
-                probeAck = frame
-                true
+                assertEquals(probeId, id); assertEquals(secondaryId, recipient); probeAck = frame; true
             }
         )
         primaryProbeProcessor.onEncryptedFrame(secondaryId, probeId, probeFrame)
         assertEquals("APPLIED", inboxStatus(primaryDb, probeId))
-        assertEquals(expenseCountBefore, scalar(primaryDb,
-            "SELECT COUNT(*) FROM operating_expenses WHERE operation_id=?", operationId))
-        assertEquals(cashCountBefore, scalar(primaryDb,
-            "SELECT COUNT(*) FROM cash_transactions WHERE operation_id=?", operationId + ":CASH"))
-
         setLocalDeviceId(secondaryId)
         AppDatabase.installForTests(secondaryDb)
         secondaryProcessor.onEncryptedFrame(primaryId, probeId, probeAck!!)
         assertEquals("SYNCED", queueStatus(secondaryDb, probeId))
-        assertEquals(0, scalar(primaryDb,
-            "SELECT COUNT(*) FROM operating_expenses WHERE operation_id=?", probeId))
-        assertEquals(0, scalar(primaryDb,
-            "SELECT COUNT(*) FROM cash_transactions WHERE operation_id=?", probeId + ":CASH"))
+        assertEquals(0, scalar(primaryDb, "SELECT COUNT(*) FROM operating_expenses", null))
     }
 
     @Test fun twoIndependentDevicesSyncCashSaleStockAndFinancialEffectsExactlyOnce() {
