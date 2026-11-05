@@ -248,7 +248,7 @@ class InventoryAdjustmentRepository(context: Context) {
                 adjustmentId, movementId, productId, resolvedWarehouse, type,
                 absoluteQuantity, before, after, unitCostUsdCents, cost, cleanReason, false
             )
-        } finally { db.endTransaction() }
+        } finally { db.endTransaction(); runCatching { SyncRelaySession.flushPending() } }
     }
 
     fun listRecent(limit: Int = 100): List<InventoryAdjustmentResult> {
