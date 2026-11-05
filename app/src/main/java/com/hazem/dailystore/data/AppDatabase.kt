@@ -56,6 +56,7 @@ class AppDatabase internal constructor(context: Context, databaseName: String = 
             ensureSyncCashAccountMappingSchema(db)
             ensureSyncCategoryMappingSchema(db)
             ensureSyncUnitMappingSchema(db)
+            ensureSyncAckDeliverySchema(db)
             db.execSQL(
                 """INSERT INTO app_settings(setting_key, setting_value, updated_at)
                    VALUES('base_currency', 'USD', strftime('%Y-%m-%dT%H:%M:%fZ','now'))"""
@@ -569,6 +570,14 @@ class AppDatabase internal constructor(context: Context, databaseName: String = 
                 version = 28
             } finally { db.endTransaction() }
         }
+        if (version < 29) {
+            db.beginTransaction()
+            try {
+                ensureSyncAckDeliverySchema(db)
+                db.setTransactionSuccessful()
+                version = 29
+            } finally { db.endTransaction() }
+        }
         if (version != newVersion) {
             throw IllegalStateException("Missing database migration from version $version to $newVersion")
         }
@@ -591,6 +600,24 @@ class AppDatabase internal constructor(context: Context, databaseName: String = 
             )
         """.trimIndent())
         db.execSQL("CREATE INDEX IF NOT EXISTS idx_sync_category_mappings_local ON sync_category_mappings(secondary_category_id)")
+    }
+
+    private fun ensureSyncAckDeliverySchema(db: SQLiteDatabase) {
+        db.execSQL("""
+            CREATE TABLE IF NOT EXISTS sync_ack_delivery (
+                operation_id TEXT NOT NULL,
+                device_id TEXT NOT NULL,
+                last_forwarded_at TEXT NOT NULL,
+                attempt_count INTEGER NOT NULL DEFAULT 1 CHECK(attempt_count > 0),
+                updated_at TEXT NOT NULL,
+                PRIMARY KEY(operation_id, device_id),
+                FOREIGN KEY(operation_id) REFERENCES sync_inbox(operation_id)
+                    ON UPDATE RESTRICT ON DELETE RESTRICT,
+                FOREIGN KEY(device_id) REFERENCES sync_devices(device_id)
+                    ON UPDATE RESTRICT ON DELETE RESTRICT
+            )
+        """.trimIndent())
+        db.execSQL("CREATE INDEX IF NOT EXISTS idx_sync_ack_delivery_retry ON sync_ack_delivery(device_id, last_forwarded_at)")
     }
 
     private fun ensureSyncUnitMappingSchema(db: SQLiteDatabase) {
@@ -1078,7 +1105,7 @@ class AppDatabase internal constructor(context: Context, databaseName: String = 
 
     companion object {
         const val DATABASE_NAME = "the_daily_shop.db"
-        const val DATABASE_VERSION = 28
+        const val DATABASE_VERSION = 29
 
         @Volatile
         private var INSTANCE: AppDatabase? = null

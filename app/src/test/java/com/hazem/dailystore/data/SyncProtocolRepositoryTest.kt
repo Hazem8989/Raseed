@@ -997,4 +997,62 @@ class SyncProtocolRepositoryTest {
         assertEquals(operationId, repository.pendingOutboxForDevice(lateDeviceId).single().operationId)
     }
 
+    @Test fun forwardedApplicationAcksAdvanceInBoundedBatchesAndRetryAfterCooldown() {
+        repository.configureAsPrimary(adminId, "الجهاز الأساسي")
+        val secondaryId = UUID.randomUUID().toString()
+        val invitation = repository.createPairingInvitation(adminId)
+        enrollRemote(invitation, secondaryId, "الجهاز الثانوي")
+
+        val db = database.writableDatabase
+        val now = "2026-11-05T12:00:00.000Z"
+        val operationIds = (1..120).map { UUID.randomUUID().toString() }
+        db.beginTransaction()
+        try {
+            operationIds.forEachIndexed { index, operationId ->
+                db.insertOrThrow("sync_inbox", null, ContentValues().apply {
+                    put("operation_id", operationId)
+                    put("origin_device_id", secondaryId)
+                    put("sequence_number", index + 1L)
+                    put("operation_type", "CREATE")
+                    put("entity_type", "SYNC_TRANSPORT_PROBE")
+                    put("entity_id", operationId)
+                    put("payload_json", JSONObject().put("business_operation", "SYNC_TRANSPORT_PROBE").toString())
+                    put("payload_sha256", "%064x".format(index + 1))
+                    put("status", "APPLIED")
+                    put("received_at", now)
+                    put("applied_at", now)
+                    put("origin_created_at", now)
+                })
+            }
+            db.setTransactionSuccessful()
+        } finally {
+            db.endTransaction()
+        }
+
+        val first = repository.appliedOperationsAwaitingAckForDevice(secondaryId, limit = 50)
+        assertEquals(50, first.size)
+        first.forEach { assertTrue(repository.markApplicationAckForwarded(it)) }
+
+        val second = repository.appliedOperationsAwaitingAckForDevice(secondaryId, limit = 50)
+        assertEquals(50, second.size)
+        assertTrue(first.toSet().intersect(second.toSet()).isEmpty())
+        second.forEach { assertTrue(repository.markApplicationAckForwarded(it)) }
+
+        val third = repository.appliedOperationsAwaitingAckForDevice(secondaryId, limit = 50)
+        assertEquals(20, third.size)
+        assertTrue((first + second).toSet().intersect(third.toSet()).isEmpty())
+        third.forEach { assertTrue(repository.markApplicationAckForwarded(it)) }
+
+        assertTrue(repository.appliedOperationsAwaitingAckForDevice(secondaryId, limit = 50).isEmpty())
+        val retry = repository.appliedOperationsAwaitingAckForDevice(
+            secondaryId, limit = 50, retryAfterMillis = 0L
+        )
+        assertEquals(50, retry.size)
+        assertTrue(retry.all { it in first })
+        assertEquals(120, db.rawQuery(
+            "SELECT COUNT(*) FROM sync_inbox WHERE status='APPLIED' AND origin_device_id=?",
+            arrayOf(secondaryId)
+        ).use { cursor -> cursor.moveToFirst(); cursor.getInt(0) })
+    }
+
 }

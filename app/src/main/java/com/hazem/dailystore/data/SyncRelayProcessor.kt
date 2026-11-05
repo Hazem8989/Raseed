@@ -26,6 +26,8 @@ class SyncRelayProcessor(
         fun onProtocolError(operationId: String?, reason: String) {}
     }
 
+    private val pendingApplicationAckIds = java.util.concurrent.ConcurrentHashMap.newKeySet<String>()
+
     /** Called only after the relay's authenticated ready handshake. */
     fun onRelayReady() {
         val role = repository.localDeviceRole()
@@ -36,22 +38,45 @@ class SyncRelayProcessor(
                 ?: throw IllegalStateException("الجهاز الأساسي غير محدد"))
             else -> throw IllegalStateException("دور جهاز المزامنة غير معروف")
         }
-        peers.forEach { peerId ->
-            // Rebuild ACK frames from durable APPLIED inbox rows after reconnect.
-            repository.appliedOperationsAwaitingAckForDevice(peerId).forEach { operationId ->
-                val ack = repository.createEncryptedApplicationAck(peerId, operationId)
-                if (!sendFrame(operationId, peerId, ack)) {
-                    listener.onRetryRequired(operationId, "تعذر إرسال إقرار التطبيق؛ سيعاد بناؤه عند الاتصال التالي")
+
+        // Cloudflare permits 60 inbound frames per device in a rolling 10-second
+        // window. Keep headroom for reconnect races and ACKs produced while
+        // processing inbound operations.
+        var remaining = 50
+        for (peerId in peers) {
+            if (remaining <= 0) break
+            val acknowledgements = repository.appliedOperationsAwaitingAckForDevice(
+                peerId, limit = remaining
+            )
+            for (operationId in acknowledgements) {
+                if (!sendApplicationAck(operationId, peerId)) {
+                    listener.onRetryRequired(operationId, "تعذر إرسال إقرار التطبيق؛ بقي محفوظاً لإعادة المحاولة")
+                    return
                 }
+                remaining--
+                if (remaining <= 0) break
             }
-            // Outbox remains durable until the peer's application ACK is accepted.
-            repository.pendingOutboxForDevice(peerId).forEach { item ->
-                val frame = repository.encryptedAuthenticatedOutbox(item.operationId, peerId)
-                if (!sendFrame(item.operationId, peerId, frame)) {
-                    listener.onRetryRequired(item.operationId, "تعذر إرسال العملية؛ بقيت محفوظة في صندوق الإرسال")
+            if (remaining > 0) {
+                val pending = repository.pendingOutboxForDevice(peerId, limit = remaining)
+                for (item in pending) {
+                    val frame = repository.encryptedAuthenticatedOutbox(item.operationId, peerId)
+                    if (!sendFrame(item.operationId, peerId, frame)) {
+                        listener.onRetryRequired(item.operationId, "تعذر إرسال العملية؛ بقيت محفوظة في صندوق الإرسال")
+                        return
+                    }
+                    remaining--
+                    if (remaining <= 0) break
                 }
             }
         }
+    }
+
+    private fun sendApplicationAck(operationId: String, recipientDeviceId: String): Boolean {
+        val frame = repository.createEncryptedApplicationAck(recipientDeviceId, operationId)
+        pendingApplicationAckIds.add(operationId)
+        val sent = sendFrame(operationId, recipientDeviceId, frame)
+        if (!sent) pendingApplicationAckIds.remove(operationId)
+        return sent
     }
 
     /** Processes a relay-delivered encrypted peer frame. */
@@ -105,8 +130,7 @@ class SyncRelayProcessor(
                 else -> throw IllegalStateException("تعذر تحديد حالة العملية الواردة")
             }
 
-            val ack = repository.createEncryptedApplicationAck(fromDeviceId, frameId)
-            if (!sendFrame(frameId, fromDeviceId, ack)) {
+            if (!sendApplicationAck(frameId, fromDeviceId)) {
                 listener.onRetryRequired(frameId, "تم تطبيق العملية، لكن تعذر إرسال الإقرار؛ سيعاد إرساله عند الاتصال التالي")
             }
         } catch (error: Exception) {
@@ -116,6 +140,12 @@ class SyncRelayProcessor(
 
     /** Relay forwarding is transport telemetry only and never changes outbox state. */
     fun onRelayDelivery(frameId: String, forwarded: Boolean, retryable: Boolean) {
+        if (forwarded && !retryable && pendingApplicationAckIds.remove(frameId)) {
+            // This only records relay-level delivery pacing. The peer's outbox is
+            // cleared exclusively by its verified application-level ACK.
+            runCatching { repository.markApplicationAckForwarded(frameId) }
+                .onFailure { listener.onProtocolError(frameId, it.message ?: "تعذر حفظ محاولة تمرير الإقرار") }
+        }
         if (!forwarded || retryable) {
             listener.onRetryRequired(
                 frameId,
@@ -138,12 +168,13 @@ class SyncRelayRuntime(
 ) : SyncRelayWebSocketClient.Listener {
     private lateinit var client: SyncRelayWebSocketClient
     private val registryBaseUrl = relayBaseUrl.replaceFirst(Regex("^wss://", RegexOption.IGNORE_CASE), "https://")
+    private val sendRateLimiter = SyncRelaySendRateLimiter()
     private val scheduler = Executors.newSingleThreadScheduledExecutor { task ->
         Thread(task, "daily-shop-sync-retry").apply { isDaemon = true }
     }
     @Volatile private var desiredConnection = false
     private var reconnectDelaySeconds = 1L
-    private var deliveryRetryDelaySeconds = 5L
+    private var deliveryRetryDelaySeconds = 11L
     private var reconnectTask: ScheduledFuture<*>? = null
     private var deliveryRetryTask: ScheduledFuture<*>? = null
 
@@ -152,7 +183,7 @@ class SyncRelayRuntime(
             listener.onOperationApplied(operationId)
 
         override fun onApplicationAckAccepted(operationId: String, duplicate: Boolean) {
-            synchronized(this@SyncRelayRuntime) { deliveryRetryDelaySeconds = 5L }
+            synchronized(this@SyncRelayRuntime) { deliveryRetryDelaySeconds = 11L }
             listener.onApplicationAckAccepted(operationId, duplicate)
         }
 
@@ -171,7 +202,9 @@ class SyncRelayRuntime(
         repository,
         SyncDomainApplier(context.applicationContext),
         sendFrame = { operationId, recipientId, frame ->
-            if (::client.isInitialized) client.sendEncryptedFrame(operationId, recipientId, frame) else false
+            if (::client.isInitialized && client.isReady && sendRateLimiter.tryAcquire()) {
+                client.sendEncryptedFrame(operationId, recipientId, frame)
+            } else false
         },
         listener = processorListener
     )
@@ -318,5 +351,30 @@ class SyncRelayRuntime(
     fun shutdown() {
         disconnect()
         scheduler.shutdownNow()
+    }
+}
+
+
+/** Rolling-window limiter aligned with the relay's device-level 60/10s limit. */
+internal class SyncRelaySendRateLimiter(
+    private val maxMessages: Int = 50,
+    private val windowMillis: Long = 10_000L,
+    private val clockMillis: () -> Long = { System.nanoTime() / 1_000_000L }
+) {
+    private val sentAt = java.util.ArrayDeque<Long>()
+
+    init {
+        require(maxMessages in 1..59 && windowMillis > 0L)
+    }
+
+    @Synchronized
+    fun tryAcquire(): Boolean {
+        val now = clockMillis()
+        while (sentAt.peekFirst()?.let { now - it >= windowMillis } == true) {
+            sentAt.removeFirst()
+        }
+        if (sentAt.size >= maxMessages) return false
+        sentAt.addLast(now)
+        return true
     }
 }

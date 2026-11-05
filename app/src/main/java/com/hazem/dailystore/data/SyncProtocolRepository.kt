@@ -1944,8 +1944,17 @@ class SyncProtocolRepository(private val context: Context, private val credentia
         }
     }
 
-    fun appliedOperationsAwaitingAckForDevice(deviceId: String, limit: Int = 100): List<String> {
-        require(limit in 1..500 && runCatching { UUID.fromString(deviceId) }.isSuccess)
+    /**
+     * Returns APPLIED inbox operations whose application ACK has not recently
+     * been forwarded. Relay forwarding is only a retry hint, never a business ACK.
+     */
+    fun appliedOperationsAwaitingAckForDevice(
+        deviceId: String,
+        limit: Int = 100,
+        retryAfterMillis: Long = 60_000L
+    ): List<String> {
+        require(limit in 1..500 && retryAfterMillis in 0..86_400_000L &&
+            runCatching { UUID.fromString(deviceId) }.isSuccess)
         val db = database.readableDatabase
         val role = state(db, "local_device_role")
         val localId = SyncDeviceIdentity.getOrCreate(context)
@@ -1964,16 +1973,79 @@ class SyncProtocolRepository(private val context: Context, private val credentia
             "SELECT 1 FROM sync_devices WHERE device_id=? AND device_role=? AND status='ACTIVE'",
             arrayOf(deviceId, expectedPeerRole)
         ).use { it.moveToFirst() }) { "الجهاز المقابل غير مسجل أو موقوف" }
+        val retryBefore = timestamp(System.currentTimeMillis() - retryAfterMillis)
         val result = mutableListOf<String>()
         db.rawQuery(
             """SELECT i.operation_id FROM sync_inbox i
                JOIN sync_devices d ON d.device_id=i.origin_device_id
+               LEFT JOIN sync_ack_delivery a
+                 ON a.operation_id=i.operation_id AND a.device_id=i.origin_device_id
                WHERE i.origin_device_id=? AND i.status='APPLIED'
                  AND d.device_role=? AND d.status='ACTIVE'
-               ORDER BY i.sequence_number LIMIT ?""".trimIndent(),
-            arrayOf(deviceId, expectedPeerRole, limit.toString())
+                 AND (a.last_forwarded_at IS NULL OR a.last_forwarded_at<=?)
+               ORDER BY CASE WHEN a.last_forwarded_at IS NULL THEN 0 ELSE 1 END,
+                        a.last_forwarded_at,i.sequence_number LIMIT ?""".trimIndent(),
+            arrayOf(deviceId, expectedPeerRole, retryBefore, limit.toString())
         ).use { cursor -> while (cursor.moveToNext()) result.add(cursor.getString(0)) }
         return result
+    }
+
+    /** Relay forwarding updates retry pacing only; it never changes business ACK state. */
+    fun markApplicationAckForwarded(operationId: String): Boolean {
+        require(operationId.isNotBlank())
+        val db = database.writableDatabase
+        db.beginTransaction()
+        try {
+            val peer = db.rawQuery(
+                "SELECT origin_device_id,status FROM sync_inbox WHERE operation_id=?",
+                arrayOf(operationId)
+            ).use { cursor ->
+                if (!cursor.moveToFirst() || cursor.getString(1) != "APPLIED") null
+                else cursor.getString(0)
+            } ?: return false
+            val role = state(db, "local_device_role")
+            val localId = SyncDeviceIdentity.getOrCreate(context)
+            val expectedPeerRole = when (role) {
+                "PRIMARY" -> {
+                    require(state(db, "authority_device_id") == localId)
+                    "SECONDARY"
+                }
+                "SECONDARY" -> {
+                    require(state(db, "authority_device_id") == peer)
+                    "PRIMARY"
+                }
+                else -> throw IllegalArgumentException("دور الجهاز غير مهيأ")
+            }
+            require(db.rawQuery(
+                "SELECT 1 FROM sync_devices WHERE device_id=? AND device_role=? AND status='ACTIVE'",
+                arrayOf(peer, expectedPeerRole)
+            ).use { it.moveToFirst() }) { "الجهاز المقابل غير مسجل أو موقوف" }
+
+            val now = timestamp()
+            val attempts = db.rawQuery(
+                "SELECT attempt_count FROM sync_ack_delivery WHERE operation_id=? AND device_id=?",
+                arrayOf(operationId, peer)
+            ).use { cursor -> if (cursor.moveToFirst()) cursor.getInt(0) else null }
+            val values = ContentValues().apply {
+                put("last_forwarded_at", now)
+                put("attempt_count", (attempts ?: 0) + 1)
+                put("updated_at", now)
+            }
+            if (attempts == null) {
+                values.put("operation_id", operationId)
+                values.put("device_id", peer)
+                db.insertOrThrow("sync_ack_delivery", null, values)
+            } else {
+                require(db.update(
+                    "sync_ack_delivery", values, "operation_id=? AND device_id=?",
+                    arrayOf(operationId, peer)
+                ) == 1) { "تعذر حفظ حالة تمرير إقرار التطبيق" }
+            }
+            db.setTransactionSuccessful()
+            return true
+        } finally {
+            db.endTransaction()
+        }
     }
 
     fun storeId(): String = state(database.readableDatabase, "store_id")
