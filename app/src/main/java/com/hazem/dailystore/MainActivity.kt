@@ -1210,8 +1210,11 @@ class MainActivity : Activity() {
             "المستخدمون والصلاحيات" to "إضافة الموظفين والتحكم بصلاحياتهم"
         )
         lateinit var popup: PopupWindow
+        val secondaryDevice = SyncProtocolRepository(this).isConfiguredSecondary()
         val visibleEntries = entries.filter { entry ->
-            when (entry.first) {
+            if (secondaryDevice) {
+                entry.first == "نقطة البيع" || entry.first == "مزامنة الأجهزة"
+            } else when (entry.first) {
                 "تسويات المخزون" -> hasPermission(PermissionPolicy.INVENTORY_ADJUST)
                 "مرتجعات المبيعات", "مرتجعات المشتريات" -> isManager() && hasPermission(PermissionPolicy.RETURNS_PROCESS)
                 "المصاريف التشغيلية" -> isManager() && hasPermission(PermissionPolicy.EXPENSES_MANAGE)
