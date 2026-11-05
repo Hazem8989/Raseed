@@ -1592,8 +1592,12 @@ class SyncDomainApplier(context: Context) {
                 }
             }
 
+            val hasPrimaryUnitId = payload.has("primary_unit_id")
             val primaryUnitId = payload.optLong("primary_unit_id", 0L)
-            val unitId = if (primaryUnitId > 0L) {
+            require(!hasPrimaryUnitId || (!payload.isNull("primary_unit_id") && primaryUnitId > 0L)) {
+                "معرّف الوحدة الأصلي في المنتج غير صالح"
+            }
+            val unitId = if (hasPrimaryUnitId) {
                 val mapping = db.rawQuery(
                     """SELECT secondary_unit_id,unit_name,unit_symbol,decimal_places
                        FROM sync_unit_mappings WHERE primary_device_id=? AND primary_unit_id=?""".trimIndent(),
