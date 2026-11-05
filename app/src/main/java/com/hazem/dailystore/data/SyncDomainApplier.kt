@@ -1619,7 +1619,13 @@ class SyncDomainApplier(context: Context) {
                 val hasMovement = db.rawQuery(
                     "SELECT 1 FROM inventory_movements WHERE product_id=? LIMIT 1", arrayOf(productId)
                 ).use { it.moveToFirst() }
-                require(!hasMovement || (existing.first == unitId && existing.second == tracksInventory)) {
+                val existingQuantity = db.rawQuery(
+                    "SELECT COALESCE(SUM(quantity),0) FROM inventory_balances WHERE product_id=?",
+                    arrayOf(productId)
+                ).use { c -> c.moveToFirst(); c.getDouble(0) }
+                val hasLocalStock = kotlin.math.abs(existingQuantity) > 0.0000001
+                require(!(hasMovement || hasLocalStock) ||
+                    (existing.first == unitId && existing.second == tracksInventory)) {
                     "لا يمكن تغيير وحدة أو تتبع مخزون منتج له حركات محلية"
                 }
                 val values = ContentValues().apply {
