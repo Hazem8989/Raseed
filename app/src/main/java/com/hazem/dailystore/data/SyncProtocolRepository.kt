@@ -78,6 +78,7 @@ class SyncProtocolRepository(private val context: Context, private val credentia
                 Base64.encodeToString(localIdentity.public.encoded, Base64.NO_WRAP), now
             )
             putState(db, "authority_device_id", deviceId, now)
+            putState(db, "local_device_id", deviceId, now)
             putState(db, "local_device_role", "PRIMARY", now)
             if (state(db, "store_id") == null) putState(db, "store_id", UUID.randomUUID().toString(), now)
             if (state(db, "next_sequence") == null) putState(db, "next_sequence", "1", now)
@@ -281,6 +282,7 @@ class SyncProtocolRepository(private val context: Context, private val credentia
                 put("certificate_json", deviceCertificateJson)
             }, "device_id=?", arrayOf(localDeviceId))
             putState(db, "authority_device_id", primaryDeviceId, now)
+            putState(db, "local_device_id", localDeviceId, now)
             putState(db, "local_device_role", "SECONDARY", now)
             putState(db, "store_id", storeId, now)
             StoreTime.setZoneId(db, storeTimeZoneId, now)
