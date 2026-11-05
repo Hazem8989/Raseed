@@ -575,6 +575,56 @@ class SyncProtocolRepositoryTest {
         secretBytes.fill(0)
     }
 
+    @Test fun secondaryOutboxRejectsEveryNonSalesAndNonCollectionFinancialCommand() {
+        val primaryId = UUID.randomUUID().toString()
+        val credential = android.util.Base64.encodeToString(
+            ByteArray(32) { 17 },
+            android.util.Base64.URL_SAFE or android.util.Base64.NO_WRAP or android.util.Base64.NO_PADDING
+        )
+        configureSecondaryForTest(
+            UUID.randomUUID().toString(), primaryId, credential, "الثانوي"
+        )
+        val db = database.writableDatabase
+        val forbidden = listOf(
+            "POST_SUPPLIER_PAYMENT",
+            "POST_SALES_RETURN",
+            "POST_PURCHASE_RETURN",
+            "POST_OPERATING_EXPENSE",
+            "POST_INVENTORY_ADJUSTMENT",
+            "EXECUTE_SERVICE_TRANSFER",
+            "SET_SUPPLIER_ROLLOVER"
+        )
+        db.beginTransaction()
+        try {
+            forbidden.forEachIndexed { index, operation ->
+                var rejected = false
+                try {
+                    repository.enqueueSecondaryCommand(
+                        db, adminId, UUID.randomUUID().toString(), operation,
+                        "FORBIDDEN_FINANCIAL_OPERATION", "forbidden-$index",
+                        """{"business_operation":"$operation"}"""
+                    )
+                } catch (_: IllegalArgumentException) {
+                    rejected = true
+                }
+                assertTrue("يجب رفض الأمر المالي غير المسموح: $operation", rejected)
+            }
+            db.setTransactionSuccessful()
+        } finally {
+            db.endTransaction()
+        }
+
+        assertEquals(0, db.rawQuery(
+            "SELECT COUNT(*) FROM sync_operation_envelopes", null
+        ).use { it.moveToFirst(); it.getInt(0) })
+        assertEquals(0, db.rawQuery(
+            "SELECT COUNT(*) FROM sync_queue", null
+        ).use { it.moveToFirst(); it.getInt(0) })
+        assertEquals("1", db.rawQuery(
+            "SELECT state_value FROM sync_protocol_state WHERE state_key='secondary_next_sequence'", null
+        ).use { assertTrue(it.moveToFirst()); it.getString(0) })
+    }
+
     @Test fun secondaryCommandReplayRejectsDifferentAuthenticatedActor() {
         val primaryId = UUID.randomUUID().toString()
         val secretBytes = ByteArray(32) { (it + 37).toByte() }
