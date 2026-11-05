@@ -208,6 +208,32 @@ class SyncDomainApplierTest {
             arrayOf(primaryId, primaryUnitId.toString())
         ).use { c -> c.moveToFirst(); c.getInt(0) })
 
+        // A product that references a primary unit ID must resolve through the durable mapping.
+        val productId = "unit-mapped-product-$primaryUnitId"
+        val productOperationId = "product-using-primary-unit-$primaryUnitId"
+        val productPayload = JSONObject()
+            .put("business_operation", "UPSERT_PRODUCT")
+            .put("product_id", productId).put("name", "منتج يستخدم الوحدة المستقلة")
+            .put("barcode", JSONObject.NULL).put("sku", JSONObject.NULL)
+            .put("primary_category_id", JSONObject.NULL).put("category_name", JSONObject.NULL)
+            .put("primary_unit_id", primaryUnitId)
+            .put("unit_name", "وحدة مستقلة للاختبار").put("unit_symbol", "u-test")
+            .put("unit_decimal_places", 2)
+            .put("purchase_cost_usd_cents", 100L).put("sale_price_usd_cents", 250L)
+            .put("tracks_inventory", true).put("is_active", true)
+            .put("created_at", now).put("updated_at", now).put("opening_quantity", 0.0)
+        db.execSQL(
+            """INSERT INTO sync_inbox(operation_id,origin_device_id,sequence_number,operation_type,
+               entity_type,entity_id,payload_json,payload_sha256,status,received_at,origin_created_at)
+               VALUES(?,?,2,'CREATE','PRODUCT',?,?,?,'RECEIVED',?,?)""".trimIndent(),
+            arrayOf(productOperationId, primaryId, productId, productPayload.toString(),
+                "unit-product-hash-$productOperationId", now, now)
+        )
+        assertTrue(applier.applyReceivedOperation(productOperationId).applied)
+        assertEquals(mapping[0].toLong(), db.rawQuery(
+            "SELECT unit_id FROM products WHERE id=?", arrayOf(productId)
+        ).use { c -> assertTrue(c.moveToFirst()); c.getLong(0) })
+
         val conflictId = "$unitOperationId-conflict"
         receiveUnit(conflictId, 2L, "وحدة مستقلة للاختبار", "wrong-symbol")
         try {
