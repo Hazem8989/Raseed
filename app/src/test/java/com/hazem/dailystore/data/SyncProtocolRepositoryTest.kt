@@ -976,6 +976,27 @@ class SyncProtocolRepositoryTest {
         ).edit().putString("device_id", primaryId).commit()
         setProtocolStateForTest("local_device_role", "PRIMARY")
         setProtocolStateForTest("authority_device_id", primaryId)
+
+        // Even a correctly signed/encrypted peer must not ACK a primary-only
+        // financial operation that is never part of the secondary replication stream.
+        db.update("sync_operation_envelopes", ContentValues().apply {
+            put("entity_type", "OPERATING_EXPENSE")
+        }, "operation_id=?", arrayOf(operationId))
+        var unsupportedAckRejected = false
+        try {
+            repository.acceptEncryptedApplicationAck(firstAck)
+        } catch (_: IllegalArgumentException) {
+            unsupportedAckRejected = true
+        }
+        assertTrue("يجب رفض ACK لعملية مالية غير موزعة على الجهاز الثانوي", unsupportedAckRejected)
+        assertEquals(0, db.rawQuery(
+            "SELECT COUNT(*) FROM sync_acknowledgements WHERE operation_id=? AND device_id=?",
+            arrayOf(operationId, secondaryIds[0])
+        ).use { cursor -> cursor.moveToFirst(); cursor.getInt(0) })
+        db.update("sync_operation_envelopes", ContentValues().apply {
+            put("entity_type", "PRODUCT")
+        }, "operation_id=?", arrayOf(operationId))
+
         assertEquals(SyncApplicationAckDisposition.APPLIED,
             repository.acceptEncryptedApplicationAck(firstAck))
         database.readableDatabase.rawQuery(
