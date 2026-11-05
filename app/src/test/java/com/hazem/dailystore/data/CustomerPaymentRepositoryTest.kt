@@ -333,7 +333,7 @@ class CustomerPaymentRepositoryTest {
         )
 
         assertFalse(result.replayed)
-        assertEquals(400L, result.outstandingUsdCents)
+        assertEquals(500L, result.outstandingUsdCents)
         assertTrue("A secondary collection must remain pending until the primary applies it",
             payments.listPayments(invoiceId).isEmpty())
         assertEquals(0, database.readableDatabase.rawQuery(
