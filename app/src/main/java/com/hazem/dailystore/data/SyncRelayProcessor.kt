@@ -156,8 +156,12 @@ class SyncRelayRuntime(
             listener.onApplicationAckAccepted(operationId, duplicate)
         }
 
-        override fun onRetryRequired(operationId: String, reason: String) =
+        override fun onRetryRequired(operationId: String, reason: String) {
             listener.onRetryRequired(operationId, reason)
+            // A local send failure may not produce a relay delivery-status callback.
+            // Schedule a durable outbox retry here as well, with bounded backoff.
+            scheduleDeliveryRetry()
+        }
 
         override fun onProtocolError(operationId: String?, reason: String) =
             listener.onProtocolError(operationId, reason)
