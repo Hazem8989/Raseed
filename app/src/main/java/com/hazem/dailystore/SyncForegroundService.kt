@@ -34,11 +34,16 @@ class SyncForegroundService : Service() {
         startVisibleForeground()
         try {
             val repository = SyncProtocolRepository(applicationContext)
-            check(repository.localDeviceRole() != null) { "دور جهاز المزامنة غير مهيأ" }
+            if (repository.localDeviceRole() == null) {
+                stopSelf(startId)
+                return START_NOT_STICKY
+            }
             SyncRelaySession.connect(applicationContext, endpoint, repository)
         } catch (_: Exception) {
-            // Keep the foreground service alive; the runtime retries transport
-            // failures and the outbox is never cleared by relay delivery notices.
+            // Configuration/database errors are not transport outages. Stop
+            // cleanly; valid network outages are retried inside SyncRelayRuntime.
+            stopSelf(startId)
+            return START_NOT_STICKY
         }
         return START_STICKY
     }
