@@ -582,6 +582,11 @@ class AppDatabase internal constructor(context: Context, databaseName: String = 
         if (version < 30) {
             db.beginTransaction()
             try {
+                // Some legacy databases (and interrupted historical upgrades) may not
+                // yet contain the protocol tables. Reconcile the base schema before
+                // adding the authenticated actor column; all operations are idempotent.
+                ensureSyncProtocolSchema(db)
+                ensureSyncActorMappingSchema(db)
                 ensureSyncInboxActorColumn(db)
                 db.setTransactionSuccessful()
                 version = 30
