@@ -62,8 +62,12 @@ class CustomerRepository(context: Context) {
         try {
             db.insertOrThrow("customers", null, values)
             insertAudit(db, actorUserId, "CREATE", id, now)
+            enqueueCustomerSync(db, actorUserId, id, "CREATE")
             db.setTransactionSuccessful()
-        } finally { db.endTransaction() }
+        } finally {
+            db.endTransaction()
+            runCatching { SyncRelaySession.flushPending() }
+        }
         return get(id) ?: error("تعذر قراءة الزبون بعد الحفظ")
     }
 
@@ -87,8 +91,12 @@ class CustomerRepository(context: Context) {
                 "customers", values, "id=? AND is_active=1", arrayOf(customerId)
             ) == 1) { "الزبون غير موجود أو موقوف" }
             insertAudit(db, actorUserId, "UPDATE", customerId, now)
+            enqueueCustomerSync(db, actorUserId, customerId, "UPDATE")
             db.setTransactionSuccessful()
-        } finally { db.endTransaction() }
+        } finally {
+            db.endTransaction()
+            runCatching { SyncRelaySession.flushPending() }
+        }
         return get(customerId) ?: error("تعذر قراءة بيانات الزبون")
     }
 
@@ -107,11 +115,49 @@ class CustomerRepository(context: Context) {
                 "customers", values, "id=?", arrayOf(customerId)
             ) == 1) { "الزبون غير موجود" }
             insertAudit(db, actorUserId, if (active) "ACTIVATE" else "DEACTIVATE", customerId, now)
+            val payload = org.json.JSONObject().put("business_operation", "SET_CUSTOMER_ACTIVE")
+                .put("customer_id", customerId).put("is_active", active).put("occurred_at", now)
+            SyncProtocolRepository(context).enqueueLocalOperation(
+                db, actorUserId, UUID.randomUUID().toString(), "SET_CUSTOMER_ACTIVE",
+                "CUSTOMER", customerId, "UPDATE", payload.toString()
+            )
             db.setTransactionSuccessful()
-        } finally { db.endTransaction() }
+        } finally {
+            db.endTransaction()
+            runCatching { SyncRelaySession.flushPending() }
+        }
     }
 
-    private fun insertAudit(db: android.database.sqlite.SQLiteDatabase, actor: String,
+    private fun enqueueCustomerSync(
+        db: android.database.sqlite.SQLiteDatabase,
+        actorUserId: String,
+        customerId: String,
+        changeKind: String
+    ) {
+        val payload = db.rawQuery(
+            "SELECT name,phone,address,notes,is_active,created_at,updated_at FROM customers WHERE id=?",
+            arrayOf(customerId)
+        ).use { c ->
+            require(c.moveToFirst()) { "الزبون غير موجود عند تجهيز المزامنة" }
+            org.json.JSONObject().apply {
+                put("business_operation", "UPSERT_CUSTOMER")
+                put("customer_id", customerId)
+                put("name", c.getString(0))
+                put("phone", if (c.isNull(1)) org.json.JSONObject.NULL else c.getString(1))
+                put("address", if (c.isNull(2)) org.json.JSONObject.NULL else c.getString(2))
+                put("notes", if (c.isNull(3)) org.json.JSONObject.NULL else c.getString(3))
+                put("is_active", c.getInt(4) == 1)
+                put("created_at", c.getString(5))
+                put("updated_at", c.getString(6))
+            }
+        }
+        SyncProtocolRepository(context).enqueueLocalOperation(
+            db, actorUserId, UUID.randomUUID().toString(), "UPSERT_CUSTOMER",
+            "CUSTOMER", customerId, changeKind, payload.toString()
+        )
+    }
+
+    private fun insertAudit(db: android.database.sqlite.SQLiteDatabase, actor:
                              action: String, customerId: String, now: String) {
         db.insertOrThrow("audit_log", null, ContentValues().apply {
             put("id", UUID.randomUUID().toString())
