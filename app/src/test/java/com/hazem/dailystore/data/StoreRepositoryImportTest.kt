@@ -149,6 +149,36 @@ class StoreRepositoryImportTest {
     }
 
     @Test
+    fun importedNewCategoryIsQueuedForReplicationInTheSameCatalogTransaction() {
+        val context = RuntimeEnvironment.getApplication()
+        SyncDeviceTestKeyProvider.install()
+        SyncProtocolRepository(context).configureAsPrimary(actorId, "Import test primary")
+        val row = ProductImportRow(
+            rowNumber = 2, name = productName, category = categoryName,
+            unit = "قطعة", purchaseCostSyp = null, salePriceSyp = null,
+            purchaseCostUsdCents = 100L, salePriceUsdCents = 200L,
+            sku = null, barcode = null
+        )
+
+        assertEquals(1, repository.importProducts(listOf(row), 0L, actorId))
+        database.readableDatabase.rawQuery(
+            """SELECT e.operation_type,e.entity_type,e.entity_id,e.payload_json
+               FROM sync_operation_envelopes e
+               WHERE e.entity_type='CATEGORY' AND e.operation_type='CREATE'
+               ORDER BY e.sequence_number DESC LIMIT 1""".trimIndent(), null
+        ).use { cursor ->
+            assertTrue("Imported category must create a durable sync event", cursor.moveToFirst())
+            assertEquals("CREATE", cursor.getString(0))
+            assertEquals("CATEGORY", cursor.getString(1))
+            assertEquals(categoryName.lowercase(java.util.Locale.ROOT), cursor.getString(2))
+            val payload = org.json.JSONObject(cursor.getString(3))
+            assertEquals("CREATE_CATEGORY", payload.getString("business_operation"))
+            assertTrue(payload.getLong("primary_category_id") > 0L)
+            assertEquals(categoryName, payload.getString("name"))
+        }
+    }
+
+    @Test
     fun importsSyrianPoundPricesUsingTheExplicitRateAndLeavesStockAtZero() {
         val rateMilli = 15_000_000L
         val row = ProductImportRow(
