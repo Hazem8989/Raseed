@@ -6,6 +6,7 @@ import android.app.NotificationManager
 import android.app.PendingIntent
 import android.app.Service
 import android.content.Intent
+import android.content.Context
 import android.os.Build
 import android.os.IBinder
 import android.content.pm.ServiceInfo
@@ -98,5 +99,15 @@ class SyncForegroundService : Service() {
         private const val ENDPOINT_KEY = "relay_wss_url"
         private const val CHANNEL_ID = "daily_shop_sync"
         private const val NOTIFICATION_ID = 7401
+
+        fun start(context: Context) {
+            val intent = Intent(context, SyncForegroundService::class.java).setAction(ACTION_START)
+            if (Build.VERSION.SDK_INT >= 26) context.startForegroundService(intent)
+            else context.startService(intent)
+        }
+
+        fun stop(context: Context) {
+            context.stopService(Intent(context, SyncForegroundService::class.java))
+        }
     }
 }
