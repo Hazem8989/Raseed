@@ -569,6 +569,27 @@ class TwoDeviceSyncIntegrationTest {
             "2026-11-04T11:15:00Z", "2026-11-04"
         )
         assertEquals("PENDING", queueStatus(secondaryDb, saleOperationId))
+        assertEquals(1, scalar(secondaryDb,
+            "SELECT COUNT(*) FROM sync_operation_envelopes WHERE operation_id=? AND entity_id=?",
+            saleOperationId, invoiceId))
+        // Retrying with the same id is idempotent; a new id for this invoice is rejected.
+        assertEquals(false, InvoiceRepository(context).postCashSale(
+            secondaryAdminId, invoiceId, saleOperationId, cashAccountId,
+            "2026-11-04T11:15:00Z", "2026-11-04"
+        ))
+        var duplicateTokenRejected = false
+        try {
+            InvoiceRepository(context).postCashSale(
+                secondaryAdminId, invoiceId, UUID.randomUUID().toString(), cashAccountId,
+                "2026-11-04T11:16:00Z", "2026-11-04"
+            )
+        } catch (_: IllegalArgumentException) {
+            duplicateTokenRejected = true
+        }
+        assertTrue("A second token must not create a second invoice command", duplicateTokenRejected)
+        assertEquals(1, scalar(secondaryDb,
+            "SELECT COUNT(*) FROM sync_operation_envelopes WHERE entity_type='SALES_INVOICE' AND entity_id=?",
+            invoiceId))
         assertEquals(0, scalar(secondaryDb,
             "SELECT COUNT(*) FROM cash_transactions WHERE source_type='SALES_INVOICE' AND source_id=?",
             invoiceId))
