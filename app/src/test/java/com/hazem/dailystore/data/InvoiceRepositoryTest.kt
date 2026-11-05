@@ -189,7 +189,7 @@ class InvoiceRepositoryTest {
         val payload = org.json.JSONObject(sync.pendingOutbox().single().payloadJson)
         val receipts = payload.getJSONArray("cash_receipts")
         assertEquals(1, receipts.length())
-        assertEquals("pending-cash-secondary-invoice-post:${draft.invoiceId}",
+        assertEquals("pending-cash-ui-sale-attempt-1",
             receipts.getJSONObject(0).getString("cash_transaction_id"))
         assertEquals(500L, receipts.getJSONObject(0).getLong("amount_minor"))
         assertEquals("USD", receipts.getJSONObject(0).getString("currency_code"))
@@ -197,13 +197,20 @@ class InvoiceRepositoryTest {
         val firstEventAt = payload.getString("posted_at")
         val firstOperatingDate = payload.getString("posted_operating_date")
 
-        assertTrue(invoices.postCashSale(adminId, draft.invoiceId, "ui-sale-attempt-2", cashAccountId))
+        assertFalse(invoices.postCashSale(adminId, draft.invoiceId, "ui-sale-attempt-1", cashAccountId))
+        var differentOperationIdRejected = false
+        try {
+            invoices.postCashSale(adminId, draft.invoiceId, "ui-sale-attempt-2", cashAccountId)
+        } catch (_: IllegalArgumentException) {
+            differentOperationIdRejected = true
+        }
+        assertTrue("A retry with a different operation ID must be rejected", differentOperationIdRejected)
         assertEquals(1, sync.pendingOutbox().size)
         val retryPayload = org.json.JSONObject(sync.pendingOutbox().single().payloadJson)
         assertEquals(firstEventAt, retryPayload.getString("posted_at"))
         assertEquals(firstOperatingDate, retryPayload.getString("posted_operating_date"))
         val envelope = sync.authenticatedOutbox(
-            "secondary-invoice-post:${draft.invoiceId}", primaryId
+            "ui-sale-attempt-1", primaryId
         )
         assertTrue(SyncEnvelopeSecurity.verify(envelope, secret))
         secret.fill(0)
