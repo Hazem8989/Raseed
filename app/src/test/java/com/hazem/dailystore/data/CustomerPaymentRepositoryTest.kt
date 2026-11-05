@@ -341,7 +341,7 @@ class CustomerPaymentRepositoryTest {
         ).use { c -> c.moveToFirst(); c.getInt(0) })
         val queued = sync.pendingOutbox()
         assertEquals(1, queued.size)
-        assertEquals("COLLECT_CUSTOMER_PAYMENT", queued.single().operationType)
+        assertEquals("CREATE", queued.single().operationType)
         assertEquals("CUSTOMER_PAYMENT", queued.single().entityType)
         assertTrue(queued.single().payloadJson.contains("\"business_operation\":\"COLLECT_CUSTOMER_PAYMENT\""))
     }
