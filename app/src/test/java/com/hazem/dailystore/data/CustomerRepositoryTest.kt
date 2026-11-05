@@ -79,7 +79,7 @@ class CustomerRepositoryTest {
         assertTrue(createRejected)
         assertTrue(updateRejected)
         assertTrue(deactivateRejected)
-        assertEquals("زبون أساسي", customers.get(existing.id)?.name?.substringBefore(" "))
+        assertEquals("زبون أساسي", customers.get(existing.id)?.name?.substringBeforeLast(" "))
         assertEquals(1, customers.listAll().size)
     }
 
