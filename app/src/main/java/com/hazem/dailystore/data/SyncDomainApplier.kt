@@ -1421,7 +1421,7 @@ class SyncDomainApplier(context: Context) {
             } ?: createdAt
             require(productId.isNotBlank() && productId == row[3] && name.isNotEmpty() &&
                 name.length <= 200 && unitName.isNotEmpty() && unitSymbol.isNotEmpty() &&
-                decimals in 0..6 && cost >= 0L && price > 0L &&
+                decimals in 0..3 && cost >= 0L && price > 0L &&
                 (!tracksInventory || cost > 0L) && openingQuantity.isFinite() && openingQuantity >= 0.0 &&
                 (openingQuantity == 0.0 || tracksInventory)) {
                 "بيانات المنتج أو الوحدة أو الأسعار أو الرصيد الافتتاحي غير صالحة"
