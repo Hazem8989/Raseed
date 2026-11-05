@@ -220,7 +220,7 @@ class PurchaseReturnRepository(context: Context) {
             db.setTransactionSuccessful()
             return PurchaseReturnResult(returnId,number,preview.totalUsdCents,
                 preview.supplierCreditReductionSypMinor,preview.supplierCashRefundSypMinor,false)
-        } finally { db.endTransaction() }
+        } finally { db.endTransaction(); runCatching { SyncRelaySession.flushPending() } }
     }
 
     private fun calculate(db: SQLiteDatabase, invoice: Invoice, plans: List<Plan>): PurchaseReturnPreview {
