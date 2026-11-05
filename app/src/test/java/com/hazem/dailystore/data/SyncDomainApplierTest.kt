@@ -198,6 +198,18 @@ class SyncDomainApplierTest {
         ).use { c -> assertTrue(c.moveToFirst()); JSONObject(c.getString(0)) }
         assertEquals("UPSERT_CUSTOMER", customerEvent.getString("business_operation"))
         assertEquals("زبون مزامنة اختباري", customerEvent.getString("name"))
+        val customerSequence = db.rawQuery(
+            "SELECT sequence_number FROM sync_operation_envelopes WHERE entity_type='CUSTOMER' AND entity_id=? ORDER BY sequence_number DESC LIMIT 1",
+            arrayOf(customerId)
+        ).use { c -> assertTrue(c.moveToFirst()); c.getLong(0) }
+        assertTrue(customerSequence > event.first)
+        val rateEvent = db.rawQuery(
+            """SELECT sequence_number,payload_json FROM sync_operation_envelopes
+               WHERE entity_type='EXCHANGE_RATE' ORDER BY sequence_number DESC LIMIT 1""".trimIndent(), null
+        ).use { c -> assertTrue(c.moveToFirst()); c.getLong(0) to JSONObject(c.getString(1)) }
+        assertTrue(rateEvent.first > customerSequence)
+        assertEquals("SET_EXCHANGE_RATE", rateEvent.second.getString("business_operation"))
+        assertEquals(10_000_000L, rateEvent.second.getLong("rate_syp_per_usd_milli"))
     }
 
     @Test fun primaryProductAndOpeningStockAreAppliedToSecondaryOnce() {
