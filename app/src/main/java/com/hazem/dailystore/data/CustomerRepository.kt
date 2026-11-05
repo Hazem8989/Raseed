@@ -158,8 +158,13 @@ class CustomerRepository(context: Context) {
         )
     }
 
-    private fun insertAudit(db: android.database.sqlite.SQLiteDatabase, actor:
-                             action: String, customerId: String, now: String) {
+    private fun insertAudit(
+        db: android.database.sqlite.SQLiteDatabase,
+        actor: String,
+        action: String,
+        customerId: String,
+        now: String
+    ) {
         db.insertOrThrow("audit_log", null, ContentValues().apply {
             put("id", UUID.randomUUID().toString())
             put("user_id", actor)
