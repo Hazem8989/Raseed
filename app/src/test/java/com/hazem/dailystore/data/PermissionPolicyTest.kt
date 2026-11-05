@@ -382,6 +382,34 @@ class PermissionPolicyTest {
             arrayOf(localDeviceId)
         )
         // Deliberately omit local_device_role: repository-level gates must use the enrolled role.
+        val sync = SyncProtocolRepository(context)
+        assertTrue("The durable enrollment record must still identify this installation as secondary",
+            sync.isConfiguredSecondary())
+        val accounts = CashAccountRepository(context)
+        val accountCountBefore = database.readableDatabase.rawQuery(
+            "SELECT COUNT(*) FROM cash_accounts", null
+        ).use { c -> assertTrue(c.moveToFirst()); c.getInt(0) }
+        val ledgerBefore = financialMutationCounts()
+        accounts.ensureSystemCashAccounts()
+        assertEquals("A secondary with a lost role flag must not seed independent cash accounts",
+            accountCountBefore, database.readableDatabase.rawQuery(
+                "SELECT COUNT(*) FROM cash_accounts", null
+            ).use { c -> assertTrue(c.moveToFirst()); c.getInt(0) })
+        assertSecondaryDenied("cash account creation after role-state loss") {
+            accounts.create(adminId, "lost-role-account", "CASH_BOX", "SYP", 0L)
+        }
+        assertSecondaryDenied("customer creation after role-state loss") {
+            CustomerRepository(context).create(adminId, "lost-role-customer")
+        }
+        assertSecondaryDenied("supplier creation after role-state loss") {
+            SupplierRepository(context).create(adminId, "lost-role-supplier")
+        }
+        assertSecondaryDenied("service recharge after role-state loss") {
+            ServiceTransferRepository(context).recharge(
+                adminId, ServiceTransferRepository.SYRIATEL_SHARED, "account", 1L,
+                "lost-role-service-recharge"
+            )
+        }
         assertSecondaryDenied("expense posting after role-state loss") {
             OperatingExpenseRepository(context).postExpense(
                 adminId, "lost-role-expense", "category", "account", 1L, "2026-11-06"
@@ -423,6 +451,8 @@ class PermissionPolicyTest {
         assertSecondaryDenied("purchase posting after role-state loss") {
             InvoiceRepository(context).postPurchase(adminId, "invoice", "lost-role-purchase-post")
         }
+        assertEquals("Rejected operations must not mutate financial ledgers or create sync commands",
+            ledgerBefore, financialMutationCounts())
     }
 
 }
