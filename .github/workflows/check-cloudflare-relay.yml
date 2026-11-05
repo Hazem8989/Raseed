@@ -6,6 +6,7 @@ on:
       - the-daily-shop-development
     paths:
       - 'cloudflare-relay/**'
+      - 'app/**'
       - 'app/src/main/java/com/hazem/dailystore/data/Sync*.kt'
       - 'app/src/test/java/com/hazem/dailystore/data/Sync*.kt'
       - 'app/src/test/java/com/hazem/dailystore/data/TwoDeviceSyncIntegrationTest.kt'
