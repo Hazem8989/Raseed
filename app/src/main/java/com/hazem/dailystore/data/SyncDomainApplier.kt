@@ -236,12 +236,13 @@ class SyncDomainApplier(context: Context) {
                       m.primary_user_id,i.origin_created_at
                FROM sync_inbox i
                JOIN sync_actor_mappings m
-                 ON m.device_id=i.origin_device_id AND m.is_active=1
+                 ON m.device_id=i.origin_device_id
+                AND m.remote_actor_user_id=i.actor_user_id AND m.is_active=1
                JOIN users u ON u.id=m.primary_user_id
                JOIN sync_devices d ON d.device_id=i.origin_device_id
                WHERE i.operation_id=? AND d.device_role='SECONDARY'
                  AND d.status='ACTIVE' AND u.is_active=1 AND u.must_change_password=0
-               ORDER BY m.mapped_at DESC LIMIT 1""".trimIndent(),
+               LIMIT 1""".trimIndent(),
             arrayOf(operationId)
         ).use { c ->
             require(c.moveToFirst()) { "الأمر غير موجود أو الجهاز/المستخدم غير مفعل أو لم يتم ربط المستخدم" }
@@ -435,12 +436,14 @@ class SyncDomainApplier(context: Context) {
                 """SELECT i.origin_device_id,i.entity_type,i.entity_id,i.payload_json,i.status,
                           m.primary_user_id,i.payload_sha256,i.origin_created_at
                    FROM sync_inbox i
-                   JOIN sync_actor_mappings m ON m.device_id=i.origin_device_id AND m.is_active=1
+                   JOIN sync_actor_mappings m
+                     ON m.device_id=i.origin_device_id
+                    AND m.remote_actor_user_id=i.actor_user_id AND m.is_active=1
                    JOIN users u ON u.id=m.primary_user_id
                    JOIN sync_devices d ON d.device_id=i.origin_device_id
                    WHERE i.operation_id=? AND d.device_role='SECONDARY'
                      AND d.status='ACTIVE' AND u.is_active=1 AND u.must_change_password=0
-                   ORDER BY m.mapped_at DESC LIMIT 1""".trimIndent(),
+                   LIMIT 1""".trimIndent(),
                 arrayOf(operationId)
             ).use { c ->
                 require(c.moveToFirst()) { "أمر المصروف غير موجود أو الجهاز/المستخدم غير مفعل أو غير مربوط" }
@@ -625,7 +628,7 @@ class SyncDomainApplier(context: Context) {
                    JOIN sync_devices d ON d.device_id=i.origin_device_id
                    WHERE i.operation_id=? AND d.device_role='SECONDARY'
                      AND d.status='ACTIVE' AND u.is_active=1 AND u.must_change_password=0
-                   ORDER BY m.mapped_at DESC LIMIT 1""".trimIndent(),
+                   LIMIT 1""".trimIndent(),
                 arrayOf(operationId)
             ).use { c ->
                 require(c.moveToFirst()) { "أمر دفعة المورد غير موجود أو الجهاز/المستخدم غير مفعل أو غير مربوط" }
@@ -896,7 +899,7 @@ class SyncDomainApplier(context: Context) {
                    JOIN sync_devices d ON d.device_id=i.origin_device_id
                    WHERE i.operation_id=? AND d.device_role='SECONDARY'
                      AND d.status='ACTIVE' AND u.is_active=1 AND u.must_change_password=0
-                   ORDER BY m.mapped_at DESC LIMIT 1""".trimIndent(),
+                   LIMIT 1""".trimIndent(),
                 arrayOf(operationId)
             ).use { c ->
                 require(c.moveToFirst()) { "أمر التحصيل غير موجود أو الجهاز/المستخدم غير مفعل أو غير مربوط" }
@@ -1102,10 +1105,12 @@ class SyncDomainApplier(context: Context) {
         try {
             val row = db.rawQuery(
                 """SELECT i.origin_device_id,i.entity_type,i.entity_id,i.payload_json,i.status,m.primary_user_id,i.payload_sha256
-                   FROM sync_inbox i JOIN sync_actor_mappings m ON m.device_id=i.origin_device_id AND m.is_active=1
+                   FROM sync_inbox i JOIN sync_actor_mappings m
+                     ON m.device_id=i.origin_device_id
+                    AND m.remote_actor_user_id=i.actor_user_id AND m.is_active=1
                    JOIN users u ON u.id=m.primary_user_id JOIN sync_devices d ON d.device_id=i.origin_device_id
                    WHERE i.operation_id=? AND d.device_role='SECONDARY' AND d.status='ACTIVE'
-                     AND u.is_active=1 AND u.must_change_password=0 ORDER BY m.mapped_at DESC LIMIT 1""".trimIndent(),
+                     AND u.is_active=1 AND u.must_change_password=0 LIMIT 1""".trimIndent(),
                 arrayOf(operationId)
             ).use { c ->
                 require(c.moveToFirst()) { "أمر تخصيص النقد المدور غير موجود أو الجهاز/المستخدم غير مفعل أو غير مربوط" }
@@ -1168,10 +1173,12 @@ class SyncDomainApplier(context: Context) {
         try {
             val row = db.rawQuery(
                 """SELECT i.origin_device_id,i.entity_type,i.entity_id,i.payload_json,i.status,m.primary_user_id,i.payload_sha256
-                   FROM sync_inbox i JOIN sync_actor_mappings m ON m.device_id=i.origin_device_id AND m.is_active=1
+                   FROM sync_inbox i JOIN sync_actor_mappings m
+                     ON m.device_id=i.origin_device_id
+                    AND m.remote_actor_user_id=i.actor_user_id AND m.is_active=1
                    JOIN users u ON u.id=m.primary_user_id JOIN sync_devices d ON d.device_id=i.origin_device_id
                    WHERE i.operation_id=? AND d.device_role='SECONDARY' AND d.status='ACTIVE'
-                     AND u.is_active=1 AND u.must_change_password=0 ORDER BY m.mapped_at DESC LIMIT 1""".trimIndent(),
+                     AND u.is_active=1 AND u.must_change_password=0 LIMIT 1""".trimIndent(),
                 arrayOf(operationId)
             ).use { c -> require(c.moveToFirst()) { "أمر تحويل الرصيد غير موجود أو الجهاز/المستخدم غير مفعل أو غير مربوط" }; Array(7) { i -> c.getString(i) } }
             if (row[4] == "APPLIED") { db.setTransactionSuccessful(); return@synchronized ApplyResult(operationId, true) }
@@ -1242,11 +1249,13 @@ class SyncDomainApplier(context: Context) {
             try {
                 val row=db.rawQuery(
                     """SELECT i.origin_device_id,i.entity_type,i.entity_id,i.payload_json,i.status,m.primary_user_id
-                       FROM sync_inbox i JOIN sync_actor_mappings m ON m.device_id=i.origin_device_id AND m.is_active=1
+                       FROM sync_inbox i JOIN sync_actor_mappings m
+                     ON m.device_id=i.origin_device_id
+                    AND m.remote_actor_user_id=i.actor_user_id AND m.is_active=1
                        JOIN users u ON u.id=m.primary_user_id JOIN sync_devices d ON d.device_id=i.origin_device_id
                        WHERE i.operation_id=? AND d.device_role='SECONDARY' AND d.status='ACTIVE'
                          AND u.is_active=1 AND u.must_change_password=0
-                       ORDER BY m.mapped_at DESC LIMIT 1""".trimIndent(),arrayOf(operationId)
+                       LIMIT 1""".trimIndent(),arrayOf(operationId)
                 ).use { c ->
                     require(c.moveToFirst()) { "أمر المرتجع غير موجود أو الجهاز/المستخدم غير مربوط أو موقوف" }
                     arrayOf(c.getString(0),c.getString(1),c.getString(2),c.getString(3),c.getString(4),c.getString(5))
@@ -1336,11 +1345,13 @@ class SyncDomainApplier(context: Context) {
         try {
             val row=db.rawQuery(
                 """SELECT i.origin_device_id,i.entity_type,i.entity_id,i.payload_json,i.status,m.primary_user_id
-                   FROM sync_inbox i JOIN sync_actor_mappings m ON m.device_id=i.origin_device_id AND m.is_active=1
+                   FROM sync_inbox i JOIN sync_actor_mappings m
+                     ON m.device_id=i.origin_device_id
+                    AND m.remote_actor_user_id=i.actor_user_id AND m.is_active=1
                    JOIN users u ON u.id=m.primary_user_id JOIN sync_devices d ON d.device_id=i.origin_device_id
                    WHERE i.operation_id=? AND d.device_role='SECONDARY' AND d.status='ACTIVE'
                      AND u.is_active=1 AND u.must_change_password=0
-                   ORDER BY m.mapped_at DESC LIMIT 1""".trimIndent(),arrayOf(operationId)
+                   LIMIT 1""".trimIndent(),arrayOf(operationId)
             ).use { c ->
                 require(c.moveToFirst()) { "أمر تسوية المخزون غير موجود أو الجهاز/المستخدم غير مربوط" }
                 arrayOf(c.getString(0),c.getString(1),c.getString(2),c.getString(3),c.getString(4),c.getString(5))
