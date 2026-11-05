@@ -1393,7 +1393,7 @@ class SyncProtocolRepository(private val context: Context, private val credentia
                     .put("is_active", c.getInt(12) == 1)
                     .put("created_at", c.getString(13))
                     .put("updated_at", c.getString(14))
-                    .put("opening_quantity", if (c.getInt(11) == 1) c.getDouble(15) else 0.0)
+                    .put("opening_quantity", if (c.getInt(11) == 1) maxOf(0.0, c.getDouble(15)) else 0.0)
                 enqueueLocalOperation(
                     db, actorUserId, UUID.randomUUID().toString(), "UPSERT_PRODUCT",
                     "PRODUCT", productId, "CREATE", payload.toString()
