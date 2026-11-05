@@ -379,8 +379,8 @@ class SyncProtocolRepositoryTest {
         val operationId = UUID.randomUUID().toString()
         db.beginTransaction()
         val first = repository.enqueueLocalOperation(
-            db, adminId, operationId, "SALE_POSTED", "SALES_INVOICE", "sale-1",
-            "CREATE", """{"invoice_id":"sale-1","total_usd_cents":1250}"""
+            db, adminId, operationId, "UPSERT_PRODUCT", "PRODUCT", "product-1",
+            "CREATE", """{"product_id":"product-1","name":"Test"}"""
         )
         db.setTransactionSuccessful()
         db.endTransaction()
@@ -389,8 +389,8 @@ class SyncProtocolRepositoryTest {
 
         db.beginTransaction()
         val replay = repository.enqueueLocalOperation(
-            db, adminId, operationId, "SALE_POSTED", "SALES_INVOICE", "sale-1",
-            "CREATE", """{"invoice_id":"sale-1","total_usd_cents":1250}"""
+            db, adminId, operationId, "UPSERT_PRODUCT", "PRODUCT", "product-1",
+            "CREATE", """{"product_id":"product-1","name":"Test"}"""
         )
         db.setTransactionSuccessful()
         db.endTransaction()
@@ -401,8 +401,8 @@ class SyncProtocolRepositoryTest {
         db.beginTransaction()
         try {
             repository.enqueueLocalOperation(
-                db, adminId, operationId, "SALE_POSTED", "SALES_INVOICE", "sale-1",
-                "CREATE", """{"invoice_id":"sale-1","total_usd_cents":9999}"""
+                db, adminId, operationId, "UPSERT_PRODUCT", "PRODUCT", "product-1",
+                "CREATE", """{"product_id":"product-1","name":"Tampered"}"""
             )
         } catch (_: IllegalArgumentException) { mismatchRejected = true }
         finally { db.endTransaction() }
@@ -419,8 +419,8 @@ class SyncProtocolRepositoryTest {
         val db = database.writableDatabase
         db.beginTransaction()
         repository.enqueueLocalOperation(
-            db, adminId, operationId, "SALE_POSTED", "SALES_INVOICE", "sale-verified",
-            "CREATE", """{"invoice_id":"sale-verified","total_usd_cents":1250}"""
+            db, adminId, operationId, "UPSERT_PRODUCT", "PRODUCT", "product-verified",
+            "CREATE", """{"product_id":"product-verified","name":"Test"}"""
         )
         db.setTransactionSuccessful()
         db.endTransaction()
@@ -719,7 +719,7 @@ class SyncProtocolRepositoryTest {
         val db = database.writableDatabase
         db.beginTransaction()
         val result = repository.enqueueLocalOperation(
-            db, adminId, UUID.randomUUID().toString(), "SALE_POSTED", "SALES_INVOICE", "sale-1",
+            db, adminId, UUID.randomUUID().toString(), "UPSERT_PRODUCT", "PRODUCT", "product-1",
             "CREATE", """{"invoice_id":"sale-1"}"""
         )
         db.setTransactionSuccessful()
@@ -925,8 +925,8 @@ class SyncProtocolRepositoryTest {
         val db = database.writableDatabase
         db.beginTransaction()
         val sequence = repository.enqueueLocalOperation(
-            db, adminId, operationId, "SALE_POSTED", "SALES_INVOICE",
-            "sale-$operationId", "CREATE", """{"invoice_id":"sale-$operationId"}"""
+            db, adminId, operationId, "UPSERT_PRODUCT", "PRODUCT",
+            "product-$operationId", "CREATE", """{"product_id":"product-$operationId"}"""
         )!!
         db.setTransactionSuccessful()
         db.endTransaction()
@@ -946,8 +946,8 @@ class SyncProtocolRepositoryTest {
             db.insertOrThrow("sync_inbox", null, ContentValues().apply {
                 put("operation_id", operationId); put("origin_device_id", primaryId)
                 put("sequence_number", sequence); put("operation_type", "CREATE")
-                put("entity_type", "SALES_INVOICE"); put("entity_id", "sale-$operationId")
-                put("payload_json", """{"business_operation":"SALE_POSTED"}""")
+                put("entity_type", "PRODUCT"); put("entity_id", "product-$operationId")
+                put("payload_json", """{"business_operation":"UPSERT_PRODUCT"}""")
                 put("payload_sha256", payloadHash); put("status", "APPLIED")
                 put("received_at", now); put("applied_at", now); put("origin_created_at", now)
             })
