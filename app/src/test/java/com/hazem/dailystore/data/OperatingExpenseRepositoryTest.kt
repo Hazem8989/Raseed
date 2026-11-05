@@ -175,65 +175,33 @@ class OperatingExpenseRepositoryTest {
     }
 
 
-    @Test fun primaryAppliesSecondaryExpenseOnceAndPreservesOriginalEventTimeAndDate() {
-        val context=RuntimeEnvironment.getApplication()
-        val vault=SyncCredentialVault(context) {
-            javax.crypto.spec.SecretKeySpec(ByteArray(32) { 37 }, "AES")
-        }
-        val sync=SyncProtocolRepository(context,vault)
-        sync.configureAsPrimary(adminId,"الجهاز الرئيسي")
-        val invitation=sync.createPairingInvitation(adminId)
-        val secondaryId=UUID.randomUUID().toString()
-        sync.enrollSecondaryDevice(adminId,invitation.token,secondaryId,"الجهاز الثانوي")
-        sync.mapSecondaryActor(adminId,secondaryId,"remote-admin",adminId)
-        sync.mapSecondaryCashAccount(adminId,secondaryId,"remote-expense-wallet",sypAccountId)
-        val operationId="incoming-expense-"+UUID.randomUUID()
-        val expenseId="pending-expense-$operationId"
-        val occurredAt="2026-11-03T12:34:56.000Z"
-        val payload=org.json.JSONObject()
-            .put("business_operation","POST_OPERATING_EXPENSE")
-            .put("expense_id",expenseId)
-            .put("cash_transaction_id","pending-cash-$operationId")
-            .put("category_id",categoryId)
-            .put("cash_account_id","remote-expense-wallet")
-            .put("cash_account_type","CASH_BOX")
-            .put("cash_account_currency_code","SYP")
-            .put("amount_minor",25000L)
-            .put("currency_code","SYP")
-            .put("exchange_rate_syp_per_usd_milli",10_000_000L)
-            .put("amount_usd_cents",250L)
-            .put("expense_date","2026-11-02")
-            .put("operating_date","2026-11-03")
-            .put("occurred_at",occurredAt)
-            .put("reference","فاتورة صيانة")
-            .put("notes","حركة من الثانوي")
-        val secret=vault.load(secondaryId)!!
-        val storeId=db.readableDatabase.rawQuery(
-            "SELECT state_value FROM sync_protocol_state WHERE state_key='store_id'",null
-        ).use { assertTrue(it.moveToFirst());it.getString(0) }
-        val envelope=SyncEnvelopeSecurity.create(
-            storeId,operationId,1L,secondaryId,"remote-admin",
-            "CREATE","OPERATING_EXPENSE",expenseId,0L,payload.toString(),occurredAt,secret
-        )
+    @Test fun primaryRejectsNonSaleExpenseCommandFromSecondaryBeforeInbox() {
+        val context = RuntimeEnvironment.getApplication()
+        val vault = SyncCredentialVault(context) { javax.crypto.spec.SecretKeySpec(ByteArray(32) { 37 }, "AES") }
+        val sync = SyncProtocolRepository(context, vault)
+        sync.configureAsPrimary(adminId, "الجهاز الرئيسي")
+        val invitation = sync.createPairingInvitation(adminId)
+        val secondaryId = UUID.randomUUID().toString()
+        sync.enrollSecondaryDevice(adminId, invitation.token, secondaryId, "الجهاز الثانوي")
+        val operationId = "incoming-expense-" + UUID.randomUUID()
+        val occurredAt = "2026-11-03T12:34:56.000Z"
+        val payload = org.json.JSONObject().put("business_operation", "POST_OPERATING_EXPENSE")
+            .put("expense_id", "pending-expense-$operationId").put("amount_minor", 25_000L)
+            .put("occurred_at", occurredAt)
+        val secret = vault.load(secondaryId)!!
+        val storeId = database.readableDatabase.rawQuery(
+            "SELECT state_value FROM sync_protocol_state WHERE state_key='store_id'", null
+        ).use { assertTrue(it.moveToFirst()); it.getString(0) }
+        val envelope = SyncEnvelopeSecurity.create(storeId, operationId, 1L, secondaryId,
+            "remote-admin", "CREATE", "OPERATING_EXPENSE", "pending-expense-$operationId",
+            0L, payload.toString(), occurredAt, secret)
         secret.fill(0)
-        assertEquals(SyncInboxDisposition.RECEIVED,
-            sync.recordIncomingFromSecondary(SyncEnvelopeSecurity.encode(envelope)))
-        val applier=SyncDomainApplier(context)
-        assertTrue(applier.applyReceivedOperatingExpense(operationId).applied)
-        assertTrue(applier.applyReceivedOperatingExpense(operationId).applied)
-        assertEquals(975000L,accounts.balance(sypAccountId))
-        val posted=repository.listExpenses().single()
-        assertEquals(25000L,posted.amountMinor)
-        assertEquals("2026-11-02",posted.date)
-        assertEquals(occurredAt,posted.createdAt)
-        assertEquals("فاتورة صيانة",posted.reference)
-        db.readableDatabase.rawQuery(
-            "SELECT COUNT(*) FROM cash_transactions WHERE operation_id=?",
-            arrayOf(operationId+":CASH")
-        ).use { assertTrue(it.moveToFirst());assertEquals(1,it.getInt(0)) }
-        db.readableDatabase.rawQuery(
-            "SELECT status FROM sync_inbox WHERE operation_id=?",arrayOf(operationId)
-        ).use { assertTrue(it.moveToFirst());assertEquals("APPLIED",it.getString(0)) }
+        var rejected = false
+        try { sync.recordIncomingFromSecondary(SyncEnvelopeSecurity.encode(envelope)) }
+        catch (_: IllegalArgumentException) { rejected = true }
+        assertTrue(rejected)
+        assertEquals(null, sync.incomingOperationStatus(operationId))
+        assertTrue(repository.listExpenses().isEmpty())
     }
 
 }
