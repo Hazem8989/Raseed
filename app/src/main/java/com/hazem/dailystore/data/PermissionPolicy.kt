@@ -106,15 +106,33 @@ object PermissionPolicy {
         SALES_CHECKOUT, CUSTOMERS_READ, CUSTOMERS_COLLECT, SYNC_MANAGE
     )
 
-    /** Checks the user's assigned permission without deciding where a write may be committed. */
-    fun requireAssigned(db: SQLiteDatabase, userId: String, permissionKey: String) {
-        require(userId.isNotBlank()) { "جلسة المستخدم غير صالحة" }
-        require(permissionKey in descriptions) { "الصلاحية المطلوبة غير معروفة" }
+    /**
+     * Fail closed if either the protocol role or the enrolled local-device record
+     * identifies this installation as secondary. The stable local device ID is
+     * persisted separately so a missing role flag cannot silently grant primary rights.
+     */
+    private fun isConfiguredSecondary(db: SQLiteDatabase): Boolean {
         val role = db.rawQuery(
             "SELECT state_value FROM sync_protocol_state WHERE state_key='local_device_role'",
             null
         ).use { c -> if (c.moveToFirst()) c.getString(0) else null }
-        require(role != "SECONDARY" || permissionKey in secondaryAllowedPermissions) {
+        if (role == "SECONDARY") return true
+        val localDeviceId = db.rawQuery(
+            "SELECT state_value FROM sync_protocol_state WHERE state_key='local_device_id'",
+            null
+        ).use { c -> if (c.moveToFirst()) c.getString(0) else null } ?: return false
+        val enrolledRole = db.rawQuery(
+            "SELECT device_role FROM sync_devices WHERE device_id=?",
+            arrayOf(localDeviceId)
+        ).use { c -> if (c.moveToFirst()) c.getString(0) else null }
+        return enrolledRole == "SECONDARY"
+    }
+
+    /** Checks the user's assigned permission without deciding where a write may be committed. */
+    fun requireAssigned(db: SQLiteDatabase, userId: String, permissionKey: String) {
+        require(userId.isNotBlank()) { "جلسة المستخدم غير صالحة" }
+        require(permissionKey in descriptions) { "الصلاحية المطلوبة غير معروفة" }
+        require(!isConfiguredSecondary(db) || permissionKey in secondaryAllowedPermissions) {
             "الجهاز الثانوي مخصص للبيع والمزامنة فقط؛ هذه العملية متاحة من الجهاز الأساسي"
         }
         val allowed = db.rawQuery(
@@ -133,11 +151,7 @@ object PermissionPolicy {
         require(userId.isNotBlank()) { "جلسة المستخدم غير صالحة" }
         require(permissionKey in descriptions) { "الصلاحية المطلوبة غير معروفة" }
         if (permissionKey in primaryOnlyPermissions) {
-            val role = db.rawQuery(
-                "SELECT state_value FROM sync_protocol_state WHERE state_key='local_device_role'",
-                null
-            ).use { c -> if (c.moveToFirst()) c.getString(0) else null }
-            require(role != "SECONDARY") {
+            require(!isConfiguredSecondary(db)) {
                 "هذا الجهاز ثانوي؛ لا يمكن ترحيل عملية مالية أو مخزنية محلياً قبل اعتمادها من الجهاز الأساسي"
             }
         }
@@ -148,9 +162,7 @@ object PermissionPolicy {
         db: SQLiteDatabase, actorUserId: String, roleKey: String,
         permissionKey: String, allowed: Boolean
     ) {
-        require(db.rawQuery(
-            "SELECT state_value FROM sync_protocol_state WHERE state_key='local_device_role'", null
-        ).use { c -> !c.moveToFirst() || c.getString(0) != "SECONDARY" }) {
+        require(!isConfiguredSecondary(db)) {
             "إدارة صلاحيات المستخدمين متاحة من الجهاز الأساسي فقط"
         }
         require(db.rawQuery(
