@@ -234,6 +234,7 @@ class PermissionPolicyTest {
 
     private fun financialMutationCounts(): Map<String, Int> {
         val tables = listOf(
+            "cash_accounts", "service_wallets", "service_wallet_account_links",
             "cash_transactions", "invoice_payments", "inventory_movements",
             "inventory_adjustments", "operating_expenses", "returns",
             "service_transfers", "service_wallet_transactions", "cash_account_transfers",
@@ -330,6 +331,7 @@ class PermissionPolicyTest {
         }
 
         val services = ServiceTransferRepository(context)
+        services.ensureSystemAccounts()
         assertSecondaryDenied("service recharge-account configuration") {
             services.setRechargeAccount(adminId, "missing-account")
         }
@@ -391,6 +393,7 @@ class PermissionPolicyTest {
         ).use { c -> assertTrue(c.moveToFirst()); c.getInt(0) }
         val ledgerBefore = financialMutationCounts()
         accounts.ensureSystemCashAccounts()
+        ServiceTransferRepository(context).ensureSystemAccounts()
         assertEquals("A secondary with a lost role flag must not seed independent cash accounts",
             accountCountBefore, database.readableDatabase.rawQuery(
                 "SELECT COUNT(*) FROM cash_accounts", null
