@@ -49,6 +49,11 @@ class SyncDomainApplierTest {
             null, "منتج مزامنة اختباري", null, null, category.id, unit.id,
             100, 250, true, 10.0, adminId
         )
+        // This unit has no product; the pairing snapshot must still transfer it.
+        database.writableDatabase.execSQL(
+            "INSERT INTO units(name,symbol,decimal_places) VALUES(?,?,?)",
+            arrayOf("وحدة غير مستخدمة للاختبار", "u-unused", 2)
+        )
         customerId = CustomerRepository(context).create(adminId, "زبون مزامنة اختباري").id
         database.writableDatabase.execSQL(
             "INSERT INTO exchange_rates(id,currency_code,rate_syp_per_usd_milli,effective_at,created_at) VALUES(?,?,?,?,?)",
@@ -270,6 +275,16 @@ class SyncDomainApplierTest {
         assertEquals("UPSERT_UNIT", unitEvent.second.getString("business_operation"))
         assertEquals(primaryUnitId, unitEvent.second.getLong("primary_unit_id"))
         assertTrue("Unit definition must be sequenced before its product", unitEvent.first < event.first)
+        val unusedUnitId = db.rawQuery(
+            "SELECT id FROM units WHERE name=?", arrayOf("وحدة غير مستخدمة للاختبار")
+        ).use { c -> assertTrue(c.moveToFirst()); c.getLong(0) }
+        val unusedUnitEvent = db.rawQuery(
+            """SELECT payload_json FROM sync_operation_envelopes
+               WHERE entity_type='UNIT' AND entity_id=? ORDER BY sequence_number DESC LIMIT 1""".trimIndent(),
+            arrayOf(unusedUnitId.toString())
+        ).use { c -> assertTrue(c.moveToFirst()); JSONObject(c.getString(0)) }
+        assertEquals("وحدة غير مستخدمة للاختبار", unusedUnitEvent.getString("unit_name"))
+        assertEquals("u-unused", unusedUnitEvent.getString("unit_symbol"))
         val primaryCategoryId = event.second.getLong("primary_category_id")
         val categorySequence = db.rawQuery(
             "SELECT sequence_number FROM sync_operation_envelopes WHERE entity_type='CATEGORY' AND sequence_number<? ORDER BY sequence_number",
