@@ -840,6 +840,10 @@ class TwoDeviceSyncIntegrationTest {
         primaryCollectionProcessor.onEncryptedFrame(secondaryId, collectionOperationId, collectionFrame)
         assertEquals("رفض الأساسي تحصيل الدين الصحيح: $collectionError", null, collectionError)
         assertEquals("APPLIED", inboxStatus(primaryDb, collectionOperationId))
+        assertEquals(secondaryAdminId, primaryDb.readableDatabase.rawQuery(
+            "SELECT actor_user_id FROM sync_inbox WHERE operation_id=?",
+            arrayOf(collectionOperationId)
+        ).use { c -> assertTrue(c.moveToFirst()); c.getString(0) })
         assertEquals("PARTIALLY_PAID", primaryDb.readableDatabase.rawQuery(
             "SELECT status FROM sales_invoices WHERE id=?", arrayOf(invoiceId)
         ).use { c -> assertTrue(c.moveToFirst()); c.getString(0) })
