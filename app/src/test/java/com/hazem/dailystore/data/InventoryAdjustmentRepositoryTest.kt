@@ -193,17 +193,14 @@ class InventoryAdjustmentRepositoryTest {
     }
 
     @Test
-    fun primaryInventoryAdjustmentIsAddedToOutboxAtomically() {
+    fun primaryInventoryAdjustmentRemainsLocalToPrimaryDevice() {
         val context = RuntimeEnvironment.getApplication()
         val sync = SyncProtocolRepository(context)
         sync.configureAsPrimary(adminId, "الهاتف الرئيسي")
         repository.postAdjustment(adminId, productId, BigDecimal("1"),
             "تسوية للمزامنة", "sync-adjustment-" + UUID.randomUUID(), 200L)
-        val queued = sync.pendingOutbox().single()
-        assertEquals("INVENTORY_ADJUSTMENT", queued.entityType)
-        assertEquals("CREATE", queued.operationType)
-        assertTrue(queued.payloadJson.contains("POST_INVENTORY_ADJUSTMENT"))
-        assertTrue(queued.payloadJson.contains(productId))
+        assertTrue("Inventory adjustments are primary-only; they must not be broadcast to a sales-only secondary",
+            sync.pendingOutbox().isEmpty())
     }
 
 }
