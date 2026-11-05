@@ -366,7 +366,12 @@ class SyncProtocolRepositoryTest {
     @Test fun configuredSecondaryCannotPromoteItselfEvenIfAuthorityStateIsMissing() {
         val primaryId = UUID.randomUUID().toString()
         configureSecondaryForTest(
-            UUID.randomUUID().toString(), primaryId, "secondary-credential-for-test", "الثانوي"
+            UUID.randomUUID().toString(), primaryId,
+            android.util.Base64.encodeToString(
+                ByteArray(32) { 9 },
+                android.util.Base64.URL_SAFE or android.util.Base64.NO_WRAP or android.util.Base64.NO_PADDING
+            ),
+            "الثانوي"
         )
         val localId = SyncDeviceIdentity.getOrCreate(RuntimeEnvironment.getApplication())
         database.writableDatabase.delete(
