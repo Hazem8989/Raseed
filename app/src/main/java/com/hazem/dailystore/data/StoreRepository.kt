@@ -735,7 +735,8 @@ class StoreRepository(context: Context) {
             """SELECT p.name,p.barcode,p.sku,p.category_id,c.name,u.name,u.symbol,u.decimal_places,
                       p.purchase_cost_usd_cents,p.sale_price_usd_cents,p.track_inventory,p.is_active,
                       p.created_at,p.updated_at,
-                      COALESCE((SELECT SUM(ib.quantity) FROM inventory_balances ib WHERE ib.product_id=p.id),0)
+                      COALESCE((SELECT SUM(ib.quantity) FROM inventory_balances ib WHERE ib.product_id=p.id),0),
+                      p.unit_id
                FROM products p JOIN units u ON u.id=p.unit_id
                LEFT JOIN categories c ON c.id=p.category_id WHERE p.id=?""".trimIndent(),
             arrayOf(productId)
@@ -752,6 +753,7 @@ class StoreRepository(context: Context) {
                 put("unit_name", cursor.getString(5))
                 put("unit_symbol", cursor.getString(6))
                 put("unit_decimal_places", cursor.getInt(7))
+                put("primary_unit_id", cursor.getLong(15))
                 put("purchase_cost_usd_cents", cursor.getLong(8))
                 put("sale_price_usd_cents", cursor.getLong(9))
                 put("tracks_inventory", cursor.getInt(10) == 1)

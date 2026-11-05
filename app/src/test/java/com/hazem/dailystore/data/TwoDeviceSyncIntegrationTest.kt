@@ -163,6 +163,131 @@ class TwoDeviceSyncIntegrationTest {
             .any { it.operationId == newFinancialOperationId })
     }
 
+    @Test fun twoIndependentDatabasesBootstrapStandaloneUnitsAndMapProductOpeningStock() {
+        setLocalDeviceId(primaryId)
+        AppDatabase.installForTests(primaryDb)
+        val db = primaryDb.writableDatabase
+        db.execSQL(
+            "INSERT INTO units(id,name,symbol,decimal_places) VALUES(500,?,?,0)",
+            arrayOf("كيس اختبار", "كيس")
+        )
+        db.execSQL(
+            "INSERT INTO units(id,name,symbol,decimal_places) VALUES(501,?,?,0)",
+            arrayOf("وحدة مستقلة غير مستخدمة", "وحدة")
+        )
+
+        db.beginTransaction()
+        try {
+            for ((unitId, name, symbol) in listOf(
+                Triple(500L, "كيس اختبار", "كيس"),
+                Triple(501L, "وحدة مستقلة غير مستخدمة", "وحدة")
+            )) {
+                val payload = JSONObject()
+                    .put("business_operation", "UPSERT_UNIT")
+                    .put("primary_unit_id", unitId)
+                    .put("unit_name", name)
+                    .put("unit_symbol", symbol)
+                    .put("decimal_places", 0)
+                primaryRepository.enqueueLocalOperation(
+                    db, primaryAdminId, "bootstrap-unit-$unitId", "UPSERT_UNIT",
+                    "UNIT", unitId.toString(), "CREATE", payload.toString()
+                )
+            }
+            db.setTransactionSuccessful()
+        } finally {
+            db.endTransaction()
+        }
+
+        val category = StoreRepository(context).getCategories().first()
+        val productId = StoreRepository(context).saveProduct(
+            null, "منتج بوحدة مستقلة", null, null, category.id, 500L,
+            250L, 350L, true, 4.0, primaryAdminId
+        )
+        val pending = primaryRepository.pendingOutboxForDevice(secondaryId)
+        val productItem = pending.single { it.entityType == "PRODUCT" && it.entityId == productId }
+        val productEnvelope = primaryRepository.authenticatedOutbox(productItem.operationId, secondaryId)
+        assertEquals(500L, JSONObject(productEnvelope.payloadJson).getLong("primary_unit_id"))
+        val customUnitIndex = pending.indexOfFirst { it.entityType == "UNIT" && it.entityId == "500" }
+        val productIndex = pending.indexOfFirst { it.operationId == productItem.operationId }
+        assertTrue("The standalone unit must precede the product that references it",
+            customUnitIndex >= 0 && customUnitIndex < productIndex)
+
+        setLocalDeviceId(secondaryId)
+        AppDatabase.installForTests(secondaryDb)
+        val ackFrames = mutableMapOf<String, String>()
+        var secondaryProtocolError: String? = null
+        val secondaryProcessor = SyncRelayProcessor(
+            secondaryRepository, SyncDomainApplier(context),
+            listener = object : SyncRelayProcessor.Listener {
+                override fun onProtocolError(operationId: String?, message: String) {
+                    secondaryProtocolError = "$operationId: $message"
+                }
+            },
+            sendFrame = { operationId, recipient, frame ->
+                assertEquals(primaryId, recipient)
+                ackFrames[operationId] = frame
+                true
+            }
+        )
+        setLocalDeviceId(primaryId)
+        AppDatabase.installForTests(primaryDb)
+        val primaryProcessor = SyncRelayProcessor(
+            primaryRepository, SyncDomainApplier(context), sendFrame = { _, _, _ -> true }
+        )
+        val frames = mutableMapOf<String, String>()
+        for (item in pending) {
+            setLocalDeviceId(primaryId)
+            AppDatabase.installForTests(primaryDb)
+            val frame = primaryRepository.encryptedAuthenticatedOutbox(item.operationId, secondaryId)
+            frames[item.operationId] = frame
+
+            setLocalDeviceId(secondaryId)
+            AppDatabase.installForTests(secondaryDb)
+            secondaryProcessor.onEncryptedFrame(primaryId, item.operationId, frame)
+            assertEquals("تعذر تطبيق حدث دليل مستقل: $secondaryProtocolError", null, secondaryProtocolError)
+            assertEquals("APPLIED", inboxStatus(secondaryDb, item.operationId))
+            val ack = ackFrames[item.operationId]
+                ?: throw AssertionError("لم يصدر الجهاز الثانوي إقرار التطبيق للعملية ${item.operationId}")
+
+            setLocalDeviceId(primaryId)
+            AppDatabase.installForTests(primaryDb)
+            primaryProcessor.onEncryptedFrame(secondaryId, item.operationId, ack)
+            assertEquals("SYNCED", queueStatus(primaryDb, item.operationId))
+        }
+
+        setLocalDeviceId(secondaryId)
+        AppDatabase.installForTests(secondaryDb)
+        val mappedUnitId = secondaryDb.readableDatabase.rawQuery(
+            "SELECT secondary_unit_id FROM sync_unit_mappings WHERE primary_device_id=? AND primary_unit_id=500",
+            arrayOf(primaryId)
+        ).use { c -> assertTrue(c.moveToFirst()); c.getLong(0) }
+        assertNotEquals("The secondary must use its own unit row ID", 500L, mappedUnitId)
+        assertEquals(1, scalar(secondaryDb,
+            "SELECT COUNT(*) FROM sync_unit_mappings WHERE primary_device_id=? AND primary_unit_id=501",
+            primaryId))
+        val productUnitId = secondaryDb.readableDatabase.rawQuery(
+            "SELECT unit_id FROM products WHERE id=?", arrayOf(productId)
+        ).use { c -> assertTrue(c.moveToFirst()); c.getLong(0) }
+        assertEquals(mappedUnitId, productUnitId)
+        assertEquals(4.0, secondaryDb.readableDatabase.rawQuery(
+            "SELECT COALESCE(SUM(quantity),0) FROM inventory_balances WHERE product_id=?",
+            arrayOf(productId)
+        ).use { c -> assertTrue(c.moveToFirst()); c.getDouble(0) }, 0.000001)
+        assertEquals(1, scalar(secondaryDb,
+            "SELECT COUNT(*) FROM inventory_movements WHERE product_id=? AND movement_type='OPENING'",
+            productId))
+
+        val repeatedProductFrame = frames[productItem.operationId]!!
+        secondaryProcessor.onEncryptedFrame(primaryId, productItem.operationId, repeatedProductFrame)
+        assertEquals(4.0, secondaryDb.readableDatabase.rawQuery(
+            "SELECT COALESCE(SUM(quantity),0) FROM inventory_balances WHERE product_id=?",
+            arrayOf(productId)
+        ).use { c -> assertTrue(c.moveToFirst()); c.getDouble(0) }, 0.000001)
+        assertEquals(1, scalar(secondaryDb,
+            "SELECT COUNT(*) FROM inventory_movements WHERE product_id=? AND movement_type='OPENING'",
+            productId))
+    }
+
     @Test fun twoIndependentDevicesExchangeAuthenticatedProbeAndSignedAckExactlyOnce() {
         var ack: String? = null
         setLocalDeviceId(primaryId)
