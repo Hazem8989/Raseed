@@ -807,6 +807,11 @@ class TwoDeviceSyncIntegrationTest {
         SyncRelayProcessor(secondaryRepository, SyncDomainApplier(context), sendFrame = { _, _, _ -> true })
             .onEncryptedFrame(primaryId, invoicePostOperationId, postedInvoiceAck)
         assertEquals("SYNCED", queueStatus(secondaryDb, invoicePostOperationId))
+        assertEquals("POSTED", secondaryDb.readableDatabase.rawQuery(
+            "SELECT status FROM sales_invoices WHERE id=?", arrayOf(invoiceId)
+        ).use { c -> assertTrue(c.moveToFirst()); c.getString(0) })
+        assertEquals(0, scalar(secondaryDb,
+            "SELECT COUNT(*) FROM cash_transactions WHERE source_type='SALES_INVOICE' AND source_id=?", invoiceId))
 
         val collectionOperationId = UUID.randomUUID().toString()
         val secondaryPayments = CustomerPaymentRepository(context)
