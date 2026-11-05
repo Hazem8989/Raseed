@@ -307,63 +307,34 @@ class PurchasePaymentRepositoryTest {
     }
 
     @Test
-    fun primaryAppliesSecondarySupplierPaymentOnceAndPreservesOriginalEventTime() {
+    fun primaryRejectsSupplierPaymentCommandFromSecondaryBeforeInbox() {
         val context = RuntimeEnvironment.getApplication()
         val vault = SyncCredentialVault(context) { SecretKeySpec(ByteArray(32) { 23 }, "AES") }
         val sync = SyncProtocolRepository(context, vault)
         sync.configureAsPrimary(adminId, "الجهاز الرئيسي")
         val invitation = sync.createPairingInvitation(adminId)
         val secondaryId = UUID.randomUUID().toString()
-        val enrollment = sync.enrollSecondaryDevice(adminId, invitation.token, secondaryId, "الجهاز الثانوي")
-        sync.mapSecondaryActor(adminId, secondaryId, "remote-admin", adminId)
-        sync.mapSecondaryCashAccount(adminId, secondaryId, "remote-usd-box", accountId)
-
+        sync.enrollSecondaryDevice(adminId, invitation.token, secondaryId, "الجهاز الثانوي")
         val operationId = "incoming-supplier-payment-" + UUID.randomUUID()
         val paymentId = "pending-payment-$operationId"
         val occurredAt = "2026-11-03T12:34:56.000Z"
-        val payload = org.json.JSONObject()
-            .put("business_operation", "POST_SUPPLIER_PAYMENT")
-            .put("invoice_id", invoiceId)
-            .put("payment_id", paymentId)
-            .put("cash_transaction_id", "pending-cash-$operationId")
-            .put("cash_account_id", "remote-usd-box")
-            .put("cash_account_type", "CASH_BOX")
-            .put("cash_account_currency_code", "USD")
-            .put("amount_minor", 1000L)
-            .put("currency_code", "USD")
-            .put("payment_rate_milli", 10_000_000L)
-            .put("amount_syp_equivalent", 100_000L)
-            .put("note", "دفعة من جهاز ثانوي")
-            .put("occurred_at", occurredAt)
-            .put("operating_date", "2026-11-03")
+        val payload = org.json.JSONObject().put("business_operation", "POST_SUPPLIER_PAYMENT")
+            .put("invoice_id", invoiceId).put("payment_id", paymentId)
+            .put("amount_minor", 1_000L).put("occurred_at", occurredAt)
         val secret = vault.load(secondaryId)!!
         val storeId = database.readableDatabase.rawQuery(
             "SELECT state_value FROM sync_protocol_state WHERE state_key='store_id'", null
         ).use { assertTrue(it.moveToFirst()); it.getString(0) }
-        val envelope = SyncEnvelopeSecurity.create(
-            storeId, operationId, 1L, secondaryId, "remote-admin",
-            "CREATE", "SUPPLIER_PAYMENT", paymentId, 0L,
-            payload.toString(), occurredAt, secret
-        )
+        val envelope = SyncEnvelopeSecurity.create(storeId, operationId, 1L, secondaryId,
+            "remote-admin", "CREATE", "SUPPLIER_PAYMENT", paymentId, 0L,
+            payload.toString(), occurredAt, secret)
         secret.fill(0)
-
-        assertEquals(
-            SyncInboxDisposition.RECEIVED,
-            sync.recordIncomingFromSecondary(SyncEnvelopeSecurity.encode(envelope))
-        )
-        val applier = SyncDomainApplier(context)
-        assertTrue(applier.applyReceivedSupplierPayment(operationId).applied)
-        assertTrue(applier.applyReceivedSupplierPayment(operationId).applied)
-
-        assertEquals(49_000L, cashAccounts.balance(accountId))
-        val posted = payments.listPayments(invoiceId).single()
-        assertEquals(1000L, posted.amountMinor)
-        assertEquals("USD", posted.currencyCode)
-        assertEquals(occurredAt, posted.createdAt)
-        assertEquals("PARTIALLY_PAID", payments.listPurchaseInvoices().first { it.id == invoiceId }.invoiceStatus)
-        database.readableDatabase.rawQuery(
-            "SELECT status FROM sync_inbox WHERE operation_id=?", arrayOf(operationId)
-        ).use { assertTrue(it.moveToFirst()); assertEquals("APPLIED", it.getString(0)) }
+        var rejected = false
+        try { sync.recordIncomingFromSecondary(SyncEnvelopeSecurity.encode(envelope)) }
+        catch (_: IllegalArgumentException) { rejected = true }
+        assertTrue(rejected)
+        assertEquals(null, sync.incomingOperationStatus(operationId))
+        assertTrue(payments.listPayments(invoiceId).isEmpty())
     }
 
 }
