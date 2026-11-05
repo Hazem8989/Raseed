@@ -1810,17 +1810,23 @@ class SyncProtocolRepository(private val context: Context, private val credentia
             db.beginTransaction()
             try {
                 val local = db.rawQuery(
-                    """SELECT e.sequence_number,e.payload_sha256,e.origin_device_id,q.status
+                    """SELECT e.sequence_number,e.payload_sha256,e.origin_device_id,q.status,e.entity_type
                        FROM sync_operation_envelopes e JOIN sync_queue q ON q.operation_id=e.operation_id
                        WHERE e.operation_id=?""".trimIndent(), arrayOf(operationId)
                 ).use { cursor ->
                     require(cursor.moveToFirst()) { "لا يوجد أمر محلي مطابق لإقرار التطبيق" }
                     arrayOf(cursor.getLong(0).toString(), cursor.getString(1),
-                        cursor.getString(2), cursor.getString(3))
+                        cursor.getString(2), cursor.getString(3), cursor.getString(4))
                 }
                 require(local[0].toLong() == sequence && local[1] == payloadHash &&
                     local[2] == localId) {
                     "الإقرار لا يطابق تسلسل الأمر أو بصمة بياناته المحلية"
+                }
+                require(role != "PRIMARY" || local[4] in setOf(
+                    "CATEGORY", "UNIT", "PRODUCT", "PRODUCT_OPENING_STOCK",
+                    "CUSTOMER", "CASH_ACCOUNT", "EXCHANGE_RATE", "STORE_SETTINGS"
+                )) {
+                    "لا يجوز قبول إقرار من جهاز ثانوي لعملية إدارية أو مالية غير موزعة عليه"
                 }
                 require(local[3] in setOf("PENDING", "FAILED", "IN_PROGRESS", "SYNCED")) {
                     "حالة الأمر المحلي لا تسمح بقبول الإقرار"
