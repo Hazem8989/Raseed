@@ -234,7 +234,7 @@ class TwoDeviceSyncIntegrationTest {
         val invoiceId = "secondary-sale-" + UUID.randomUUID()
         val saleOperationId = UUID.randomUUID().toString()
         val payload = JSONObject()
-            .put("business_operation", "POST_SALES_INVOICE")
+            .put("business_operation", "POST_SALE_INVOICE")
             .put("id", invoiceId)
             .put("party_id", JSONObject.NULL)
             .put("sale_type", "CASH")
@@ -264,7 +264,7 @@ class TwoDeviceSyncIntegrationTest {
         try {
             secondaryRepository.enqueueSecondaryCommand(
                 secondaryDb.writableDatabase, secondaryAdminId, saleOperationId,
-                "POST_SALES_INVOICE", "SALES_INVOICE", invoiceId, payload.toString()
+                "POST_SALE_INVOICE", "SALES_INVOICE", invoiceId, payload.toString()
             )
             secondaryDb.writableDatabase.setTransactionSuccessful()
         } finally {
