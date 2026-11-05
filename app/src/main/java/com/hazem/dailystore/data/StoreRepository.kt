@@ -430,17 +430,27 @@ class StoreRepository(context: Context) {
                 }
 
                 val categoryName = row.category?.trim()?.takeIf { it.isNotEmpty() } ?: "غير مصنف"
-                val categoryId = db.rawQuery(
+                val existingCategoryId = db.rawQuery(
                     "SELECT id FROM categories WHERE name=? COLLATE NOCASE LIMIT 1",
                     arrayOf(categoryName)
-                ).use { cursor ->
-                    if (cursor.moveToFirst()) cursor.getLong(0) else {
-                        val categoryValues = ContentValues().apply {
-                            put("name", categoryName)
-                            put("created_at", now)
-                        }
-                        db.insertOrThrow("categories", null, categoryValues)
+                ).use { cursor -> if (cursor.moveToFirst()) cursor.getLong(0) else null }
+                val categoryId = existingCategoryId ?: run {
+                    val categoryValues = ContentValues().apply {
+                        put("name", categoryName)
+                        put("created_at", now)
                     }
+                    val createdCategoryId = db.insertOrThrow("categories", null, categoryValues)
+                    // Imported categories are first-class catalog changes too. Record
+                    // their replication event in this same import transaction.
+                    SyncProtocolRepository(appContext).enqueueLocalOperation(
+                        db, actorUserId, "category-import-$createdCategoryId",
+                        "CREATE_CATEGORY", "CATEGORY",
+                        categoryName.lowercase(Locale.ROOT), "CREATE",
+                        org.json.JSONObject().put("name", categoryName)
+                            .put("primary_category_id", createdCategoryId)
+                            .put("created_at", now).toString()
+                    )
+                    createdCategoryId
                 }
 
                 val unitName = row.unit?.trim()?.takeIf { it.isNotEmpty() } ?: "قطعة"
