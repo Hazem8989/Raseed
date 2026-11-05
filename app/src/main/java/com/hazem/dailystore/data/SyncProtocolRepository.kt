@@ -718,6 +718,9 @@ class SyncProtocolRepository(private val context: Context, private val credentia
             "إرسال الأوامر المعلقة متاح للجهاز الثانوي المسجل فقط"
         }
         require(state(db, "authority_device_id").isNullOrBlank().not()) { "الجهاز الأساسي غير محدد" }
+        require(businessOperation in setOf("POST_SALES_INVOICE", "SYNC_TRANSPORT_PROBE")) {
+            "الجهاز الثانوي مخول بإرسال فواتير البيع واختبارات المزامنة فقط"
+        }
         require(operationId.isNotBlank() && businessOperation.isNotBlank() &&
             entityType.isNotBlank() && entityId.isNotBlank())
         require(payloadJson.length in 2..MAX_PAYLOAD_CHARS)
