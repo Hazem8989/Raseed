@@ -557,12 +557,12 @@ class SyncProtocolRepositoryTest {
         // its primary/unconfigured state. User administration is intentionally
         // unavailable after the device is configured as a sales-only secondary.
         val auth = AuthRepository(RuntimeEnvironment.getApplication())
-        val temporaryPassphrase = "UnitTestPassphrase!"
+        val temporaryPassphrase = "UnitTestPassphrase1!"
         val cashierId = auth.createUser(
             "ADMIN", adminId, "cashier-command-actor", "Cashier command actor",
             temporaryPassphrase, "CASHIER"
         )
-        auth.changePassword(cashierId, temporaryPassphrase, "AnotherUnitTestPassphrase!")
+        auth.changePassword(cashierId, temporaryPassphrase, "AnotherUnitTestPassphrase2!")
         configureSecondaryForTest("store-command-actor-01", primaryId, credential, "الثانوي")
         val operationId = UUID.randomUUID().toString()
         val entityId = "sale-$operationId"
