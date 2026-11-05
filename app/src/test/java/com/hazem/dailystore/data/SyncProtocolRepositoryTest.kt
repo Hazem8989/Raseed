@@ -763,6 +763,10 @@ class SyncProtocolRepositoryTest {
             "SELECT COALESCE(MAX(sequence_number),0)+1 FROM sync_operation_envelopes", null
         ).use { c -> assertTrue(c.moveToFirst()); c.getLong(0) }
         setProtocolStateForTest("secondary_next_sequence", nextSecondarySequence.toString())
+        db.update("sync_cursors", ContentValues().apply {
+            put("last_sequence", nextSecondarySequence - 1L)
+            put("updated_at", "2026-11-04T12:00:00.000Z")
+        }, "device_id=?", arrayOf(secondaryId))
         db.beginTransaction()
         val sequence = repository.enqueueSecondaryCommand(
             db, adminId, operationId, "POST_SALE_INVOICE",
