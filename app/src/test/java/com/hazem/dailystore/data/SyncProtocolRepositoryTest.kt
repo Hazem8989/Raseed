@@ -363,6 +363,30 @@ class SyncProtocolRepositoryTest {
         assertFalse(storedValues.any { it == credential })
     }
 
+    @Test fun configuredSecondaryCannotPromoteItselfEvenIfAuthorityStateIsMissing() {
+        val primaryId = UUID.randomUUID().toString()
+        configureSecondaryForTest(
+            UUID.randomUUID().toString(), primaryId, "secondary-credential-for-test", "الثانوي"
+        )
+        val localId = SyncDeviceIdentity.getOrCreate(RuntimeEnvironment.getApplication())
+        database.writableDatabase.delete(
+            "sync_protocol_state", "state_key='authority_device_id'", null
+        )
+
+        var denied = false
+        try {
+            repository.configureAsPrimary(adminId, "محاولة ترقية")
+        } catch (_: IllegalArgumentException) {
+            denied = true
+        }
+
+        assertTrue(denied)
+        assertEquals("SECONDARY", repository.localDeviceRole())
+        database.readableDatabase.rawQuery(
+            "SELECT device_role FROM sync_devices WHERE device_id=?", arrayOf(localId)
+        ).use { c -> assertTrue(c.moveToFirst()); assertEquals("SECONDARY", c.getString(0)) }
+    }
+
     @Test fun cashierCannotConfigurePrimaryOrCreateInvitations() {
         val auth = AuthRepository(RuntimeEnvironment.getApplication())
         val cashierId = auth.createUser("ADMIN", adminId, "sync-cashier", "Cashier", "Cashier12345", "CASHIER")
