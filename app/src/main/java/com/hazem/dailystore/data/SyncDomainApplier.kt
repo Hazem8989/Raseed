@@ -50,7 +50,7 @@ class SyncDomainApplier(context: Context) {
             "SET_CUSTOMER_ACTIVE" -> applyReceivedCustomerActive(operationId)
             "SYNC_TRANSPORT_PROBE" -> applyReceivedTransportProbe(operationId)
             "SET_EXCHANGE_RATE" -> applyReceivedExchangeRate(operationId)
-            "POST_PURCHASE_INVOICE", "POST_SALES_INVOICE" -> applyReceivedInvoice(operationId)
+            "POST_PURCHASE_INVOICE", "POST_SALE_INVOICE" -> applyReceivedInvoice(operationId)
             "POST_OPERATING_EXPENSE" -> applyReceivedOperatingExpense(operationId)
             "POST_SUPPLIER_PAYMENT" -> applyReceivedSupplierPayment(operationId)
             "COLLECT_CUSTOMER_PAYMENT" -> applyReceivedCustomerCollection(operationId)
@@ -255,7 +255,7 @@ class SyncDomainApplier(context: Context) {
         val businessOperation = payload.optString("business_operation")
         val requiredPermission = when (businessOperation) {
             "POST_PURCHASE_INVOICE" -> PermissionPolicy.PURCHASES_MANAGE
-            "POST_SALES_INVOICE" -> PermissionPolicy.SALES_CHECKOUT
+            "POST_SALE_INVOICE" -> PermissionPolicy.SALES_CHECKOUT
             else -> throw IllegalArgumentException("نوع الأمر غير مدعوم في مطبّق الفواتير: $businessOperation")
         }
         PermissionPolicy.require(db, row.primaryUserId, requiredPermission)
