@@ -114,6 +114,7 @@ class SyncProtocolRepository(private val context: Context, private val credentia
         val db = database.writableDatabase
         val secretBytes = ByteArray(32)
         var credentialSaved = false
+        var flushCatalogAfterCommit = false
         db.beginTransaction()
         try {
             requirePrimaryManager(db, actorUserId)
@@ -178,6 +179,7 @@ class SyncProtocolRepository(private val context: Context, private val credentia
             audit(db, actorUserId, "SYNC_DEVICE_ENROLLED", remoteDeviceId, null,
                 JSONObject().put("display_name", cleanName).put("device_role", "SECONDARY").toString(), now)
             db.setTransactionSuccessful()
+            flushCatalogAfterCommit = true
             return SyncEnrollment(
                 remoteDeviceId, credential,
                 state(db, "store_id") ?: error("معرّف المتجر غير مهيأ"),
@@ -191,6 +193,7 @@ class SyncProtocolRepository(private val context: Context, private val credentia
             throw error
         } finally {
             db.endTransaction()
+            if (flushCatalogAfterCommit) runCatching { SyncRelaySession.flushPending() }
             secretBytes.fill(0)
         }
     }
