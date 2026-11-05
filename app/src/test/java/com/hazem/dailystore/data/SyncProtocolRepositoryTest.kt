@@ -546,6 +546,58 @@ class SyncProtocolRepositoryTest {
         secretBytes.fill(0)
     }
 
+    @Test fun secondaryCommandReplayRejectsDifferentAuthenticatedActor() {
+        val primaryId = UUID.randomUUID().toString()
+        val secretBytes = ByteArray(32) { (it + 37).toByte() }
+        val credential = android.util.Base64.encodeToString(
+            secretBytes,
+            android.util.Base64.URL_SAFE or android.util.Base64.NO_WRAP or android.util.Base64.NO_PADDING
+        )
+        configureSecondaryForTest("store-command-actor-01", primaryId, credential, "الثانوي")
+        val auth = AuthRepository(RuntimeEnvironment.getApplication())
+        val temporaryPassphrase = "UnitTestPassphrase!"
+        val cashierId = auth.createUser(
+            "ADMIN", adminId, "cashier-command-actor", "Cashier command actor",
+            temporaryPassphrase, "CASHIER"
+        )
+        auth.changePassword(cashierId, temporaryPassphrase, "AnotherUnitTestPassphrase!")
+        val operationId = UUID.randomUUID().toString()
+        val entityId = "sale-$operationId"
+        val payload = """{"invoice_id":"$entityId","total_usd_cents":2500}"""
+        val db = database.writableDatabase
+
+        db.beginTransaction()
+        try {
+            repository.enqueueSecondaryCommand(
+                db, adminId, operationId, "POST_SALE_INVOICE",
+                "SALES_INVOICE", entityId, payload
+            )
+            db.setTransactionSuccessful()
+        } finally { db.endTransaction() }
+
+        var rejected = false
+        db.beginTransaction()
+        try {
+            repository.enqueueSecondaryCommand(
+                db, cashierId, operationId, "POST_SALE_INVOICE",
+                "SALES_INVOICE", entityId, payload
+            )
+        } catch (_: IllegalArgumentException) {
+            rejected = true
+        } finally { db.endTransaction() }
+
+        assertTrue("يجب رفض إعادة استخدام معرّف العملية بهوية موظف مختلفة", rejected)
+        db.rawQuery(
+            "SELECT actor_user_id FROM sync_operation_envelopes WHERE operation_id=?",
+            arrayOf(operationId)
+        ).use { c -> assertTrue(c.moveToFirst()); assertEquals(adminId, c.getString(0)) }
+        assertEquals(1, db.rawQuery(
+            "SELECT COUNT(*) FROM sync_queue WHERE operation_id=?",
+            arrayOf(operationId)
+        ).use { c -> assertTrue(c.moveToFirst()); c.getInt(0) })
+        secretBytes.fill(0)
+    }
+
     @Test fun primaryDurablyReceivesSecondaryCommandAndHandlesDuplicateAndHashConflict() {
         repository.configureAsPrimary(adminId, "الرئيسي")
         val invitation = repository.createPairingInvitation(adminId)
