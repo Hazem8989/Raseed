@@ -16,7 +16,8 @@ data class CustomerSummary(
 
 /** Customer master data; financial balances are maintained by invoice/payment ledgers. */
 class CustomerRepository(context: Context) {
-    private val database = AppDatabase.getInstance(context)
+    private val appContext = context.applicationContext
+    private val database = AppDatabase.getInstance(appContext)
 
     fun listActive(): List<CustomerSummary> = list(false)
     fun listAll(): List<CustomerSummary> = list(true)
@@ -117,7 +118,7 @@ class CustomerRepository(context: Context) {
             insertAudit(db, actorUserId, if (active) "ACTIVATE" else "DEACTIVATE", customerId, now)
             val payload = org.json.JSONObject().put("business_operation", "SET_CUSTOMER_ACTIVE")
                 .put("customer_id", customerId).put("is_active", active).put("occurred_at", now)
-            SyncProtocolRepository(context).enqueueLocalOperation(
+            SyncProtocolRepository(appContext).enqueueLocalOperation(
                 db, actorUserId, UUID.randomUUID().toString(), "SET_CUSTOMER_ACTIVE",
                 "CUSTOMER", customerId, "UPDATE", payload.toString()
             )
@@ -151,7 +152,7 @@ class CustomerRepository(context: Context) {
                 put("updated_at", c.getString(6))
             }
         }
-        SyncProtocolRepository(context).enqueueLocalOperation(
+        SyncProtocolRepository(appContext).enqueueLocalOperation(
             db, actorUserId, UUID.randomUUID().toString(), "UPSERT_CUSTOMER",
             "CUSTOMER", customerId, changeKind, payload.toString()
         )
