@@ -154,30 +154,24 @@ class OperatingExpenseRepositoryTest {
 
     // Sync-domain coverage is added below.
 
-    @Test fun secondaryExpenseQueuesWithoutChangingLocalCashOrExpenseLedger() {
-        val context=RuntimeEnvironment.getApplication()
-        val vault=SyncCredentialVault(context) {
-            javax.crypto.spec.SecretKeySpec(ByteArray(32) { 31 }, "AES")
-        }
-        repository=OperatingExpenseRepository(context,vault)
-        val sync=SyncProtocolRepository(context,vault)
-        val primaryId=UUID.randomUUID().toString()
-        val credential=android.util.Base64.encodeToString(
-            ByteArray(32) { (it+7).toByte() },
-            android.util.Base64.URL_SAFE or android.util.Base64.NO_WRAP or android.util.Base64.NO_PADDING
-        )
-        sync.configureAsSecondary(adminId,"expense-sync-store",primaryId,credential,"الجهاز الثانوي","Asia/Damascus")
-        val before=accounts.balance(sypAccountId)
-        val operationId="secondary-expense-"+UUID.randomUUID()
-        val result=repository.postExpense(adminId,operationId,categoryId,sypAccountId,
-            25000L,"2026-11-02","مصروف معلق","لا يرحل محلياً")
-        assertEquals("pending-expense-$operationId",result.expenseId)
-        assertEquals(before,accounts.balance(sypAccountId))
+    @Test fun secondaryExpenseIsRejectedBySalesOnlyPolicy() {
+        val context = RuntimeEnvironment.getApplication()
+        val vault = SyncCredentialVault(context) { javax.crypto.spec.SecretKeySpec(ByteArray(32) { 31 }, "AES") }
+        repository = OperatingExpenseRepository(context, vault)
+        val sync = SyncProtocolRepository(context, vault)
+        val primaryId = UUID.randomUUID().toString()
+        val credential = android.util.Base64.encodeToString(ByteArray(32) { (it + 7).toByte() },
+            android.util.Base64.URL_SAFE or android.util.Base64.NO_WRAP or android.util.Base64.NO_PADDING)
+        sync.configureAsSecondary(adminId, "expense-sync-store", primaryId, credential, "الجهاز الثانوي", "Asia/Damascus")
+        val before = accounts.balance(sypAccountId)
+        var rejected = false
+        try { repository.postExpense(adminId, "secondary-expense-" + UUID.randomUUID(),
+            categoryId, sypAccountId, 25_000L, "2026-11-02", "مصروف ممنوع", "لا يرحل") }
+        catch (_: IllegalArgumentException) { rejected = true }
+        assertTrue(rejected)
+        assertEquals(before, accounts.balance(sypAccountId))
         assertTrue(repository.listExpenses().isEmpty())
-        val queued=sync.pendingOutbox().single()
-        assertEquals(operationId,queued.operationId)
-        assertEquals("OPERATING_EXPENSE",queued.entityType)
-        assertTrue(queued.payloadJson.contains("POST_OPERATING_EXPENSE"))
+        assertTrue(sync.pendingOutbox().isEmpty())
     }
 
 
