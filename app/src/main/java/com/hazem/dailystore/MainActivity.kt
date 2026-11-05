@@ -420,13 +420,7 @@ class MainActivity : Activity() {
         runCatching {
             val repository = SyncProtocolRepository(applicationContext)
             if (repository.localDeviceRole() != null) {
-                val serviceIntent = android.content.Intent(this, SyncForegroundService::class.java)
-                    .setAction(SyncForegroundService.ACTION_START)
-                if (android.os.Build.VERSION.SDK_INT >= 26) {
-                    startForegroundService(serviceIntent)
-                } else {
-                    startService(serviceIntent)
-                }
+                SyncForegroundService.start(this)
             }
         }
     }
@@ -560,7 +554,7 @@ class MainActivity : Activity() {
         cart.clear()
         sessionPrefs.edit().clear().apply()
         SecureSessionStore.clear(this)
-        stopService(android.content.Intent(this, SyncForegroundService::class.java))
+        SyncForegroundService.stop(this)
     }
 
     private fun showLoginScreen() {
