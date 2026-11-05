@@ -623,7 +623,8 @@ class SyncDomainApplier(context: Context) {
                           m.primary_user_id,i.payload_sha256,i.origin_created_at
                    FROM sync_inbox i
                    JOIN sync_actor_mappings m
-                     ON m.device_id=i.origin_device_id AND m.is_active=1
+                     ON m.device_id=i.origin_device_id
+                    AND m.remote_actor_user_id=i.actor_user_id AND m.is_active=1
                    JOIN users u ON u.id=m.primary_user_id
                    JOIN sync_devices d ON d.device_id=i.origin_device_id
                    WHERE i.operation_id=? AND d.device_role='SECONDARY'
@@ -894,7 +895,8 @@ class SyncDomainApplier(context: Context) {
                           m.primary_user_id,i.origin_created_at,i.payload_sha256
                    FROM sync_inbox i
                    JOIN sync_actor_mappings m
-                     ON m.device_id=i.origin_device_id AND m.is_active=1
+                     ON m.device_id=i.origin_device_id
+                    AND m.remote_actor_user_id=i.actor_user_id AND m.is_active=1
                    JOIN users u ON u.id=m.primary_user_id
                    JOIN sync_devices d ON d.device_id=i.origin_device_id
                    WHERE i.operation_id=? AND d.device_role='SECONDARY'
