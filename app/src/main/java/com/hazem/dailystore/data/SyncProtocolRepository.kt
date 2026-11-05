@@ -1370,11 +1370,31 @@ class SyncProtocolRepository(private val context: Context, private val credentia
                 )
             }
         }
+        // Units are first-class reference data. Send them even when no product uses them.
+        db.rawQuery("SELECT id,name,symbol,decimal_places FROM units ORDER BY id", null).use { c ->
+            while (c.moveToNext()) {
+                val unitId = c.getLong(0)
+                val unitName = c.getString(1)
+                val unitSymbol = c.getString(2)
+                val decimals = c.getInt(3)
+                val payload = JSONObject()
+                    .put("business_operation", "UPSERT_UNIT")
+                    .put("primary_unit_id", unitId)
+                    .put("unit_name", unitName)
+                    .put("unit_symbol", unitSymbol)
+                    .put("decimal_places", decimals)
+                enqueueLocalOperation(
+                    db, actorUserId, UUID.randomUUID().toString(), "UPSERT_UNIT",
+                    "UNIT", unitId.toString(), "CREATE", payload.toString()
+                )
+            }
+        }
         db.rawQuery(
             """SELECT p.id,p.name,p.barcode,p.sku,p.category_id,c.name,u.name,u.symbol,u.decimal_places,
                       p.purchase_cost_usd_cents,p.sale_price_usd_cents,p.track_inventory,p.is_active,
                       p.created_at,p.updated_at,
-                      COALESCE((SELECT SUM(ib.quantity) FROM inventory_balances ib WHERE ib.product_id=p.id),0)
+                      COALESCE((SELECT SUM(ib.quantity) FROM inventory_balances ib WHERE ib.product_id=p.id),0),
+                      p.unit_id
                FROM products p JOIN units u ON u.id=p.unit_id
                LEFT JOIN categories c ON c.id=p.category_id
                ORDER BY p.id""".trimIndent(), null
@@ -1392,6 +1412,7 @@ class SyncProtocolRepository(private val context: Context, private val credentia
                     .put("unit_name", c.getString(6))
                     .put("unit_symbol", c.getString(7))
                     .put("unit_decimal_places", c.getInt(8))
+                    .put("primary_unit_id", c.getLong(16))
                     .put("purchase_cost_usd_cents", c.getLong(9))
                     .put("sale_price_usd_cents", c.getLong(10))
                     .put("tracks_inventory", c.getInt(11) == 1)
