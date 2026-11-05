@@ -152,6 +152,54 @@ class SyncDomainApplierTest {
         assertEquals("RECEIVED", inboxStatus(conflictId))
     }
 
+    @Test fun primaryProductAndOpeningStockAreAppliedToSecondaryOnce() {
+        val primaryId = SyncDeviceIdentity.getOrCreate(context)
+        check(context.getSharedPreferences("the_daily_shop_sync_identity", Context.MODE_PRIVATE)
+            .edit().putString("device_id", secondaryId).commit())
+        val db = database.writableDatabase
+        db.execSQL("UPDATE sync_protocol_state SET state_value='SECONDARY' WHERE state_key='local_device_role'")
+        db.execSQL("UPDATE sync_protocol_state SET state_value=? WHERE state_key='authority_device_id'", arrayOf(primaryId))
+
+        val unit = StoreRepository(context).getUnits().first()
+        val id = UUID.randomUUID().toString()
+        val now = "2026-11-05T10:00:00.000Z"
+        val operationId = UUID.randomUUID().toString()
+        val payload = JSONObject()
+            .put("business_operation", "UPSERT_PRODUCT")
+            .put("product_id", id).put("name", "منتج كتالوج ثانوي $id")
+            .put("barcode", JSONObject.NULL).put("sku", JSONObject.NULL)
+            .put("primary_category_id", JSONObject.NULL).put("category_name", JSONObject.NULL)
+            .put("unit_name", unit.name).put("unit_symbol", unit.symbol)
+            .put("unit_decimal_places", unit.decimalPlaces)
+            .put("purchase_cost_usd_cents", 100L).put("sale_price_usd_cents", 250L)
+            .put("tracks_inventory", true).put("is_active", true)
+            .put("created_at", now).put("updated_at", now).put("opening_quantity", 4.0)
+        db.execSQL(
+            """INSERT INTO sync_inbox(operation_id,origin_device_id,sequence_number,operation_type,
+               entity_type,entity_id,payload_json,payload_sha256,status,received_at,origin_created_at)
+               VALUES(?,?,1,'CREATE','PRODUCT',?,?,?,'RECEIVED',?,?)""".trimIndent(),
+            arrayOf(operationId, primaryId, id, payload.toString(), "product-hash-$operationId", now, now)
+        )
+
+        val applier = SyncDomainApplier(context)
+        assertTrue(applier.applyReceivedOperation(operationId).applied)
+        assertEquals(1, db.rawQuery("SELECT COUNT(*) FROM products WHERE id=?", arrayOf(id))
+            .use { it.moveToFirst(); it.getInt(0) })
+        assertEquals(4.0, db.rawQuery(
+            "SELECT quantity FROM inventory_balances WHERE product_id=?", arrayOf(id)
+        ).use { it.moveToFirst(); it.getDouble(0) }, 0.000001)
+        assertEquals(1, db.rawQuery("SELECT COUNT(*) FROM inventory_cost_layers WHERE product_id=?", arrayOf(id))
+            .use { it.moveToFirst(); it.getInt(0) })
+
+        db.execSQL("UPDATE sync_inbox SET status='RECEIVED',applied_at=NULL WHERE operation_id=?", arrayOf(operationId))
+        assertTrue(applier.applyReceivedOperation(operationId).applied)
+        assertEquals(4.0, db.rawQuery(
+            "SELECT quantity FROM inventory_balances WHERE product_id=?", arrayOf(id)
+        ).use { it.moveToFirst(); it.getDouble(0) }, 0.000001)
+        assertEquals(1, db.rawQuery("SELECT COUNT(*) FROM inventory_movements WHERE product_id=?", arrayOf(id))
+            .use { it.moveToFirst(); it.getInt(0) })
+    }
+
     @Test fun primaryExchangeRateChangeIsQueuedAsAnAuthoritativeReferenceEvent() {
         val before = database.readableDatabase.rawQuery(
             "SELECT COUNT(*) FROM sync_operation_envelopes WHERE entity_type='EXCHANGE_RATE'", null
