@@ -198,6 +198,38 @@ class StoreRepositoryImportTest {
     }
 
     @Test
+    fun primaryProductCreateOpeningStockAndDeactivationAreAllQueuedAtomically() {
+        val context = RuntimeEnvironment.getApplication()
+        SyncDeviceTestKeyProvider.install()
+        val sync = SyncProtocolRepository(context)
+        sync.configureAsPrimary(actorId, "Catalog test primary")
+        val unit = repository.getUnits().first()
+        val category = repository.getCategories().first()
+        val id = repository.saveProduct(null, "Catalog lifecycle $actorId", null, null,
+            category.id, unit.id, 100L, 250L, true, 0.0, actorId)
+        repository.recordOpeningStock(id, 7.0, actorId, "جرد افتتاحي")
+        repository.setProductActive(id, false, actorId)
+
+        val events = database.readableDatabase.rawQuery(
+            """SELECT e.sequence_number,e.payload_json FROM sync_operation_envelopes e
+               WHERE e.entity_type IN ('PRODUCT','PRODUCT_OPENING_STOCK') AND e.entity_id=?
+               ORDER BY e.sequence_number""".trimIndent(), arrayOf(id)
+        ).use { c ->
+            val result = mutableListOf<Pair<Long, org.json.JSONObject>>()
+            while (c.moveToNext()) result.add(c.getLong(0) to org.json.JSONObject(c.getString(1)))
+            result
+        }
+        assertEquals(3, events.size)
+        assertEquals("UPSERT_PRODUCT", events[0].second.getString("business_operation"))
+        assertEquals(0.0, events[0].second.getDouble("opening_quantity"), 0.000001)
+        assertEquals("SET_PRODUCT_OPENING_STOCK", events[1].second.getString("business_operation"))
+        assertEquals(7.0, events[1].second.getDouble("quantity"), 0.000001)
+        assertEquals("SET_PRODUCT_ACTIVE", events[2].second.getString("business_operation"))
+        assertFalse(events[2].second.getBoolean("is_active"))
+        assertTrue(events[0].first < events[1].first && events[1].first < events[2].first)
+    }
+
+    @Test
     fun importsSyrianPoundPricesUsingTheExplicitRateAndLeavesStockAtZero() {
         val rateMilli = 15_000_000L
         val row = ProductImportRow(
