@@ -272,17 +272,14 @@ class PurchasePaymentRepositoryTest {
     }
 
     @Test
-    fun primarySupplierPaymentIsAddedToOutboxAtomically() {
+    fun primarySupplierPaymentRemainsLocalToPrimaryDevice() {
         val context = RuntimeEnvironment.getApplication()
         val sync = SyncProtocolRepository(context)
         sync.configureAsPrimary(adminId, "الهاتف الرئيسي")
         payments.addPayment(adminId, invoiceId, "sync-supplier-payment-" + UUID.randomUUID(),
             accountId, 1000L, "دفعة للمزامنة")
-        val queued = sync.pendingOutbox().single()
-        assertEquals("SUPPLIER_PAYMENT", queued.entityType)
-        assertEquals("CREATE", queued.operationType)
-        assertTrue(queued.payloadJson.contains("POST_SUPPLIER_PAYMENT"))
-        assertTrue(queued.payloadJson.contains(invoiceId))
+        assertTrue("Supplier payments are primary-only financial operations",
+            sync.pendingOutbox().isEmpty())
     }
 
     @Test
