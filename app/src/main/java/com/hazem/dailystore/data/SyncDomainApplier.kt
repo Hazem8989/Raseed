@@ -46,6 +46,8 @@ class SyncDomainApplier(context: Context) {
             "UPSERT_PRODUCT" -> applyReceivedProduct(operationId)
             "SET_PRODUCT_ACTIVE" -> applyReceivedProductActive(operationId)
             "SET_PRODUCT_OPENING_STOCK" -> applyReceivedProductOpeningStock(operationId)
+            "UPSERT_CUSTOMER" -> applyReceivedCustomer(operationId)
+            "SET_CUSTOMER_ACTIVE" -> applyReceivedCustomerActive(operationId)
             "SYNC_TRANSPORT_PROBE" -> applyReceivedTransportProbe(operationId)
             "SET_EXCHANGE_RATE" -> applyReceivedExchangeRate(operationId)
             "POST_PURCHASE_INVOICE", "POST_SALES_INVOICE" -> applyReceivedInvoice(operationId)
@@ -1367,6 +1369,123 @@ class SyncDomainApplier(context: Context) {
             }
             db.setTransactionSuccessful()
             ApplyResult(operationId,true)
+        } finally { db.endTransaction() }
+    }
+
+    /** Applies primary-owned customer master data for POS lookup and credit sales. */
+    fun applyReceivedCustomer(operationId: String): ApplyResult = synchronized(APPLY_LOCK) {
+        require(operationId.isNotBlank()) { "معرّف أمر الزبون مطلوب" }
+        val db = database.writableDatabase
+        val localId = SyncDeviceIdentity.getOrCreate(appContext)
+        val role = db.rawQuery(
+            "SELECT state_value FROM sync_protocol_state WHERE state_key='local_device_role'", null
+        ).use { if (it.moveToFirst()) it.getString(0) else null }
+        val authority = db.rawQuery(
+            "SELECT state_value FROM sync_protocol_state WHERE state_key='authority_device_id'", null
+        ).use { if (it.moveToFirst()) it.getString(0) else null }
+        require(role == "SECONDARY" && !authority.isNullOrBlank() && authority != localId) {
+            "تطبيق بيانات الزبائن الواردة مسموح على جهاز ثانوي مرتبط فقط"
+        }
+        db.beginTransaction()
+        try {
+            val row = db.rawQuery(
+                """SELECT origin_device_id,operation_type,entity_type,entity_id,payload_json,status,origin_created_at
+                   FROM sync_inbox WHERE operation_id=?""".trimIndent(), arrayOf(operationId)
+            ).use { c ->
+                require(c.moveToFirst()) { "أمر الزبون غير موجود في صندوق الوارد" }
+                Array(7) { c.getString(it) }
+            }
+            require(row[0] == authority && row[2] == "CUSTOMER" &&
+                row[1] in setOf("CREATE", "UPDATE")) { "مصدر أو نوع حدث الزبون غير صالح" }
+            if (row[5] == "APPLIED") {
+                db.setTransactionSuccessful()
+                return@synchronized ApplyResult(operationId, true)
+            }
+            require(row[5] == "RECEIVED") { "حالة حدث الزبون لا تسمح بالتطبيق" }
+            val payload = JSONObject(row[4])
+            val customerId = payload.optString("customer_id")
+            val name = payload.optString("name").trim()
+            val createdAt = payload.optString("created_at").takeIf {
+                it.matches(Regex("\\d{4}-\\d{2}-\\d{2}T.*"))
+            } ?: row[6]
+            val updatedAt = payload.optString("updated_at").takeIf {
+                it.matches(Regex("\\d{4}-\\d{2}-\\d{2}T.*"))
+            } ?: createdAt
+            val phone = payload.optString("phone").takeIf { !payload.isNull("phone") }
+            val address = payload.optString("address").takeIf { !payload.isNull("address") }
+            val notes = payload.optString("notes").takeIf { !payload.isNull("notes") }
+            require(customerId.isNotBlank() && customerId == row[3] && name.isNotEmpty() &&
+                name.length <= 200 && (phone?.length ?: 0) <= 80 &&
+                (address?.length ?: 0) <= 500 && (notes?.length ?: 0) <= 2000) {
+                "بيانات الزبون الواردة غير صالحة"
+            }
+            val values = ContentValues().apply {
+                put("name", name)
+                if (phone == null) putNull("phone") else put("phone", phone)
+                if (address == null) putNull("address") else put("address", address)
+                if (notes == null) putNull("notes") else put("notes", notes)
+                put("is_active", if (payload.optBoolean("is_active", true)) 1 else 0)
+                put("updated_at", updatedAt)
+            }
+            val exists = db.rawQuery("SELECT 1 FROM customers WHERE id=?", arrayOf(customerId))
+                .use { it.moveToFirst() }
+            if (exists) {
+                require(db.update("customers", values, "id=?", arrayOf(customerId)) == 1)
+            } else {
+                values.put("id", customerId)
+                values.put("opening_balance_minor", 0L)
+                values.put("opening_balance_currency", "SYP")
+                values.put("created_at", createdAt)
+                db.insertOrThrow("customers", null, values)
+            }
+            require(db.update("sync_inbox", ContentValues().apply {
+                put("status", "APPLIED"); put("applied_at", timestamp()); putNull("rejection_reason")
+            }, "operation_id=? AND status='RECEIVED'", arrayOf(operationId)) == 1) {
+                "تعذر تثبيت تطبيق بيانات الزبون"
+            }
+            db.setTransactionSuccessful()
+            ApplyResult(operationId, true)
+        } finally { db.endTransaction() }
+    }
+
+    /** Applies customer activation/deactivation without touching the customer's debt ledger. */
+    fun applyReceivedCustomerActive(operationId: String): ApplyResult = synchronized(APPLY_LOCK) {
+        require(operationId.isNotBlank())
+        val db = database.writableDatabase
+        val authority = db.rawQuery(
+            "SELECT state_value FROM sync_protocol_state WHERE state_key='authority_device_id'", null
+        ).use { if (it.moveToFirst()) it.getString(0) else null }
+        require(!authority.isNullOrBlank() &&
+            db.rawQuery("SELECT state_value FROM sync_protocol_state WHERE state_key='local_device_role'", null)
+                .use { it.moveToFirst() && it.getString(0) == "SECONDARY" }) {
+            "تحديث حالة الزبون الوارد مسموح على جهاز ثانوي مرتبط فقط"
+        }
+        db.beginTransaction()
+        try {
+            val row = db.rawQuery(
+                "SELECT origin_device_id,entity_type,entity_id,payload_json,status FROM sync_inbox WHERE operation_id=?",
+                arrayOf(operationId)
+            ).use { c ->
+                require(c.moveToFirst()) { "تحديث حالة الزبون غير موجود" }
+                Array(5) { c.getString(it) }
+            }
+            require(row[0] == authority && row[1] == "CUSTOMER") { "مصدر تحديث حالة الزبون غير صالح" }
+            if (row[4] == "APPLIED") { db.setTransactionSuccessful(); return@synchronized ApplyResult(operationId, true) }
+            require(row[4] == "RECEIVED")
+            val payload = JSONObject(row[3])
+            require(payload.optString("business_operation") == "SET_CUSTOMER_ACTIVE" &&
+                payload.optString("customer_id") == row[2]) { "بيانات تحديث حالة الزبون غير صالحة" }
+            require(db.update("customers", ContentValues().apply {
+                put("is_active", if (payload.optBoolean("is_active")) 1 else 0)
+                put("updated_at", payload.optString("occurred_at", timestamp()))
+            }, "id=?", arrayOf(row[2])) == 1) {
+                "الزبون المطلوب تحديثه غير موجود على الجهاز الثانوي"
+            }
+            require(db.update("sync_inbox", ContentValues().apply {
+                put("status", "APPLIED"); put("applied_at", timestamp()); putNull("rejection_reason")
+            }, "operation_id=? AND status='RECEIVED'", arrayOf(operationId)) == 1)
+            db.setTransactionSuccessful()
+            ApplyResult(operationId, true)
         } finally { db.endTransaction() }
     }
 
