@@ -258,14 +258,14 @@ class PurchaseReturnRepositoryTest {
         assertTrue(sync.pendingOutbox().isEmpty())
     }
 
-    @Test fun primaryPurchaseReturnIsAddedToOutboxAtomically() {
+    @Test fun primaryPurchaseReturnRemainsLocalToPrimaryDevice() {
         val context=RuntimeEnvironment.getApplication()
         val sync=SyncProtocolRepository(context)
         sync.configureAsPrimary(adminId,"الهاتف الرئيسي")
         returns.postPurchaseReturn(adminId,invoiceId,"sync-purchase-return-"+UUID.randomUUID(),
             "2026-11-02","مرتجع للمزامنة",item("1"),emptyList())
-        assertTrue(sync.pendingOutbox().any { it.entityType=="PURCHASE_RETURN" && it.operationType=="CREATE" &&
-            it.payloadJson.contains("POST_PURCHASE_RETURN") })
+        assertTrue("Purchase returns are primary-only and must not be sent to a sales-only secondary",
+            sync.pendingOutbox().isEmpty())
     }
 
 }
