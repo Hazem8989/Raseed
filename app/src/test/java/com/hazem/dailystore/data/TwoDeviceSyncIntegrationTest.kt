@@ -655,56 +655,58 @@ class TwoDeviceSyncIntegrationTest {
         assertEquals("SYNCED", queueStatus(secondaryDb, saleOperationId))
     }
 
-    @Test fun twoIndependentDevicesRejectCustomerCollectionFromSecondary() {
-        var probeAck: String? = null
-        setLocalDeviceId(primaryId)
-        AppDatabase.installForTests(primaryDb)
-        val primaryProcessor = SyncRelayProcessor(
-            primaryRepository, SyncDomainApplier(context),
-            sendFrame = { _, recipient, frame ->
-                assertEquals(secondaryId, recipient)
-                probeAck = frame
-                true
-            }
-        )
-        primaryProcessor.onEncryptedFrame(secondaryId, operationId, outgoingFrame)
-        assertEquals("APPLIED", inboxStatus(primaryDb, operationId))
-        setLocalDeviceId(secondaryId)
-        AppDatabase.installForTests(secondaryDb)
-        val secondaryProcessor = SyncRelayProcessor(
-            secondaryRepository, SyncDomainApplier(context), sendFrame = { _, _, _ -> true }
-        )
-        secondaryProcessor.onEncryptedFrame(primaryId, operationId, probeAck!!)
-        assertEquals("SYNCED", queueStatus(secondaryDb, operationId))
-
+    @Test fun secondaryMayQueueCustomerCollectionButNotAdministrativeCommands() {
         val beforeOutbox = scalar(secondaryDb,
             "SELECT COUNT(*) FROM sync_operation_envelopes WHERE origin_device_id=?", secondaryId)
-        val operationId = "customer-debt-" + UUID.randomUUID()
-        var rejected = false
-        try {
-            CustomerPaymentRepository(context).addPayment(
-                secondaryAdminId, "credit-invoice-not-available", operationId,
-                "secondary-wallet-not-available", 15_000L, "تحصيل ممنوع من الجهاز الثانوي"
-            )
-        } catch (_: IllegalArgumentException) { rejected = true }
-        assertTrue("Secondary must not collect customer debt", rejected)
+        val operationId = UUID.randomUUID().toString()
+        val payload = JSONObject()
+            .put("business_operation", "COLLECT_CUSTOMER_PAYMENT")
+            .put("invoice_id", "credit-invoice-test")
+            .put("payment_id", "payment-$operationId")
+            .put("cash_transaction_id", "cash-$operationId")
+            .put("cash_account_id", "secondary-wallet")
+            .put("cash_account_type", "WALLET")
+            .put("cash_account_currency_code", "SYP")
+            .put("amount_minor", 15_000L)
+            .put("currency_code", "SYP")
+            .put("collection_rate_milli", 10_000_000L)
+            .put("effective_rate_milli", 10_000_000L)
+            .put("usd_reference_reduction_cents", 150L)
+            .put("occurred_at", "2026-11-04T12:00:00Z")
+            .put("operating_date", "2026-11-04")
         val secondarySql = secondaryDb.writableDatabase
+        secondarySql.beginTransaction()
+        try {
+            secondaryRepository.enqueueSecondaryCommand(
+                secondarySql, secondaryAdminId, operationId,
+                "COLLECT_CUSTOMER_PAYMENT", "CUSTOMER_PAYMENT",
+                "payment-$operationId", payload.toString()
+            )
+            secondarySql.setTransactionSuccessful()
+        } finally { secondarySql.endTransaction() }
+        assertEquals(beforeOutbox + 1, scalar(secondaryDb,
+            "SELECT COUNT(*) FROM sync_operation_envelopes WHERE origin_device_id=?", secondaryId))
+        assertEquals("PENDING", queueStatus(secondaryDb, operationId))
+        assertEquals(1, scalar(secondaryDb,
+            "SELECT COUNT(*) FROM sync_operation_envelopes WHERE operation_id=? AND entity_type='CUSTOMER_PAYMENT'",
+            operationId))
+
         var directCommandRejected = false
+        val expenseId = UUID.randomUUID().toString()
         secondarySql.beginTransaction()
         try {
             try {
                 secondaryRepository.enqueueSecondaryCommand(
-                    secondarySql, secondaryAdminId, "forged-expense-" + UUID.randomUUID(),
-                    "POST_OPERATING_EXPENSE", "OPERATING_EXPENSE", "forged-expense", "{}"
+                    secondarySql, secondaryAdminId, expenseId,
+                    "POST_OPERATING_EXPENSE", "OPERATING_EXPENSE", "forged-expense",
+                    JSONObject().put("business_operation", "POST_OPERATING_EXPENSE").toString()
                 )
             } catch (_: IllegalArgumentException) { directCommandRejected = true }
-            assertTrue("Outbox must independently reject non-sale command types", directCommandRejected)
+            assertTrue("Secondary must still reject administrative expense commands", directCommandRejected)
             secondarySql.setTransactionSuccessful()
         } finally { secondarySql.endTransaction() }
-        assertEquals(beforeOutbox, scalar(secondaryDb,
+        assertEquals(beforeOutbox + 1, scalar(secondaryDb,
             "SELECT COUNT(*) FROM sync_operation_envelopes WHERE origin_device_id=?", secondaryId))
-        assertEquals(0, scalar(secondaryDb,
-            "SELECT COUNT(*) FROM invoice_payments WHERE invoice_id=?", "credit-invoice-not-available"))
         assertEquals(0, scalar(secondaryDb,
             "SELECT COUNT(*) FROM cash_transactions WHERE operation_id=?", operationId))
     }
