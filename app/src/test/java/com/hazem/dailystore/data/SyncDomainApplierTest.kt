@@ -1103,6 +1103,11 @@ class SyncDomainApplierTest {
                 put("payload_json", payload.toString()); put("payload_sha256", "internal-test-$operationId")
                 put("status", "RECEIVED"); put("received_at", occurredAt); put("origin_created_at", occurredAt)
             })
+            database.writableDatabase.update(
+                "sync_cursors", android.content.ContentValues().apply {
+                    put("last_sequence", sequence); put("updated_at", occurredAt)
+                }, "device_id=?", arrayOf(secondaryId)
+            )
         }
         return operationId
     }
