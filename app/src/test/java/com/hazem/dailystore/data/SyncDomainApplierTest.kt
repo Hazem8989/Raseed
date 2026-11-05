@@ -25,12 +25,14 @@ class SyncDomainApplierTest {
     private lateinit var adminId: String
     private lateinit var productId: String
     private lateinit var secondaryId: String
+    private lateinit var primaryLocalDeviceId: String
     private lateinit var secondarySecret: ByteArray
 
     @Before fun setUp() {
         SyncDeviceTestKeyProvider.install()
         context = RuntimeEnvironment.getApplication()
         AppDatabase.resetForTests(context)
+        primaryLocalDeviceId = SyncDeviceIdentity.getOrCreate(context)
         database = AppDatabase.getInstance(context)
         StoreRepository(context).ensureBaseSetup()
         auth = AuthRepository(context)
@@ -66,6 +68,8 @@ class SyncDomainApplierTest {
 
     @After fun tearDown() {
         secondarySecret.fill(0)
+        context.getSharedPreferences("the_daily_shop_sync_identity", Context.MODE_PRIVATE)
+            .edit().putString("device_id", primaryLocalDeviceId).commit()
         database.close()
     }
 
@@ -188,7 +192,7 @@ class SyncDomainApplierTest {
     }
 
     @Test fun primaryProductAndOpeningStockAreAppliedToSecondaryOnce() {
-        val primaryId = SyncDeviceIdentity.getOrCreate(context)
+        val primaryId = primaryLocalDeviceId
         check(context.getSharedPreferences("the_daily_shop_sync_identity", Context.MODE_PRIVATE)
             .edit().putString("device_id", secondaryId).commit())
         val db = database.writableDatabase
