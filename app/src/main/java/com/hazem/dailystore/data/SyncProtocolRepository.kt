@@ -721,6 +721,11 @@ class SyncProtocolRepository(private val context: Context, private val credentia
         require(businessOperation in setOf("POST_SALES_INVOICE", "SYNC_TRANSPORT_PROBE")) {
             "الجهاز الثانوي مخول بإرسال فواتير البيع واختبارات المزامنة فقط"
         }
+        PermissionPolicy.requireAssigned(
+            db, actorUserId,
+            if (businessOperation == "POST_SALES_INVOICE") PermissionPolicy.SALES_CHECKOUT
+            else PermissionPolicy.SYNC_MANAGE
+        )
         require(operationId.isNotBlank() && businessOperation.isNotBlank() &&
             entityType.isNotBlank() && entityId.isNotBlank())
         require(payloadJson.length in 2..MAX_PAYLOAD_CHARS)
