@@ -359,7 +359,7 @@ class PermissionPolicyTest {
             CustomerRepository(context).update(adminId, "missing-customer", "changed")
         }
         assertSecondaryDenied("employee administration") {
-            auth.createUser(adminId, adminId, "secondary-user", "Secondary user", "SecondaryPass123", "CASHIER")
+            auth.createUser("ADMIN", adminId, "secondary-user", "Secondary user", "SecondaryPass123", "CASHIER")
         }
 
         assertEquals("No financial ledger or sync command may be written by a rejected direct call",
