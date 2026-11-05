@@ -1213,6 +1213,9 @@ class SyncDomainApplierTest {
             ).use { c -> assertTrue(c.moveToFirst()); c.getLong(0) }
             database.writableDatabase.insertOrThrow("sync_inbox", null, android.content.ContentValues().apply {
                 put("operation_id", operationId); put("origin_device_id", secondaryId)
+                // Internal handler fixtures must preserve the authenticated actor just
+                // as the real ingress path does; never fall back to "latest mapping".
+                put("actor_user_id", "remote-admin")
                 put("sequence_number", sequence); put("operation_type", "CREATE")
                 put("entity_type", entityType); put("entity_id", resolvedEntityId)
                 put("payload_json", payload.toString()); put("payload_sha256", "internal-test-$operationId")
