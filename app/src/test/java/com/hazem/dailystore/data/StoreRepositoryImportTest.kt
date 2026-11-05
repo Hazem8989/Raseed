@@ -176,6 +176,25 @@ class StoreRepositoryImportTest {
             assertTrue(payload.getLong("primary_category_id") > 0L)
             assertEquals(categoryName, payload.getString("name"))
         }
+
+        val importedProductId = database.readableDatabase.rawQuery(
+            "SELECT id FROM products WHERE name=?", arrayOf(productName)
+        ).use { cursor -> assertTrue(cursor.moveToFirst()); cursor.getString(0) }
+        database.readableDatabase.rawQuery(
+            """SELECT e.operation_type,e.entity_id,e.payload_json
+               FROM sync_operation_envelopes e
+               WHERE e.entity_type='PRODUCT' AND e.entity_id=?
+               ORDER BY e.sequence_number DESC LIMIT 1""".trimIndent(), arrayOf(importedProductId)
+        ).use { cursor ->
+            assertTrue("Imported product must create a durable sync event", cursor.moveToFirst())
+            assertEquals("CREATE", cursor.getString(0))
+            assertEquals(importedProductId, cursor.getString(1))
+            val payload = org.json.JSONObject(cursor.getString(2))
+            assertEquals("UPSERT_PRODUCT", payload.getString("business_operation"))
+            assertEquals(productName, payload.getString("name"))
+            assertEquals("قطعة", payload.getString("unit_name"))
+            assertEquals(0.0, payload.getDouble("opening_quantity"), 0.000001)
+        }
     }
 
     @Test
