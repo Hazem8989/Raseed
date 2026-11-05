@@ -340,7 +340,7 @@ class SalesReturnRepository(context: Context) {
             }
             db.setTransactionSuccessful()
             return SalesReturnResult(returnId, number, totalReturn, creditReduction, cashRefund, totalCogs, false)
-        } finally { db.endTransaction() }
+        } finally { db.endTransaction(); runCatching { SyncRelaySession.flushPending() } }
     }
 
     private fun loadOriginalInvoice(db: SQLiteDatabase, id: String): OriginalInvoice =
