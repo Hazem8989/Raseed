@@ -237,9 +237,9 @@ class SyncProtocolRepositoryTest {
             put("origin_device_id", remoteId)
             put("sequence_number", 1L)
             put("operation_type", "CREATE")
-            put("entity_type", "OPERATING_EXPENSE")
-            put("entity_id", "expense-$operationId")
-            put("payload_json", """{"business_operation":"POST_OPERATING_EXPENSE"}""")
+            put("entity_type", "SALES_INVOICE")
+            put("entity_id", "sale-$operationId")
+            put("payload_json", """{"business_operation":"POST_SALE_INVOICE"}""")
             put("payload_sha256", payloadHash)
             put("status", "APPLIED")
             put("received_at", now)
@@ -759,9 +759,9 @@ class SyncProtocolRepositoryTest {
         val db = database.writableDatabase
         db.beginTransaction()
         val sequence = repository.enqueueSecondaryCommand(
-            db, adminId, operationId, "POST_OPERATING_EXPENSE",
-            "OPERATING_EXPENSE", "expense-$operationId",
-            """{"amount_syp":12500,"description":"sync acknowledgement test"}"""
+            db, adminId, operationId, "POST_SALE_INVOICE",
+            "SALES_INVOICE", "sale-$operationId",
+            """{"invoice_id":"sale-$operationId","total_usd_cents":1250}"""
         )
         db.setTransactionSuccessful()
         db.endTransaction()
