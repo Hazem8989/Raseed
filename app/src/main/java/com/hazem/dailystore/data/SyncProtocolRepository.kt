@@ -170,6 +170,9 @@ class SyncProtocolRepository(private val context: Context, private val credentia
             db.insertWithOnConflict("sync_cursors", null, ContentValues().apply {
                 put("device_id", remoteDeviceId); put("last_sequence", 0L); put("updated_at", now)
             }, SQLiteDatabase.CONFLICT_REPLACE)
+            // Bootstrap a newly paired terminal from the authoritative primary catalog.
+            // Events are durable and use the same ordered per-device ACK protocol.
+            enqueueCatalogSnapshot(db, actorUserId)
             credentialVault.save(remoteDeviceId, secretBytes)
             credentialSaved = true
             audit(db, actorUserId, "SYNC_DEVICE_ENROLLED", remoteDeviceId, null,
@@ -1332,6 +1335,65 @@ class SyncProtocolRepository(private val context: Context, private val credentia
         db.update("sync_devices", ContentValues().apply { put("last_seen_at", now) },
             "device_id=?", arrayOf(deviceId))
         return next
+    }
+
+    /**
+     * Queues an authoritative catalog snapshot after pairing. Product events carry
+     * semantic unit data and category IDs, never SQLite row IDs for local units.
+     * The secondary resolves those values into its own database identifiers.
+     */
+    private fun enqueueCatalogSnapshot(db: SQLiteDatabase, actorUserId: String) {
+        require(db.inTransaction()) { "يجب إنشاء لقطة الدليل ضمن معاملة الاقتران" }
+        db.rawQuery(
+            "SELECT id,name,created_at FROM categories ORDER BY id", null
+        ).use { c ->
+            while (c.moveToNext()) {
+                val categoryId = c.getLong(0)
+                val name = c.getString(1)
+                val createdAt = c.getString(2)
+                enqueueLocalOperation(
+                    db, actorUserId, UUID.randomUUID().toString(), "CREATE_CATEGORY",
+                    "CATEGORY", name.lowercase(java.util.Locale.ROOT), "CREATE",
+                    JSONObject().put("name", name).put("primary_category_id", categoryId)
+                        .put("created_at", createdAt).toString()
+                )
+            }
+        }
+        db.rawQuery(
+            """SELECT p.id,p.name,p.barcode,p.sku,p.category_id,c.name,u.name,u.symbol,u.decimal_places,
+                      p.purchase_cost_usd_cents,p.sale_price_usd_cents,p.track_inventory,p.is_active,
+                      p.created_at,p.updated_at,
+                      COALESCE((SELECT SUM(ib.quantity) FROM inventory_balances ib WHERE ib.product_id=p.id),0)
+               FROM products p JOIN units u ON u.id=p.unit_id
+               LEFT JOIN categories c ON c.id=p.category_id
+               ORDER BY p.id""".trimIndent(), null
+        ).use { c ->
+            while (c.moveToNext()) {
+                val productId = c.getString(0)
+                val payload = JSONObject()
+                    .put("business_operation", "UPSERT_PRODUCT")
+                    .put("product_id", productId)
+                    .put("name", c.getString(1))
+                    .put("barcode", if (c.isNull(2)) JSONObject.NULL else c.getString(2))
+                    .put("sku", if (c.isNull(3)) JSONObject.NULL else c.getString(3))
+                    .put("primary_category_id", if (c.isNull(4)) JSONObject.NULL else c.getLong(4))
+                    .put("category_name", if (c.isNull(5)) JSONObject.NULL else c.getString(5))
+                    .put("unit_name", c.getString(6))
+                    .put("unit_symbol", c.getString(7))
+                    .put("unit_decimal_places", c.getInt(8))
+                    .put("purchase_cost_usd_cents", c.getLong(9))
+                    .put("sale_price_usd_cents", c.getLong(10))
+                    .put("tracks_inventory", c.getInt(11) == 1)
+                    .put("is_active", c.getInt(12) == 1)
+                    .put("created_at", c.getString(13))
+                    .put("updated_at", c.getString(14))
+                    .put("opening_quantity", if (c.getInt(11) == 1) c.getDouble(15) else 0.0)
+                enqueueLocalOperation(
+                    db, actorUserId, UUID.randomUUID().toString(), "UPSERT_PRODUCT",
+                    "PRODUCT", productId, "CREATE", payload.toString()
+                )
+            }
+        }
     }
 
     fun enqueueInvoicePosting(
