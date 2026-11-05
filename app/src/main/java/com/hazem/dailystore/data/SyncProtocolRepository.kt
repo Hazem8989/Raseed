@@ -1876,12 +1876,14 @@ class SyncProtocolRepository(private val context: Context, private val credentia
                     // ledgers remain exclusively owned by the primary device.
                     if (local[4] == "SALES_INVOICE") {
                         val posted = JSONObject(local[7])
-                        if (posted.optString("business_operation") == "POST_SALE_INVOICE") {
-                        require(posted.optString("business_operation") == "POST_SALE_INVOICE" &&
-                            posted.optString("id") == local[6] &&
+                        // Cash sales are also POST_SALE_INVOICE commands, but their
+                        // workflow is already represented by the queued ACK. Only
+                        // credit sales need the local invoice status reconciliation.
+                        if (posted.optString("business_operation") == "POST_SALE_INVOICE" &&
                             posted.optString("sale_type") == "CREDIT") {
-                            "إقرار الفاتورة لا يطابق أمر بيع آجل محلياً"
-                        }
+                            require(posted.optString("id") == local[6]) {
+                                "إقرار الفاتورة لا يطابق أمر بيع آجل محلياً"
+                            }
                         val invoiceId = local[6]
                         val customerId = posted.optString("party_id").takeIf {
                             it.isNotBlank() && it != "null"
