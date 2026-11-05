@@ -530,7 +530,7 @@ class SyncProtocolRepositoryTest {
         val db = database.writableDatabase
         db.beginTransaction()
         val sequence = repository.enqueueSecondaryCommand(
-            db, adminId, operationId, "POST_SALES_INVOICE", "SALES_INVOICE", "sale-command-1",
+            db, adminId, operationId, "POST_SALE_INVOICE", "SALES_INVOICE", "sale-command-1",
             """{"invoice_id":"sale-command-1","total_usd_cents":2500}"""
         )
         db.setTransactionSuccessful()
@@ -542,7 +542,7 @@ class SyncProtocolRepositoryTest {
         val envelope = repository.authenticatedOutbox(operationId, primaryId)
         assertEquals(SyncDeviceIdentity.getOrCreate(RuntimeEnvironment.getApplication()), envelope.originDeviceId)
         assertTrue(SyncEnvelopeSecurity.verify(envelope, secretBytes))
-        assertEquals("POST_SALES_INVOICE", org.json.JSONObject(envelope.payloadJson).getString("business_operation"))
+        assertEquals("POST_SALE_INVOICE", org.json.JSONObject(envelope.payloadJson).getString("business_operation"))
         secretBytes.fill(0)
     }
 
@@ -559,7 +559,7 @@ class SyncProtocolRepositoryTest {
                 "SELECT state_value FROM sync_protocol_state WHERE state_key='store_id'", null
             ).use { c -> assertTrue(c.moveToFirst()); c.getString(0) },
             operationId, 1L, secondaryId, "remote-admin", "CREATE", "SALES_INVOICE",
-            "sale-incoming-1", 0L, """{"business_operation":"POST_SALES_INVOICE","invoice_id":"sale-incoming-1","total_usd_cents":2500}""",
+            "sale-incoming-1", 0L, """{"business_operation":"POST_SALE_INVOICE","invoice_id":"sale-incoming-1","total_usd_cents":2500}""",
             "2026-11-03T12:00:00Z", secret
         )
         val encoded = SyncEnvelopeSecurity.encode(envelope)
@@ -567,7 +567,7 @@ class SyncProtocolRepositoryTest {
         assertEquals(SyncInboxDisposition.DUPLICATE, repository.recordIncomingFromSecondary(encoded))
         val changed = SyncEnvelopeSecurity.create(
             envelope.storeId, operationId, 1L, secondaryId, "remote-admin", "CREATE", "SALES_INVOICE",
-            "sale-incoming-1", 0L, """{"business_operation":"POST_SALES_INVOICE","invoice_id":"sale-incoming-1","total_usd_cents":9900}""",
+            "sale-incoming-1", 0L, """{"business_operation":"POST_SALE_INVOICE","invoice_id":"sale-incoming-1","total_usd_cents":9900}""",
             "2026-11-03T12:00:01Z", secret
         )
         assertEquals(SyncInboxDisposition.CONFLICT,
@@ -590,7 +590,7 @@ class SyncProtocolRepositoryTest {
         val firstSecret = vault.load(firstId)!!
         val storeId = repository.storeId()
         val operationId = UUID.randomUUID().toString()
-        val payload = """{"business_operation":"POST_SALES_INVOICE","invoice_id":"shared-id","total_usd_cents":2500}"""
+        val payload = """{"business_operation":"POST_SALE_INVOICE","invoice_id":"shared-id","total_usd_cents":2500}"""
         val createdAt = "2026-11-04T12:00:00Z"
         val first = SyncEnvelopeSecurity.create(
             storeId, operationId, 1L, firstId, "remote-admin-1", "CREATE",
@@ -699,7 +699,7 @@ class SyncProtocolRepositoryTest {
         ).use { c -> assertTrue(c.moveToFirst()); c.getString(0) }
         val gap = SyncEnvelopeSecurity.create(
             storeId, UUID.randomUUID().toString(), 2L, secondaryId, "remote-admin", "CREATE",
-            "SALES_INVOICE", "sale-gap", 0L, """{"business_operation":"POST_SALES_INVOICE","invoice_id":"sale-gap"}""",
+            "SALES_INVOICE", "sale-gap", 0L, """{"business_operation":"POST_SALE_INVOICE","invoice_id":"sale-gap"}""",
             "2026-11-03T12:00:00Z", secret
         )
         var rejected = false
