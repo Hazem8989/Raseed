@@ -96,8 +96,12 @@ class InvoiceRepository(context: Context) {
         val payloadHash = hashPayload(type, invoiceId, partyId, invoiceDate, discountUsdCents, notes, lines, saleType)
         db.beginTransaction()
         try {
-            // Draft creation is a local, non-authoritative action and is allowed
-            // on a secondary after checking the user's assigned role permission.
+            // Secondary devices are sales terminals only; purchasing stays on primary.
+            if (type == "PURCHASE") {
+                require(!SyncProtocolRepository(context).isConfiguredSecondary()) {
+                    "إنشاء فواتير المشتريات متاح من الجهاز الرئيسي فقط"
+                }
+            }
             PermissionPolicy.requireAssigned(
                 db, actorUserId,
                 if (type == "PURCHASE") PermissionPolicy.PURCHASES_MANAGE else PermissionPolicy.SALES_CHECKOUT
@@ -212,6 +216,11 @@ class InvoiceRepository(context: Context) {
         db.beginTransaction()
         try {
             val syncRepository = SyncProtocolRepository(context)
+            if (type == "PURCHASE") {
+                require(!syncRepository.isConfiguredSecondary()) {
+                    "اعتماد فواتير المشتريات متاح من الجهاز الرئيسي فقط"
+                }
+            }
             val requiredInvoicePermission =
                 if (type == "PURCHASE") PermissionPolicy.PURCHASES_MANAGE else PermissionPolicy.SALES_CHECKOUT
             if (syncRepository.isConfiguredSecondary()) {
