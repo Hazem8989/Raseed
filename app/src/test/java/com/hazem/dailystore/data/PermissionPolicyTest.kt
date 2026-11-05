@@ -64,15 +64,22 @@ class PermissionPolicyTest {
             "INSERT INTO sync_protocol_state(state_key,state_value,updated_at) VALUES('local_device_role','SECONDARY','2026-11-03T00:00:00Z')"
         )
         val protectedPermissions = listOf(
+            PermissionPolicy.USERS_MANAGE,
             PermissionPolicy.CATALOG_MANAGE,
             PermissionPolicy.EXCHANGE_RATE_MANAGE,
             PermissionPolicy.ACCOUNTS_MANAGE,
+            PermissionPolicy.SUPPLIERS_MANAGE,
             PermissionPolicy.PURCHASES_MANAGE,
             PermissionPolicy.SUPPLIER_PAYMENTS_MANAGE,
+            PermissionPolicy.SUPPLIER_PAYMENTS_CORRECT,
+            PermissionPolicy.CUSTOMERS_CREATE,
+            PermissionPolicy.CUSTOMERS_MANAGE,
             PermissionPolicy.CUSTOMERS_COLLECT,
             PermissionPolicy.SALES_CHECKOUT,
             PermissionPolicy.DAILY_CASH_MANAGE,
+            PermissionPolicy.SERVICE_TRANSFERS_MANAGE,
             PermissionPolicy.SERVICE_TRANSFERS_EXECUTE,
+            PermissionPolicy.BACKUP_MANAGE,
             PermissionPolicy.INVENTORY_ADJUST,
             PermissionPolicy.RETURNS_PROCESS,
             PermissionPolicy.EXPENSES_MANAGE
@@ -84,8 +91,18 @@ class PermissionPolicyTest {
             } catch (error: IllegalArgumentException) {
                 assertTrue(error.message.orEmpty().contains("الجهاز ثانوي"))
             }
+            try {
+                PermissionPolicy.requireAssigned(database.readableDatabase, adminId, permission)
+                fail("Secondary must not assign $permission")
+            } catch (error: IllegalArgumentException) {
+                assertTrue(error.message.orEmpty().contains("الجهاز الثانوي"))
+            }
         }
-        assertTrue(allowed(adminId, PermissionPolicy.REPORTS_READ))
+        // POS checkout uses the assigned permission directly; ordinary require()
+        // remains primary-only for any local financial posting path.
+        PermissionPolicy.requireAssigned(database.readableDatabase, adminId, PermissionPolicy.SALES_CHECKOUT)
+        PermissionPolicy.requireAssigned(database.readableDatabase, adminId, PermissionPolicy.CUSTOMERS_READ)
+        PermissionPolicy.requireAssigned(database.readableDatabase, adminId, PermissionPolicy.SYNC_MANAGE)
         assertTrue(allowed(adminId, PermissionPolicy.SYNC_MANAGE))
     }
 
