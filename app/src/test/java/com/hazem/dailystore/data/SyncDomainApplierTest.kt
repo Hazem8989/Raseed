@@ -183,7 +183,7 @@ class SyncDomainApplierTest {
             }
             if (found) sequence else 0L
         }
-        assertTrue("Category must be sequenced before its product", categorySequence in 1 until event.first)
+        assertTrue("Category must be sequenced before its product", categorySequence in 1L until event.first)
         assertTrue(protocol.pendingOutboxForDevice(secondaryId).any { it.entityId == productId && it.entityType == "PRODUCT" })
     }
 
