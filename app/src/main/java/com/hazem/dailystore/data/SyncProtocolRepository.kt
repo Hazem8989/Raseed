@@ -1817,13 +1817,15 @@ class SyncProtocolRepository(private val context: Context, private val credentia
             db.beginTransaction()
             try {
                 val local = db.rawQuery(
-                    """SELECT e.sequence_number,e.payload_sha256,e.origin_device_id,q.status,e.entity_type
+                    """SELECT e.sequence_number,e.payload_sha256,e.origin_device_id,q.status,
+                              e.entity_type,e.operation_type,e.entity_id,e.payload_json
                        FROM sync_operation_envelopes e JOIN sync_queue q ON q.operation_id=e.operation_id
                        WHERE e.operation_id=?""".trimIndent(), arrayOf(operationId)
                 ).use { cursor ->
                     require(cursor.moveToFirst()) { "لا يوجد أمر محلي مطابق لإقرار التطبيق" }
                     arrayOf(cursor.getLong(0).toString(), cursor.getString(1),
-                        cursor.getString(2), cursor.getString(3), cursor.getString(4))
+                        cursor.getString(2), cursor.getString(3), cursor.getString(4),
+                        cursor.getString(5), cursor.getString(6), cursor.getString(7))
                 }
                 require(local[0].toLong() == sequence && local[1] == payloadHash &&
                     local[2] == localId) {
@@ -1867,6 +1869,45 @@ class SyncProtocolRepository(private val context: Context, private val credentia
                         }, "operation_id=? AND status IN ('PENDING','FAILED','IN_PROGRESS')",
                             arrayOf(operationId))
                         require(changed == 1) { "تعذر تثبيت إقرار التطبيق في صندوق الإرسال" }
+                    }
+                    // A signed application ACK for a credit-sale posting is the
+                    // authoritative confirmation that the primary accepted the invoice.
+                    // Reflect only its workflow status locally; stock, debt and cash
+                    // ledgers remain exclusively owned by the primary device.
+                    if (local[4] == "SALES_INVOICE" && local[5] == "POST_SALE_INVOICE") {
+                        val posted = JSONObject(local[7])
+                        require(posted.optString("business_operation") == "POST_SALE_INVOICE" &&
+                            posted.optString("id") == local[6] &&
+                            posted.optString("sale_type") == "CREDIT") {
+                            "إقرار الفاتورة لا يطابق أمر بيع آجل محلياً"
+                        }
+                        val invoiceId = local[6]
+                        val customerId = posted.optString("party_id").takeIf {
+                            it.isNotBlank() && it != "null"
+                        } ?: throw IllegalArgumentException("فاتورة الدين المؤكدة لا تحدد زبوناً")
+                        val invoice = db.rawQuery(
+                            """SELECT status,customer_id,total_usd_cents,exchange_rate_syp_per_usd_milli
+                               FROM sales_invoices WHERE id=?""".trimIndent(), arrayOf(invoiceId)
+                        ).use { c ->
+                            require(c.moveToFirst()) { "فاتورة الدين المحلية غير موجودة عند استلام الإقرار" }
+                            arrayOf(c.getString(0), c.getString(1),
+                                c.getLong(2).toString(), c.getLong(3).toString())
+                        }
+                        require(invoice[1] == customerId &&
+                            invoice[2].toLong() == posted.getLong("total_usd_cents") &&
+                            invoice[3].toLong() == posted.getLong("exchange_rate_syp_per_usd_milli") &&
+                            invoice[0] in setOf("DRAFT", "POSTED", "PARTIALLY_PAID", "PAID")) {
+                            "الفاتورة المحلية لا تطابق الفاتورة الآجلة التي اعتمدها الأساسي"
+                        }
+                        if (invoice[0] == "DRAFT") {
+                            val changed = db.update("sales_invoices", ContentValues().apply {
+                                put("status", "POSTED")
+                                put("posted_at", posted.getString("posted_at"))
+                                put("posted_operating_date", posted.getString("posted_operating_date"))
+                                put("updated_at", timestamp())
+                            }, "id=? AND status='DRAFT'", arrayOf(invoiceId))
+                            require(changed == 1) { "تعذر تثبيت اعتماد فاتورة الدين على الجهاز الثانوي" }
+                        }
                     }
                 } else {
                     val awaiting = db.rawQuery(
