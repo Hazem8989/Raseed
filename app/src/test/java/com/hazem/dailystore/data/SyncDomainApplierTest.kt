@@ -158,6 +158,71 @@ class SyncDomainApplierTest {
         assertEquals("RECEIVED", inboxStatus(conflictId))
     }
 
+    @Test fun secondaryMapsStandaloneUnitBeforeProductAndRejectsConflicts() {
+        val primaryId = primaryLocalDeviceId
+        check(context.getSharedPreferences("the_daily_shop_sync_identity", Context.MODE_PRIVATE)
+            .edit().putString("device_id", secondaryId).commit())
+        val db = database.writableDatabase
+        db.execSQL("UPDATE sync_protocol_state SET state_value='SECONDARY' WHERE state_key='local_device_role'")
+        db.execSQL("UPDATE sync_protocol_state SET state_value=? WHERE state_key='authority_device_id'", arrayOf(primaryId))
+
+        val primaryUnitId = 999_991L
+        val now = "2026-11-05T10:00:00.000Z"
+        fun receiveUnit(operationId: String, sequence: Long, name: String, symbol: String) {
+            val payload = JSONObject()
+                .put("business_operation", "UPSERT_UNIT")
+                .put("primary_unit_id", primaryUnitId)
+                .put("unit_name", name)
+                .put("unit_symbol", symbol)
+                .put("decimal_places", 2)
+            db.execSQL(
+                """INSERT INTO sync_inbox(operation_id,origin_device_id,sequence_number,operation_type,
+                   entity_type,entity_id,payload_json,payload_sha256,status,received_at,origin_created_at)
+                   VALUES(?,?,?,'CREATE','UNIT',?,?,?,'RECEIVED',?,?)""".trimIndent(),
+                arrayOf(operationId, primaryId, sequence, primaryUnitId.toString(),
+                    payload.toString(), "unit-hash-$operationId", now, now)
+            )
+        }
+
+        val unitOperationId = "primary-unit-$primaryUnitId"
+        receiveUnit(unitOperationId, 1L, "وحدة مستقلة للاختبار", "u-test")
+        val applier = SyncDomainApplier(context)
+        assertTrue(applier.applyReceivedOperation(unitOperationId).applied)
+        val mapping = db.rawQuery(
+            """SELECT secondary_unit_id,unit_name,unit_symbol,decimal_places
+               FROM sync_unit_mappings WHERE primary_device_id=? AND primary_unit_id=?""".trimIndent(),
+            arrayOf(primaryId, primaryUnitId.toString())
+        ).use { c ->
+            assertTrue(c.moveToFirst())
+            arrayOf(c.getLong(0).toString(), c.getString(1), c.getString(2), c.getInt(3).toString())
+        }
+        assertTrue("Local unit IDs must not be assumed to equal primary IDs", mapping[0].toLong() != primaryUnitId)
+        assertEquals("وحدة مستقلة للاختبار", mapping[1])
+        assertEquals("u-test", mapping[2])
+        assertEquals("2", mapping[3])
+
+        db.execSQL("UPDATE sync_inbox SET status='RECEIVED',applied_at=NULL WHERE operation_id=?", arrayOf(unitOperationId))
+        assertTrue(applier.applyReceivedOperation(unitOperationId).applied)
+        assertEquals(1, db.rawQuery(
+            "SELECT COUNT(*) FROM sync_unit_mappings WHERE primary_device_id=? AND primary_unit_id=?",
+            arrayOf(primaryId, primaryUnitId.toString())
+        ).use { c -> c.moveToFirst(); c.getInt(0) })
+
+        val conflictId = "$unitOperationId-conflict"
+        receiveUnit(conflictId, 2L, "وحدة مستقلة للاختبار", "wrong-symbol")
+        try {
+            applier.applyReceivedOperation(conflictId)
+            throw AssertionError("Expected changed unit metadata for a mapped primary ID to be rejected")
+        } catch (expected: IllegalArgumentException) {
+            assertTrue(expected.message.orEmpty().contains("مرتبط مسبقاً"))
+        }
+        assertEquals("RECEIVED", inboxStatus(conflictId))
+        assertEquals("u-test", db.rawQuery(
+            "SELECT unit_symbol FROM sync_unit_mappings WHERE primary_device_id=? AND primary_unit_id=?",
+            arrayOf(primaryId, primaryUnitId.toString())
+        ).use { c -> assertTrue(c.moveToFirst()); c.getString(0) })
+    }
+
     @Test fun pairingQueuesOrderedCategoryAndProductBootstrapSnapshot() {
         val db = database.readableDatabase
         val event = db.rawQuery(
@@ -170,6 +235,15 @@ class SyncDomainApplierTest {
         assertEquals(10.0, event.second.getDouble("opening_quantity"), 0.000001)
         assertEquals("منتج مزامنة اختباري", event.second.getString("name"))
         assertTrue(event.second.getString("unit_name").isNotBlank())
+        val primaryUnitId = event.second.getLong("primary_unit_id")
+        val unitEvent = db.rawQuery(
+            """SELECT sequence_number,payload_json FROM sync_operation_envelopes
+               WHERE entity_type='UNIT' AND entity_id=? ORDER BY sequence_number DESC LIMIT 1""".trimIndent(),
+            arrayOf(primaryUnitId.toString())
+        ).use { c -> assertTrue(c.moveToFirst()); c.getLong(0) to JSONObject(c.getString(1)) }
+        assertEquals("UPSERT_UNIT", unitEvent.second.getString("business_operation"))
+        assertEquals(primaryUnitId, unitEvent.second.getLong("primary_unit_id"))
+        assertTrue("Unit definition must be sequenced before its product", unitEvent.first < event.first)
         val primaryCategoryId = event.second.getLong("primary_category_id")
         val categorySequence = db.rawQuery(
             "SELECT sequence_number FROM sync_operation_envelopes WHERE entity_type='CATEGORY' AND sequence_number<? ORDER BY sequence_number",
