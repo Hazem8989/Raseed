@@ -56,6 +56,33 @@ class CustomerRepositoryTest {
     }
 
     @Test
+    fun primaryCustomerCreateUpdateAndDeactivationAreQueuedForSecondary() {
+        val context = RuntimeEnvironment.getApplication()
+        SyncDeviceTestKeyProvider.install()
+        SyncProtocolRepository(context).configureAsPrimary(adminId, "Customer sync primary")
+        val customer = customers.create(adminId, "زبون مزامنة ${UUID.randomUUID()}", "0999000000")
+        customers.update(adminId, customer.id, "زبون بعد التعديل", "0999111111", "عنوان", "ملاحظة")
+        customers.setActive(adminId, customer.id, false)
+        val events = database.readableDatabase.rawQuery(
+            """SELECT operation_type,payload_json FROM sync_operation_envelopes
+               WHERE entity_type='CUSTOMER' AND entity_id=? ORDER BY sequence_number""".trimIndent(),
+            arrayOf(customer.id)
+        ).use { c ->
+            val rows = mutableListOf<Pair<String, org.json.JSONObject>>()
+            while (c.moveToNext()) rows.add(c.getString(0) to org.json.JSONObject(c.getString(1)))
+            rows
+        }
+        assertEquals(3, events.size)
+        assertEquals("CREATE", events[0].first)
+        assertEquals("UPSERT_CUSTOMER", events[0].second.getString("business_operation"))
+        assertEquals("UPDATE", events[1].first)
+        assertEquals("زبون بعد التعديل", events[1].second.getString("name"))
+        assertEquals("UPDATE", events[2].first)
+        assertEquals("SET_CUSTOMER_ACTIVE", events[2].second.getString("business_operation"))
+        assertEquals(false, events[2].second.getBoolean("is_active"))
+    }
+
+    @Test
     fun creditSaleRequiresCustomerAndIsExplicitlyStored() {
         val customer = customers.create(adminId, "زبون آجل ${UUID.randomUUID()}")
         val rate = ContentValues().apply {
