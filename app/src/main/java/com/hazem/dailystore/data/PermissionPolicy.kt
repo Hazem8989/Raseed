@@ -61,7 +61,7 @@ object PermissionPolicy {
 
     // Conservative cashier defaults: sell, view/create customers, and collect customer debts.
     private val cashierDefaults = setOf(
-        SALES_CHECKOUT, CUSTOMERS_READ, CUSTOMERS_CREATE, CUSTOMERS_COLLECT, SERVICE_TRANSFERS_EXECUTE
+        SALES_CHECKOUT, CUSTOMERS_READ, CUSTOMERS_CREATE, CUSTOMERS_COLLECT
     )
 
     fun ensureDefaults(db: SQLiteDatabase) {
