@@ -235,10 +235,12 @@ class ServiceTransferRepositoryTest {
         val debt=receivables.listOpenReceivables(customerId).single()
         assertEquals(1_200L,debt.outstandingMinor)
         val paymentOperation="svc-debt-pay-"+UUID.randomUUID()
-        val first=receivables.collect(actor,transfer.transferId,paymentOperation,drawer.id,500L,"دفعة أولى")
+        val first=receivables.collect(actor,transfer.transferId,paymentOperation,wallet,500L,"دفعة أولى عبر محفظة الرصيد")
         assertEquals(500L,first.paidMinor)
         assertEquals(700L,first.outstandingMinor)
-        assertEquals(500L,accounts.balance(drawer.id))
+        assertEquals(0L,accounts.balance(drawer.id))
+        assertEquals("تحصيل الدين في محفظة الخدمة يزيدها بالمبلغ المقبوض فقط",9_500L,
+            repo.listWallets().single{it.serviceKey==ServiceTransferRepository.SYRIATEL_SHARED}.balanceMinor)
         val partialProfit=repo.dailySummary().single{it.serviceType==ServiceTransferRepository.SYRIATEL_BALANCE}
         assertEquals("يُحتسب ربح الجزء المحصل فقط",83L,partialProfit.profitMinor)
         assertEquals(83L,repo.listTransfers().first().profitMinor)
@@ -249,9 +251,10 @@ class ServiceTransferRepositoryTest {
         assertEquals(700L,partialStatement.closingBalanceSypMinor)
         assertEquals(1_200L,partialStatement.entries.single{it.type=="SERVICE_TRANSFER_CREDIT"}.debitSypMinor)
         assertEquals(500L,partialStatement.entries.single{it.type=="SERVICE_TRANSFER_COLLECTION"}.creditSypMinor)
-        val replay=receivables.collect(actor,transfer.transferId,paymentOperation,drawer.id,500L,"دفعة أولى")
+        val replay=receivables.collect(actor,transfer.transferId,paymentOperation,wallet,500L,"دفعة أولى عبر محفظة الرصيد")
         assertTrue(replay.replayed)
-        assertEquals(500L,accounts.balance(drawer.id))
+        assertEquals(0L,accounts.balance(drawer.id))
+        assertEquals(9_500L,repo.listWallets().single{it.serviceKey==ServiceTransferRepository.SYRIATEL_SHARED}.balanceMinor)
         try {
             receivables.collect(actor,transfer.transferId,"svc-overpay-"+UUID.randomUUID(),drawer.id,701L)
             throw AssertionError("Over-collection must be rejected")
@@ -264,7 +267,8 @@ class ServiceTransferRepositoryTest {
         assertEquals(0L,final.outstandingMinor)
         val finalReplay=receivables.collect(actor,transfer.transferId,finalOperation,drawer.id,700L,"دفعة أخيرة")
         assertTrue(finalReplay.replayed)
-        assertEquals(1_200L,accounts.balance(drawer.id))
+        assertEquals(700L,accounts.balance(drawer.id))
+        assertEquals(9_500L,repo.listWallets().single{it.serviceKey==ServiceTransferRepository.SYRIATEL_SHARED}.balanceMinor)
         val finalProfit=repo.dailySummary().single{it.serviceType==ServiceTransferRepository.SYRIATEL_BALANCE}
         assertEquals("يكتمل الربح عند تحصيل كامل الذمة",200L,finalProfit.profitMinor)
         assertEquals(200L,repo.listTransfers().first().profitMinor)
