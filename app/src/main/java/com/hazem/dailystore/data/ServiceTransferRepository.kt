@@ -277,10 +277,14 @@ class ServiceTransferRepository(context:Context) {
                 put("created_at",now);put("operating_date",eventDate);put("status","POSTED")
             }
             db.insertOrThrow("service_transfers",null,v)
-            if(paymentMode=="CREDIT") db.insertOrThrow("service_transfer_receivables",null,ContentValues().apply {
-                put("transfer_id",id);put("customer_id",customerId);put("original_amount_minor",charge)
-                put("status","OPEN");put("note",note);put("created_at",now)
-            })
+            if(paymentMode=="CREDIT") {
+                db.insertOrThrow("service_transfer_receivables",null,ContentValues().apply {
+                    put("transfer_id",id);put("customer_id",customerId);put("original_amount_minor",charge)
+                    put("status","OPEN");put("note",note);put("created_at",now)
+                })
+                if(!syncOrigin) ServiceTransferReceivableRepository(appContext)
+                    .enqueueMirrorSnapshot(db,actor,id,operationId)
+            }
             insertWalletMovement(db,serviceKey,"OUT",deliveredMinor,"TRANSFER_OUT",id,operationId,0L,note?:serviceTypeName(serviceType),actor,now,null,eventDate)
             if(paymentMode=="CASH") insertCashMovement(db,effectiveReceiptAccountId,"IN",charge,"SERVICE_TRANSFER_RECEIPT","SERVICE_TRANSFER",id,operationId+":RECEIPT",actor,
                 "مقبوض تحويل رصيد • ${serviceTypeName(serviceType)} • ربح $profit ل.س • رسوم الشركة $providerFeeMinor ل.س",now,eventDate)
