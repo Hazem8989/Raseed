@@ -983,8 +983,8 @@ class TwoDeviceSyncIntegrationTest {
         serviceRepo.setOpeningBalance(primaryAdminId,ServiceTransferRepository.SYRIATEL_SHARED,50_000L,"رصيد اختبار")
         val transferOperation=UUID.randomUUID().toString()
         val transfer=serviceRepo.executeTransfer(
-            primaryAdminId,ServiceTransferRepository.SYRIATEL_BALANCE,10_000L,0L,
-            serviceRepo.serviceAccountId(ServiceTransferRepository.SYRIATEL_SHARED),
+            primaryAdminId,ServiceTransferRepository.SHAM_CASH_TRANSFER,10_000L,0L,
+            serviceRepo.serviceAccountId(ServiceTransferRepository.SHAM_CASH),
             transferOperation,paymentMode="CREDIT",customerId=customer.id
         )
         assertEquals(12_000L,transfer.customerChargeMinor)
@@ -1214,11 +1214,11 @@ class TwoDeviceSyncIntegrationTest {
         setLocalDeviceId(primaryId);AppDatabase.installForTests(primaryDb)
         val customer=CustomerRepository(context).create(primaryAdminId,"زبون تحويل ثانوي "+UUID.randomUUID())
         val serviceRepo=ServiceTransferRepository(context)
-        serviceRepo.setOpeningBalance(primaryAdminId,ServiceTransferRepository.SYRIATEL_SHARED,30_000L,"رصيد اختبار")
+        serviceRepo.setOpeningBalance(primaryAdminId,ServiceTransferRepository.SHAM_CASH,30_000L,"رصيد اختبار")
         val referenceItems=primaryRepository.pendingOutboxForDevice(secondaryId)
         assertTrue("The service wallet account must be mirrored with its service identity",
             referenceItems.any { it.entityType=="CASH_ACCOUNT" &&
-                JSONObject(it.payloadJson).optString("service_wallet_key")==ServiceTransferRepository.SYRIATEL_SHARED })
+                JSONObject(it.payloadJson).optString("service_wallet_key")==ServiceTransferRepository.SHAM_CASH })
 
         val referenceAcks=mutableMapOf<String,String>()
         var referenceError:String?=null
@@ -1251,11 +1251,11 @@ class TwoDeviceSyncIntegrationTest {
             .serviceAccountId(ServiceTransferRepository.SYRIATEL_SHARED)
         assertTrue("The secondary must receive the service-wallet link, not seed it locally",
             scalar(secondaryDb,"SELECT COUNT(*) FROM service_wallet_account_links WHERE service_key=? AND account_id=?",
-                ServiceTransferRepository.SYRIATEL_SHARED,mirroredServiceAccount)==1)
+                ServiceTransferRepository.SHAM_CASH,mirroredServiceAccount)==1)
         var secondaryCashTransferRejected=false
         try {
             ServiceTransferRepository(context).executeTransfer(
-                secondaryAdminId,ServiceTransferRepository.SYRIATEL_BALANCE,1_000L,0L,
+                secondaryAdminId,ServiceTransferRepository.SHAM_CASH_TRANSFER,1_000L,0L,
                 mirroredServiceAccount,UUID.randomUUID().toString(),paymentMode="CASH"
             )
         } catch(_:IllegalArgumentException) { secondaryCashTransferRejected=true }
@@ -1263,7 +1263,7 @@ class TwoDeviceSyncIntegrationTest {
 
         val transferOperation=UUID.randomUUID().toString()
         val pendingTransfer=ServiceTransferRepository(context).executeTransfer(
-            secondaryAdminId,ServiceTransferRepository.SYRIATEL_BALANCE,10_000L,0L,
+            secondaryAdminId,ServiceTransferRepository.SHAM_CASH_TRANSFER,10_000L,0L,
             mirroredServiceAccount,transferOperation,paymentMode="CREDIT",customerId=customer.id
         )
         assertEquals("pending-service-transfer-$transferOperation",pendingTransfer.transferId)
@@ -1294,8 +1294,8 @@ class TwoDeviceSyncIntegrationTest {
         assertEquals(1,scalar(primaryDb,"SELECT COUNT(*) FROM service_transfer_receivables WHERE transfer_id=?",transferId))
         assertEquals(0,scalar(primaryDb,
             "SELECT COUNT(*) FROM cash_transactions WHERE source_id=? AND transaction_type='SERVICE_TRANSFER_RECEIPT'",transferId))
-        assertEquals(20_000L,serviceRepo.listWallets().single{it.serviceKey==ServiceTransferRepository.SYRIATEL_SHARED}.balanceMinor)
-        assertEquals(12_000L,ServiceTransferReceivableRepository(context).listOpenReceivables(customer.id).single().outstandingMinor)
+        assertEquals(20_000L,serviceRepo.listWallets().single{it.serviceKey==ServiceTransferRepository.SHAM_CASH}.balanceMinor)
+        assertEquals(10_500L,ServiceTransferReceivableRepository(context).listOpenReceivables(customer.id).single().outstandingMinor)
 
         setLocalDeviceId(secondaryId);AppDatabase.installForTests(secondaryDb)
         SyncRelayProcessor(secondaryRepository,SyncDomainApplier(context),sendFrame={_,_,_->true})
@@ -1320,7 +1320,7 @@ class TwoDeviceSyncIntegrationTest {
             }
         ).onEncryptedFrame(primaryId,debtSnapshot.operationId,debtFrame)
         assertEquals("فشل استلام ذمة التحويل على الثانوي: $debtError",null,debtError)
-        assertEquals(12_000L,ServiceTransferReceivableRepository(context)
+        assertEquals(10_500L,ServiceTransferReceivableRepository(context)
             .listOpenReceivables(customer.id).single().outstandingMinor)
         setLocalDeviceId(primaryId);AppDatabase.installForTests(primaryDb)
         SyncRelayProcessor(primaryRepository,SyncDomainApplier(context),sendFrame={_,_,_->true})
