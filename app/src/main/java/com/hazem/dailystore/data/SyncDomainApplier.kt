@@ -1209,6 +1209,14 @@ class SyncDomainApplier(context: Context) {
                 db.setTransactionSuccessful()
                 return@synchronized ApplyResult(operationId,true)
             }
+            val serviceType=payload.getString("service_type")
+            require(serviceType in setOf(
+                ServiceTransferRepository.SYRIATEL_BALANCE,
+                ServiceTransferRepository.SYRIATEL_CASH,
+                ServiceTransferRepository.SHAM_CASH_TRANSFER
+            )) { "نوع خدمة التحويل الوارد غير مدعوم" }
+            val expectedKey=if(serviceType==ServiceTransferRepository.SHAM_CASH_TRANSFER) ServiceTransferRepository.SHAM_CASH else ServiceTransferRepository.SYRIATEL_SHARED
+            require(payload.getString("service_key")==expectedKey) { "محفظة الخدمة لا تطابق نوع التحويل" }
             val remoteAccount=payload.getString("cash_account_id")
             val remoteType=payload.getString("cash_account_type")
             val remoteCurrency=payload.getString("cash_account_currency_code")
@@ -1232,14 +1240,6 @@ class SyncDomainApplier(context: Context) {
             val occurredAt=payload.getString("occurred_at")
             val operatingDate=payload.getString("operating_date")
             require(occurredAt.matches(Regex("\\d{4}-\\d{2}-\\d{2}T.*")) && operatingDate.matches(Regex("\\d{4}-\\d{2}-\\d{2}"))) { "تاريخ أو وقت التحويل الأصلي غير صالح" }
-            val serviceType=payload.getString("service_type")
-            require(serviceType in setOf(
-                ServiceTransferRepository.SYRIATEL_BALANCE,
-                ServiceTransferRepository.SYRIATEL_CASH,
-                ServiceTransferRepository.SHAM_CASH_TRANSFER
-            )) { "نوع خدمة التحويل الوارد غير مدعوم" }
-            val expectedKey=if(serviceType==ServiceTransferRepository.SHAM_CASH_TRANSFER) ServiceTransferRepository.SHAM_CASH else ServiceTransferRepository.SYRIATEL_SHARED
-            require(payload.getString("service_key")==expectedKey) { "محفظة الخدمة لا تطابق نوع التحويل" }
             val delivered=payload.getLong("delivered_minor")
             val providerFee=payload.getLong("provider_fee_minor")
             require(payload.getLong("profit_minor")>=0L && payload.getLong("customer_charge_minor")>0L) { "قيم ربح أو قبض التحويل غير صالحة" }
