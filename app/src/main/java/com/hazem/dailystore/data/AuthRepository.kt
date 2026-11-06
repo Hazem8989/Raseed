@@ -133,7 +133,12 @@ class AuthRepository(context: Context) {
                 .getOrDefault(false)
         } ?: false
         if (!valid || user == null) {
-            val priorFailures = if (attempt == null || attempt.second <= nowMillis) 0 else attempt.first
+            val priorFailures = when {
+                attempt == null -> 0
+                attempt.second == 0L -> attempt.first
+                attempt.second <= nowMillis -> 0
+                else -> attempt.first
+            }
             val failures = priorFailures + 1
             val lockUntil = if (failures >= MAX_LOGIN_FAILURES) nowMillis + LOGIN_LOCK_MS else 0L
             db.insertWithOnConflict("auth_login_attempts", null, ContentValues().apply {
