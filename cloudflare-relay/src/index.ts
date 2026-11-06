@@ -120,7 +120,7 @@ async function readJsonLimited<T>(request: Request, maxBytes: number): Promise<T
     bytes.set(chunk, offset);
     offset += chunk.byteLength;
   }
-  return JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(bytes)) as T;
+  return JSON.parse(new TextDecoder("utf-8", { fatal: true, ignoreBOM: false }).decode(bytes)) as T;
 }
 
 async function verifyCertificate(env: Env, storeId: string, deviceId: string, cert: DeviceCertificate): Promise<boolean> {
