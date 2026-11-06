@@ -208,8 +208,12 @@ class ServiceTransferRepository(context:Context) {
             if(localRole=="SECONDARY") PermissionPolicy.requireAssigned(db,actor,PermissionPolicy.SERVICE_TRANSFERS_EXECUTE)
             else PermissionPolicy.require(db,actor,PermissionPolicy.SERVICE_TRANSFERS_EXECUTE)
             if(paymentMode=="CREDIT") {
-                require(localRole==null || localRole=="PRIMARY"){"إنشاء ديون تحويل الرصيد متاح من الجهاز الأساسي فقط"}
-                ensureSystemAccounts(db)
+                require(localRole==null || localRole in setOf("PRIMARY","SECONDARY")) {
+                    "دور الجهاز غير صالح لإنشاء ذمم تحويل الرصيد"
+                }
+                // The secondary may only queue a deferred transfer. It must never seed
+                // financial accounts or post a local wallet/cash movement.
+                if(localRole!="SECONDARY") ensureSystemAccounts(db)
             }
             val effectiveReceiptAccountId=if(paymentMode=="CREDIT") serviceAccountId(db,serviceKey) else receiptAccountId
             val account=receiptAccount(db,effectiveReceiptAccountId)
@@ -246,9 +250,11 @@ class ServiceTransferRepository(context:Context) {
                 }
             }
             if(localRole=="SECONDARY") {
-                require(walletBalance(db,serviceKey)>=deliveredMinor){"رصيد ${serviceName(serviceKey)} المحلي غير كافٍ؛ تحقق من المزامنة قبل إرسال التحويل"}
+                require(paymentMode=="CREDIT") {
+                    "الجهاز الثانوي يستطيع تسجيل تحويل رصيد آجل فقط؛ التحويل النقدي وإدارة المحافظ على الجهاز الأساسي"
+                }
                 val pendingId="pending-service-transfer-$operationId"
-                val command=org.json.JSONObject().put("business_operation","EXECUTE_SERVICE_TRANSFER")
+                val command=org.json.JSONObject().put("business_operation","EXECUTE_SERVICE_TRANSFER_CREDIT")
                     .put("service_type",serviceType).put("service_key",serviceKey)
                     .put("delivered_minor",deliveredMinor).put("provider_fee_minor",providerFeeMinor)
                     .put("profit_minor",profit).put("customer_charge_minor",charge)
