@@ -610,11 +610,42 @@ class AppDatabase internal constructor(context: Context, databaseName: String = 
                 version = 32
             } finally { db.endTransaction() }
         }
+        if (version < 33) {
+            db.beginTransaction()
+            try {
+                ensureServiceTransferPrecisionSchema(db)
+                db.setTransactionSuccessful()
+                version = 33
+            } finally { db.endTransaction() }
+        }
         if (version != newVersion) {
             throw IllegalStateException("Missing database migration from version $version to $newVersion")
         }
     }
 
+
+    /** Adds exact milli-SYP service-transfer values without rewriting legacy financial entries. */
+    private fun ensureServiceTransferPrecisionSchema(db: SQLiteDatabase) {
+        fun hasColumn(table: String, column: String): Boolean =
+            db.rawQuery("PRAGMA table_info($table)", null).use { c ->
+                var found = false
+                while (c.moveToNext()) if (c.getString(1) == column) found = true
+                found
+            }
+        if (!hasColumn("service_transfers", "amount_debited_minor"))
+            db.execSQL("ALTER TABLE service_transfers ADD COLUMN amount_debited_minor INTEGER NOT NULL DEFAULT 0")
+        if (!hasColumn("service_transfers", "amount_delivered_milli_syp"))
+            db.execSQL("ALTER TABLE service_transfers ADD COLUMN amount_delivered_milli_syp INTEGER NOT NULL DEFAULT 0")
+        if (!hasColumn("service_transfers", "profit_milli_syp"))
+            db.execSQL("ALTER TABLE service_transfers ADD COLUMN profit_milli_syp INTEGER NOT NULL DEFAULT 0")
+        db.execSQL("UPDATE service_transfers SET amount_debited_minor=amount_delivered_minor WHERE amount_debited_minor=0")
+        db.execSQL("UPDATE service_transfers SET amount_delivered_milli_syp=amount_delivered_minor*1000 WHERE amount_delivered_milli_syp=0")
+        db.execSQL("UPDATE service_transfers SET profit_milli_syp=profit_minor*1000 WHERE profit_milli_syp=0")
+        if (!hasColumn("service_transfer_receivable_mirrors", "delivered_milli_syp")) {
+            db.execSQL("ALTER TABLE service_transfer_receivable_mirrors ADD COLUMN delivered_milli_syp INTEGER NOT NULL DEFAULT 0")
+            db.execSQL("UPDATE service_transfer_receivable_mirrors SET delivered_milli_syp=delivered_minor*1000 WHERE delivered_milli_syp=0")
+        }
+    }
 
     /** Read-only receivable mirrors on secondary devices; no cash or ledger rows are created here. */
     private fun ensureServiceTransferReceivableSyncSchema(db: SQLiteDatabase) {
@@ -1234,7 +1265,7 @@ class AppDatabase internal constructor(context: Context, databaseName: String = 
 
     companion object {
         const val DATABASE_NAME = "the_daily_shop.db"
-        const val DATABASE_VERSION = 32
+        const val DATABASE_VERSION = 33
 
         @Volatile
         private var INSTANCE: AppDatabase? = null
