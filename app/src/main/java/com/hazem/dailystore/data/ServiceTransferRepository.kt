@@ -227,13 +227,19 @@ class ServiceTransferRepository(context:Context) {
         val profitRate=when(serviceType){SYRIATEL_BALANCE->20L;SYRIATEL_CASH->10L;else->5L}
         // For Syriatel Balance, input is the amount deducted from the trader wallet.
         // Keep delivered amount and profit exact in milli-SYP; round only the customer charge.
-        val amountDebitedMinor=deliveredMinor
+        // Company/provider fees are the shop owner's cost, never part of the customer's charge.
+        // For Syriatel Cash the fee is deducted from the service float in addition to the delivered amount.
+        val amountDebitedMinor=when(serviceType) {
+            SYRIATEL_BALANCE -> deliveredMinor
+            SYRIATEL_CASH -> Math.addExact(deliveredMinor,providerFeeMinor)
+            else -> deliveredMinor
+        }
         val deliveredMilliSyp=if(serviceType==SYRIATEL_BALANCE && !legacyBalanceDelivered) roundRatioMilli(amountDebitedMinor,41340L,43L) else Math.multiplyExact(deliveredMinor,1000L)
         val profitMilliSyp=roundRatioMilli(deliveredMilliSyp,profitRate,100L)
         val deliveredDisplayMinor=roundMilliToWhole(deliveredMilliSyp)
         val profit=roundMilliToWhole(profitMilliSyp)
-        val charge=roundMilliToWhole(Math.addExact(Math.addExact(deliveredMilliSyp,profitMilliSyp),Math.multiplyExact(providerFeeMinor,1000L)))
-        val walletDebitMinor=if(serviceType==SYRIATEL_BALANCE) amountDebitedMinor else deliveredMinor
+        val charge=roundMilliToWhole(Math.addExact(deliveredMilliSyp,profitMilliSyp))
+        val walletDebitMinor=amountDebitedMinor
         val db=database.writableDatabase;db.beginTransaction()
         try {
             val localRole=db.rawQuery("SELECT state_value FROM sync_protocol_state WHERE state_key='local_device_role'",null).use{if(it.moveToFirst())it.getString(0)else null}
@@ -331,7 +337,7 @@ class ServiceTransferRepository(context:Context) {
             }
             insertWalletMovement(db,serviceKey,"OUT",walletDebitMinor,"TRANSFER_OUT",id,operationId,0L,note?:serviceTypeName(serviceType),actor,now,null,eventDate)
             if(paymentMode=="CASH") insertCashMovement(db,effectiveReceiptAccountId,"IN",charge,"SERVICE_TRANSFER_RECEIPT","SERVICE_TRANSFER",id,operationId+":RECEIPT",actor,
-                "مقبوض تحويل رصيد • ${serviceTypeName(serviceType)} • ربح $profit ل.س • رسوم الشركة $providerFeeMinor ل.س",now,eventDate)
+                "مقبوض تحويل رصيد • ${serviceTypeName(serviceType)} • ربح $profit ل.س",now,eventDate)
             if(!syncOrigin) {
                 val syncPayload=org.json.JSONObject().put("business_operation","EXECUTE_SERVICE_TRANSFER")
                     .put("service_type",serviceType).put("service_key",serviceKey)
