@@ -55,7 +55,7 @@ class ServiceTransferRepositoryTest {
         accounts.setCurrentDayPrimaryDrawer("ADMIN", actor, drawer.id)
         repo.setOpeningBalance(actor, ServiceTransferRepository.SYRIATEL_SHARED, 100_000L)
         val first = repo.executeTransfer(actor, ServiceTransferRepository.SYRIATEL_BALANCE,
-            10_000L, 500L, drawer.id, "svc-normal-" + UUID.randomUUID())
+            10_000L, 500L, drawer.id, "svc-normal-" + UUID.randomUUID(),legacyBalanceDelivered=true)
         assertFalse(first.replayed)
         assertEquals(2_000L, first.profitMinor)
         assertEquals(12_500L, first.customerChargeMinor)
@@ -139,7 +139,7 @@ class ServiceTransferRepositoryTest {
         val collection = repo.serviceAccountId(ServiceTransferRepository.SYRIATEL_SHARED)
         repo.setOpeningBalance(actor, ServiceTransferRepository.SYRIATEL_SHARED, 40_000L)
         val result = repo.executeTransfer(actor, ServiceTransferRepository.SYRIATEL_BALANCE,
-            5_000L, 0L, collection, "svc-electronic-" + UUID.randomUUID())
+            5_000L, 0L, collection, "svc-electronic-" + UUID.randomUUID(),legacyBalanceDelivered=true)
         assertEquals(41_000L, accounts.balance(collection))
         assertEquals(41_000L, repo.listWallets().single { it.serviceKey == ServiceTransferRepository.SYRIATEL_SHARED }.balanceMinor)
         assertEquals("ELECTRONIC", repo.listTransfers().first().receiptChannel)
@@ -189,7 +189,7 @@ class ServiceTransferRepositoryTest {
         val walletId = repo.serviceAccountId(ServiceTransferRepository.SYRIATEL_SHARED)
         repo.setOpeningBalance(actor, ServiceTransferRepository.SYRIATEL_SHARED, 40_000L)
         repo.executeTransfer(actor, ServiceTransferRepository.SYRIATEL_BALANCE,
-            5_000L, 0L, walletId, "svc-wallet-receipt-" + UUID.randomUUID())
+            5_000L, 0L, walletId, "svc-wallet-receipt-" + UUID.randomUUID(),legacyBalanceDelivered=true)
         assertEquals(41_000L, accounts.balance(walletId))
         dailyTransferToCash(walletId, drawer.id, 6_000L)
         assertEquals(35_000L, accounts.balance(walletId))
@@ -213,7 +213,7 @@ class ServiceTransferRepositoryTest {
         repo.setOpeningBalance(actor,ServiceTransferRepository.SYRIATEL_SHARED,10_000L)
         val operationId="svc-credit-"+UUID.randomUUID()
         val transfer=repo.executeTransfer(actor,ServiceTransferRepository.SYRIATEL_BALANCE,1_000L,0L,wallet,operationId,
-            paymentMode="CREDIT",customerId=customerId)
+            paymentMode="CREDIT",customerId=customerId,legacyBalanceDelivered=true)
         assertEquals(1_000L,transfer.deliveredMinor)
         assertEquals(1_200L,transfer.customerChargeMinor)
         assertEquals(0L,accounts.balance(drawer.id))
@@ -293,7 +293,7 @@ class ServiceTransferRepositoryTest {
         accounts.setCurrentDayPrimaryDrawer("ADMIN", actor, drawer.id)
         repo.setOpeningBalance(actor, ServiceTransferRepository.SYRIATEL_SHARED, 5_000L)
         val transfer = repo.executeTransfer(actor, ServiceTransferRepository.SYRIATEL_BALANCE,
-            1_000L, 0L, drawer.id, "svc-reverse-" + UUID.randomUUID())
+            1_000L, 0L, drawer.id, "svc-reverse-" + UUID.randomUUID(),legacyBalanceDelivered=true)
         assertEquals(1_200L, accounts.balance(drawer.id))
         val reversalOperation = "svc-reverse-action-" + UUID.randomUUID()
         repo.reverseTransfer(actor, transfer.transferId, reversalOperation, "إدخال خاطئ")
@@ -318,7 +318,7 @@ class ServiceTransferRepositoryTest {
         accounts.setCurrentDayPrimaryDrawer("ADMIN", actor, drawer.id)
         repo.setOpeningBalance(actor, ServiceTransferRepository.SYRIATEL_SHARED, 10_000L)
         val op = "svc-idempotent-" + UUID.randomUUID()
-        val first = repo.executeTransfer(actor, ServiceTransferRepository.SYRIATEL_BALANCE, 2_000L, 0L, drawer.id, op)
+        val first = repo.executeTransfer(actor, ServiceTransferRepository.SYRIATEL_BALANCE, 2_000L, 0L, drawer.id, op,legacyBalanceDelivered=true)
         val legacyHash=java.security.MessageDigest.getInstance("SHA-256")
             .digest("${ServiceTransferRepository.SYRIATEL_BALANCE}|2000|0|${drawer.id}|null|null".toByteArray(Charsets.UTF_8))
             .joinToString(""){"%02x".format(it)}
@@ -329,7 +329,7 @@ class ServiceTransferRepositoryTest {
         assertEquals(2_400L, accounts.balance(drawer.id))
         assertEquals(8_000L, repo.listWallets().single { it.serviceKey == ServiceTransferRepository.SYRIATEL_SHARED }.balanceMinor)
         try {
-            repo.executeTransfer(actor, ServiceTransferRepository.SYRIATEL_BALANCE, 9_000L, 0L, drawer.id, "svc-too-large-" + UUID.randomUUID())
+            repo.executeTransfer(actor, ServiceTransferRepository.SYRIATEL_BALANCE, 9_000L, 0L, drawer.id, "svc-too-large-" + UUID.randomUUID(),legacyBalanceDelivered=true)
             throw AssertionError("Expected insufficient service float")
         } catch (expected: IllegalArgumentException) {
             assertTrue(expected.message!!.contains("غير كافٍ"))
@@ -344,7 +344,7 @@ class ServiceTransferRepositoryTest {
         val operationId = "svc-store-date-" + UUID.randomUUID()
         val result = repo.executeTransfer(
             actor, ServiceTransferRepository.SYRIATEL_BALANCE, 1_000L, 0L,
-            drawer.id, operationId
+            drawer.id, operationId,legacyBalanceDelivered=true
         )
         val expectedDate = StoreTime.today(database.readableDatabase)
         val transferDate = database.readableDatabase.rawQuery(
