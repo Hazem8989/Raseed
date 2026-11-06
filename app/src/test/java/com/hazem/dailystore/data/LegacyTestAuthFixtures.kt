@@ -24,7 +24,7 @@ internal fun AuthRepository.ensureInitialAdmin(): String {
     } finally {
         spec.clearPassword()
     }
-    val db = AppDatabase.getInstance(androidx.test.core.app.ApplicationProvider.getApplicationContext())
+    val db = AppDatabase.getInstance(org.robolectric.RuntimeEnvironment.getApplication())
     db.writableDatabase.update(
         "users",
         ContentValues().apply {
