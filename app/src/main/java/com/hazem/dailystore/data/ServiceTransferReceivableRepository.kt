@@ -65,13 +65,14 @@ class ServiceTransferReceivableRepository(context:Context) {
             }
             PermissionPolicy.require(db,actorUserId,PermissionPolicy.CUSTOMERS_COLLECT)
             val transfer=db.rawQuery(
-                """SELECT t.customer_charge_minor,t.status,r.status
+                """SELECT t.customer_charge_minor,t.status,r.status,r.original_amount_minor
                    FROM service_transfers t JOIN service_transfer_receivables r ON r.transfer_id=t.id
                    WHERE t.id=?""".trimIndent(),arrayOf(transferId)
             ).use{c->
                 require(c.moveToFirst()){"دين تحويل الرصيد غير موجود"}
-                arrayOf(c.getLong(0).toString(),c.getString(1),c.getString(2))
+                arrayOf(c.getLong(0).toString(),c.getString(1),c.getString(2),c.getLong(3).toString())
             }
+            require(transfer[0]==transfer[3]){"مبلغ الذمة لا يطابق مبلغ التحويل المسجل؛ أوقف التحصيل لحين التدقيق"}
             val existing=db.rawQuery(
                 "SELECT id,transfer_id,amount_minor,payload_hash FROM service_transfer_receivable_payments WHERE operation_id=?",
                 arrayOf(operationId)

@@ -209,9 +209,6 @@ class ServiceTransferRepository(context:Context) {
             else PermissionPolicy.require(db,actor,PermissionPolicy.SERVICE_TRANSFERS_EXECUTE)
             if(paymentMode=="CREDIT") {
                 require(localRole==null || localRole=="PRIMARY"){"إنشاء ديون تحويل الرصيد متاح من الجهاز الأساسي فقط"}
-                require(db.rawQuery("SELECT 1 FROM customers WHERE id=? AND is_active=1",arrayOf(customerId)).use{it.moveToFirst()}) {
-                    "الزبون غير موجود أو موقوف"
-                }
                 ensureSystemAccounts(db)
             }
             val effectiveReceiptAccountId=if(paymentMode=="CREDIT") serviceAccountId(db,serviceKey) else receiptAccountId
@@ -231,7 +228,10 @@ class ServiceTransferRepository(context:Context) {
                     require(primary==effectiveReceiptAccountId){"القبض النقدي يجب أن يذهب إلى درج اليوم الرئيسي"}
                 } else require(account.first=="WALLET"){"حساب الاستلام يجب أن يكون درجاً نقدياً أو محفظة إلكترونية"}
             }
-            val payload=hash("$serviceType|$deliveredMinor|$providerFeeMinor|$effectiveReceiptAccountId|$paymentMode|${customerId.orEmpty()}|$reference|$note")
+            // Preserve the historical cash-operation hash so pending pre-upgrade retries remain idempotent.
+            val payload=if(paymentMode=="CASH")
+                hash("$serviceType|$deliveredMinor|$providerFeeMinor|$effectiveReceiptAccountId|$reference|$note")
+            else hash("$serviceType|$deliveredMinor|$providerFeeMinor|$effectiveReceiptAccountId|$paymentMode|${customerId.orEmpty()}|$reference|$note")
             val old=db.rawQuery("SELECT id,service_type,amount_delivered_minor,profit_minor,provider_fee_minor,customer_charge_minor,payload_hash,payment_mode,customer_id FROM service_transfers WHERE operation_id=?",arrayOf(operationId)).use{
                 if(it.moveToFirst()) arrayOf(it.getString(0),it.getString(1),it.getLong(2).toString(),it.getLong(3).toString(),it.getLong(4).toString(),it.getLong(5).toString(),it.getString(6),it.getString(7),if(it.isNull(8)) "" else it.getString(8)) else null
             }
@@ -239,6 +239,11 @@ class ServiceTransferRepository(context:Context) {
                 require(old[1]==serviceType&&old[2]==deliveredMinor.toString()&&old[3]==profit.toString()&&old[4]==providerFeeMinor.toString()&&old[5]==charge.toString()&&old[6]==payload&&old[7]==paymentMode&&old[8]==customerId.orEmpty()){"معرّف التحويل مستخدم لبيانات مختلفة"}
                 db.setTransactionSuccessful()
                 return ServiceTransferResult(old[0]!!,deliveredMinor,profit,providerFeeMinor,charge,true)
+            }
+            if(paymentMode=="CREDIT") {
+                require(db.rawQuery("SELECT 1 FROM customers WHERE id=? AND is_active=1",arrayOf(customerId)).use{it.moveToFirst()}) {
+                    "الزبون غير موجود أو موقوف"
+                }
             }
             if(localRole=="SECONDARY") {
                 require(walletBalance(db,serviceKey)>=deliveredMinor){"رصيد ${serviceName(serviceKey)} المحلي غير كافٍ؛ تحقق من المزامنة قبل إرسال التحويل"}

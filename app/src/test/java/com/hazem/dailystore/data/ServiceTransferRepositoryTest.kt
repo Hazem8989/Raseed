@@ -276,6 +276,10 @@ class ServiceTransferRepositoryTest {
         repo.setOpeningBalance(actor, ServiceTransferRepository.SYRIATEL_SHARED, 10_000L)
         val op = "svc-idempotent-" + UUID.randomUUID()
         val first = repo.executeTransfer(actor, ServiceTransferRepository.SYRIATEL_BALANCE, 2_000L, 0L, drawer.id, op)
+        val legacyHash=java.security.MessageDigest.getInstance("SHA-256")
+            .digest("${ServiceTransferRepository.SYRIATEL_BALANCE}|2000|0|${drawer.id}|null|null".toByteArray(Charsets.UTF_8))
+            .joinToString(""){"%02x".format(it)}
+        database.writableDatabase.execSQL("UPDATE service_transfers SET payload_hash=? WHERE operation_id=?",arrayOf(legacyHash,op))
         val replay = repo.executeTransfer(actor, ServiceTransferRepository.SYRIATEL_BALANCE, 2_000L, 0L, drawer.id, op)
         assertFalse(first.replayed)
         assertTrue(replay.replayed)
