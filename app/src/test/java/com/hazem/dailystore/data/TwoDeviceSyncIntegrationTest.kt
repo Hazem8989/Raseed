@@ -1308,6 +1308,13 @@ class TwoDeviceSyncIntegrationTest {
             "SELECT id FROM service_transfers WHERE operation_id=?",arrayOf(transferOperation)
         ).use{c->assertTrue(c.moveToFirst());c.getString(0)}
         assertEquals(1,scalar(primaryDb,"SELECT COUNT(*) FROM service_transfer_receivables WHERE transfer_id=?",transferId))
+        val exactTransfer=primaryDb.readableDatabase.rawQuery(
+            "SELECT amount_debited_minor,amount_delivered_milli_syp,profit_milli_syp FROM service_transfers WHERE id=?",
+            arrayOf(transferId)
+        ).use{c->assertTrue(c.moveToFirst());Triple(c.getLong(0),c.getLong(1),c.getLong(2))}
+        assertEquals(10_000L,exactTransfer.first)
+        assertEquals(9_613_953L,exactTransfer.second)
+        assertEquals(1_922_791L,exactTransfer.third)
         assertEquals(0,scalar(primaryDb,
             "SELECT COUNT(*) FROM cash_transactions WHERE source_id=? AND transaction_type='SERVICE_TRANSFER_RECEIPT'",transferId))
         assertEquals(20_000L,serviceRepo.listWallets().single{it.serviceKey==ServiceTransferRepository.SYRIATEL_SHARED}.balanceMinor)
