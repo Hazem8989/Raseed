@@ -92,10 +92,10 @@ class ServiceTransferRepository(context:Context) {
                FROM (
                  SELECT service_type,COUNT(*) operation_count,COALESCE(SUM(amount_delivered_minor),0) delivered_minor,
                         COALESCE(SUM(CASE WHEN payment_mode='CASH' THEN customer_charge_minor ELSE 0 END),0) customer_receipts_minor,
-                        COALESCE(SUM(profit_minor),0) profit_minor,COALESCE(SUM(provider_fee_minor),0) provider_fee_minor,
+                        COALESCE(SUM(CASE WHEN payment_mode='CASH' THEN profit_minor ELSE 0 END),0) profit_minor,COALESCE(SUM(provider_fee_minor),0) provider_fee_minor,
                         COALESCE(SUM(CASE WHEN payment_mode='CREDIT' THEN customer_charge_minor ELSE 0 END),0) credit_charges_minor,
                         COALESCE(SUM(amount_delivered_milli_syp),0) delivered_milli_syp,
-                        COALESCE(SUM(profit_milli_syp),0) profit_milli_syp,
+                        COALESCE(SUM(CASE WHEN payment_mode='CASH' THEN profit_milli_syp ELSE 0 END),0) profit_milli_syp,
                         COALESCE(SUM(amount_debited_minor),0) debited_minor
                  FROM service_transfers WHERE operating_date=? AND status='POSTED' GROUP BY service_type
                  UNION ALL
@@ -103,7 +103,13 @@ class ServiceTransferRepository(context:Context) {
                         0,0,0,0,0,0,0,0,0 FROM service_wallet_transactions
                  WHERE transaction_type='RECHARGE' AND operating_date=?
                  GROUP BY service_key
-               ) GROUP BY service_type ORDER BY service_type""".trimIndent(),arrayOf(date,date)
+                 UNION ALL
+                 SELECT t.service_type,0,0,0,0,0,0,0,0,0
+                 FROM service_transfer_receivable_payments p
+                 JOIN service_transfers t ON t.id=p.transfer_id
+                 WHERE p.operating_date=? AND t.status='POSTED'
+                 GROUP BY t.service_type
+               ) GROUP BY service_type ORDER BY service_type""".trimIndent(),arrayOf(date,date,date)
         ).use { c -> while(c.moveToNext()) {
             val type=c.getString(0); val delivered=c.getLong(2)
             // Show actual fees paid on external recharge only; never add them to customer transfers.
@@ -118,7 +124,10 @@ class ServiceTransferRepository(context:Context) {
                     arrayOf(key,date)
                 ).use { it.moveToFirst();it.getLong(0) }
             } ?: 0L
-            out.add(ServiceDailySummary(type,serviceTypeName(type),c.getInt(1),delivered,c.getLong(3),c.getLong(4),c.getLong(5),rechargeFeePaid,c.getLong(9),c.getLong(6),c.getLong(7),c.getLong(8)))
+            val creditProfitMilli=realizedCreditProfitMilliForDate(database.readableDatabase,date,type)
+            val totalProfitMinor=Math.addExact(c.getLong(4),roundMilliToWhole(creditProfitMilli))
+            val totalProfitMilli=Math.addExact(c.getLong(8),creditProfitMilli)
+            out.add(ServiceDailySummary(type,serviceTypeName(type),c.getInt(1),delivered,c.getLong(3),totalProfitMinor,c.getLong(5),rechargeFeePaid,c.getLong(9),c.getLong(6),c.getLong(7),totalProfitMilli))
         } }
         return out
     }
@@ -136,10 +145,12 @@ class ServiceTransferRepository(context:Context) {
         ).use { c -> while(c.moveToNext()) {
             val type=c.getString(1)
             val charge=c.getLong(5);val paid=c.getLong(12)
-            out.add(ServiceTransferRecord(c.getString(0),type,serviceTypeName(type),c.getLong(2),c.getLong(3),
+            val totalProfitMilli=c.getLong(15)
+            val realizedProfit=if(c.getString(10)=="CREDIT") realizedProfitMilliSyp(totalProfitMilli,charge,paid) else totalProfitMilli
+            out.add(ServiceTransferRecord(c.getString(0),type,serviceTypeName(type),c.getLong(2),roundMilliToWhole(realizedProfit),
                 c.getLong(4),charge,c.getString(6),c.getString(7),c.getString(8),c.getString(9),
                 c.getString(10),if(c.isNull(11)) null else c.getString(11),paid,(charge-paid).coerceAtLeast(0L),
-                c.getLong(13),c.getLong(14),c.getLong(15)))
+                c.getLong(13),c.getLong(14),realizedProfit))
         } }
         return out
     }
@@ -508,6 +519,40 @@ class ServiceTransferRepository(context:Context) {
                 db.insertOrThrow("cash_transactions",null,v)
             }
         }
+    }
+
+    /** Profit on a credit transfer is recognized only as its receivable is actually collected. */
+    private fun realizedCreditProfitMilliForDate(db:SQLiteDatabase,date:String,serviceType:String):Long {
+        var currentTransfer:String?=null
+        var charge=0L
+        var profit=0L
+        var paid=0L
+        var recognized=0L
+        var total=0L
+        db.rawQuery(
+            """SELECT t.id,t.customer_charge_minor,t.profit_milli_syp,p.amount_minor,p.operating_date
+               FROM service_transfer_receivable_payments p
+               JOIN service_transfers t ON t.id=p.transfer_id
+               WHERE p.operating_date<=? AND t.service_type=? AND t.payment_mode='CREDIT' AND t.status='POSTED'
+               ORDER BY t.id,p.created_at,p.id""".trimIndent(),arrayOf(date,serviceType)
+        ).use { c -> while(c.moveToNext()) {
+            val id=c.getString(0)
+            if(currentTransfer!=id) {
+                currentTransfer=id;charge=c.getLong(1);profit=c.getLong(2);paid=0L;recognized=0L
+            }
+            require(charge>0L) { "مبلغ ذمة تحويل الرصيد غير صالح لحساب الربح المحصل" }
+            paid=Math.addExact(paid,c.getLong(3))
+            val nextRecognized=realizedProfitMilliSyp(profit,charge,paid)
+            val increment=nextRecognized-recognized
+            if(c.getString(4)==date) total=Math.addExact(total,increment)
+            recognized=nextRecognized
+        } }
+        return total
+    }
+
+    private fun realizedProfitMilliSyp(profitMilliSyp:Long,chargeMinor:Long,paidMinor:Long):Long {
+        if(profitMilliSyp<=0L||chargeMinor<=0L||paidMinor<=0L) return 0L
+        return roundRatioMilli(profitMilliSyp,paidMinor.coerceAtMost(chargeMinor),chargeMinor)
     }
 
     private fun walletBalance(db:SQLiteDatabase,key:String):Long =
