@@ -58,6 +58,7 @@ class AppDatabase internal constructor(context: Context, databaseName: String = 
             ensureSyncCategoryMappingSchema(db)
             ensureSyncUnitMappingSchema(db)
             ensureSyncAckDeliverySchema(db)
+            ensureServiceTransferReceivableSchema(db)
             db.execSQL(
                 """INSERT INTO app_settings(setting_key, setting_value, updated_at)
                    VALUES('base_currency', 'USD', strftime('%Y-%m-%dT%H:%M:%fZ','now'))"""
@@ -592,9 +593,65 @@ class AppDatabase internal constructor(context: Context, databaseName: String = 
                 version = 30
             } finally { db.endTransaction() }
         }
+        if (version < 31) {
+            db.beginTransaction()
+            try {
+                ensureServiceTransferReceivableSchema(db)
+                db.setTransactionSuccessful()
+                version = 31
+            } finally { db.endTransaction() }
+        }
         if (version != newVersion) {
             throw IllegalStateException("Missing database migration from version $version to $newVersion")
         }
+    }
+
+    private fun ensureServiceTransferReceivableSchema(db: SQLiteDatabase) {
+        fun hasColumn(table: String, column: String): Boolean =
+            db.rawQuery("PRAGMA table_info($table)", null).use { cursor ->
+                var found = false
+                while (cursor.moveToNext()) if (cursor.getString(1) == column) found = true
+                found
+            }
+        if (!hasColumn("service_transfers", "payment_mode")) {
+            db.execSQL("""ALTER TABLE service_transfers ADD COLUMN payment_mode TEXT NOT NULL DEFAULT 'CASH'
+                CHECK(payment_mode IN ('CASH','CREDIT'))""".trimIndent())
+        }
+        if (!hasColumn("service_transfers", "customer_id")) {
+            db.execSQL("""ALTER TABLE service_transfers ADD COLUMN customer_id TEXT
+                REFERENCES customers(id) ON UPDATE RESTRICT ON DELETE RESTRICT""".trimIndent())
+        }
+        db.execSQL("""
+            CREATE TABLE IF NOT EXISTS service_transfer_receivables (
+                transfer_id TEXT PRIMARY KEY NOT NULL,
+                customer_id TEXT NOT NULL,
+                original_amount_minor INTEGER NOT NULL CHECK(original_amount_minor > 0),
+                status TEXT NOT NULL DEFAULT 'OPEN' CHECK(status IN ('OPEN','PARTIALLY_PAID','PAID','REVERSED')),
+                note TEXT,
+                created_at TEXT NOT NULL,
+                FOREIGN KEY(transfer_id) REFERENCES service_transfers(id) ON UPDATE RESTRICT ON DELETE RESTRICT,
+                FOREIGN KEY(customer_id) REFERENCES customers(id) ON UPDATE RESTRICT ON DELETE RESTRICT
+            )
+        """.trimIndent())
+        db.execSQL("""
+            CREATE TABLE IF NOT EXISTS service_transfer_receivable_payments (
+                id TEXT PRIMARY KEY NOT NULL,
+                transfer_id TEXT NOT NULL,
+                amount_minor INTEGER NOT NULL CHECK(amount_minor > 0),
+                cash_transaction_id TEXT NOT NULL UNIQUE,
+                operation_id TEXT NOT NULL UNIQUE,
+                payload_hash TEXT NOT NULL,
+                created_by TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                operating_date TEXT NOT NULL,
+                note TEXT,
+                FOREIGN KEY(transfer_id) REFERENCES service_transfer_receivables(transfer_id) ON UPDATE RESTRICT ON DELETE RESTRICT,
+                FOREIGN KEY(cash_transaction_id) REFERENCES cash_transactions(id) ON UPDATE RESTRICT ON DELETE RESTRICT,
+                FOREIGN KEY(created_by) REFERENCES users(id) ON UPDATE RESTRICT ON DELETE RESTRICT
+            )
+        """.trimIndent())
+        db.execSQL("CREATE INDEX IF NOT EXISTS idx_service_transfer_receivables_customer ON service_transfer_receivables(customer_id,status)")
+        db.execSQL("CREATE INDEX IF NOT EXISTS idx_service_transfer_debt_payments_transfer ON service_transfer_receivable_payments(transfer_id,created_at)")
     }
 
     private fun ensureSyncCategoryMappingSchema(db: SQLiteDatabase) {
@@ -1129,7 +1186,7 @@ class AppDatabase internal constructor(context: Context, databaseName: String = 
 
     companion object {
         const val DATABASE_NAME = "the_daily_shop.db"
-        const val DATABASE_VERSION = 30
+        const val DATABASE_VERSION = 31
 
         @Volatile
         private var INSTANCE: AppDatabase? = null

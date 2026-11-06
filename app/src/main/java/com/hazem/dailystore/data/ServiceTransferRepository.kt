@@ -11,8 +11,17 @@ import java.util.TimeZone
 import java.util.UUID
 
 data class ServiceWalletSummary(val serviceKey:String,val name:String,val balanceMinor:Long,val accountId:String)
-data class ServiceTransferRecord(val id:String,val serviceType:String,val serviceName:String,val deliveredMinor:Long,val profitMinor:Long,val providerFeeMinor:Long,val customerChargeMinor:Long,val receiptAccountName:String,val receiptChannel:String,val createdAt:String,val status:String)
-data class ServiceDailySummary(val serviceType:String,val serviceName:String,val operationCount:Int,val deliveredMinor:Long,val customerReceiptsMinor:Long,val profitMinor:Long,val providerFeeMinor:Long,val rechargeFeePaidMinor:Long,val rechargeReserveMinor:Long=deliveredMinor)
+data class ServiceTransferRecord(
+    val id:String,val serviceType:String,val serviceName:String,val deliveredMinor:Long,val profitMinor:Long,
+    val providerFeeMinor:Long,val customerChargeMinor:Long,val receiptAccountName:String,val receiptChannel:String,
+    val createdAt:String,val status:String,val paymentMode:String="CASH",val customerName:String?=null,
+    val paidMinor:Long=0L,val outstandingMinor:Long=0L
+)
+data class ServiceDailySummary(
+    val serviceType:String,val serviceName:String,val operationCount:Int,val deliveredMinor:Long,
+    val customerReceiptsMinor:Long,val profitMinor:Long,val providerFeeMinor:Long,
+    val rechargeFeePaidMinor:Long,val rechargeReserveMinor:Long=deliveredMinor,val creditChargesMinor:Long=0L
+)
 data class ServiceTransferResult(val transferId:String,val deliveredMinor:Long,val profitMinor:Long,val providerFeeMinor:Long,val customerChargeMinor:Long,val replayed:Boolean)
 
 /** Each service wallet is one real cash-account wallet used for both provider float and electronic customer receipts. */
@@ -61,15 +70,16 @@ class ServiceTransferRepository(context:Context) {
         require(date.matches(Regex("\\d{4}-\\d{2}-\\d{2}"))){"تاريخ الكشف غير صالح"}
         val out=mutableListOf<ServiceDailySummary>()
         database.readableDatabase.rawQuery(
-            """SELECT service_type,SUM(operation_count),SUM(delivered_minor),SUM(customer_receipts_minor),SUM(profit_minor),SUM(provider_fee_minor)
+            """SELECT service_type,SUM(operation_count),SUM(delivered_minor),SUM(customer_receipts_minor),SUM(profit_minor),SUM(provider_fee_minor),SUM(credit_charges_minor)
                FROM (
                  SELECT service_type,COUNT(*) operation_count,COALESCE(SUM(amount_delivered_minor),0) delivered_minor,
-                        COALESCE(SUM(customer_charge_minor),0) customer_receipts_minor,COALESCE(SUM(profit_minor),0) profit_minor,
-                        COALESCE(SUM(provider_fee_minor),0) provider_fee_minor
+                        COALESCE(SUM(CASE WHEN payment_mode='CASH' THEN customer_charge_minor ELSE 0 END),0) customer_receipts_minor,
+                        COALESCE(SUM(profit_minor),0) profit_minor,COALESCE(SUM(provider_fee_minor),0) provider_fee_minor,
+                        COALESCE(SUM(CASE WHEN payment_mode='CREDIT' THEN customer_charge_minor ELSE 0 END),0) credit_charges_minor
                  FROM service_transfers WHERE operating_date=? AND status='POSTED' GROUP BY service_type
                  UNION ALL
                  SELECT CASE service_key WHEN 'SYRIATEL_SHARED' THEN 'SYRIATEL_BALANCE' ELSE 'SHAM_CASH' END,
-                        0,0,0,0,0 FROM service_wallet_transactions
+                        0,0,0,0,0,0 FROM service_wallet_transactions
                  WHERE transaction_type='RECHARGE' AND operating_date=?
                  GROUP BY service_key
                ) GROUP BY service_type ORDER BY service_type""".trimIndent(),arrayOf(date,date)
@@ -87,7 +97,7 @@ class ServiceTransferRepository(context:Context) {
                     arrayOf(key,date)
                 ).use { it.moveToFirst();it.getLong(0) }
             } ?: 0L
-            out.add(ServiceDailySummary(type,serviceTypeName(type),c.getInt(1),delivered,c.getLong(3),c.getLong(4),c.getLong(5),rechargeFeePaid))
+            out.add(ServiceDailySummary(type,serviceTypeName(type),c.getInt(1),delivered,c.getLong(3),c.getLong(4),c.getLong(5),rechargeFeePaid,delivered,c.getLong(6)))
         } }
         return out
     }
@@ -95,13 +105,19 @@ class ServiceTransferRepository(context:Context) {
         val out=mutableListOf<ServiceTransferRecord>()
         database.readableDatabase.rawQuery(
             """SELECT t.id,t.service_type,t.amount_delivered_minor,t.profit_minor,t.provider_fee_minor,
-                      t.customer_charge_minor,a.name,t.receipt_channel,t.created_at,t.status
+                      t.customer_charge_minor,a.name,t.receipt_channel,t.created_at,t.status,t.payment_mode,c.name,
+                      COALESCE(SUM(p.amount_minor),0)
                FROM service_transfers t JOIN cash_accounts a ON a.id=t.receipt_account_id
+               LEFT JOIN customers c ON c.id=t.customer_id
+               LEFT JOIN service_transfer_receivable_payments p ON p.transfer_id=t.id
+               GROUP BY t.id
                ORDER BY t.created_at DESC LIMIT ?""".trimIndent(),arrayOf(limit.coerceIn(1,200).toString())
         ).use { c -> while(c.moveToNext()) {
             val type=c.getString(1)
+            val charge=c.getLong(5);val paid=c.getLong(12)
             out.add(ServiceTransferRecord(c.getString(0),type,serviceTypeName(type),c.getLong(2),c.getLong(3),
-                c.getLong(4),c.getLong(5),c.getString(6),c.getString(7),c.getString(8),c.getString(9)))
+                c.getLong(4),charge,c.getString(6),c.getString(7),c.getString(8),c.getString(9),
+                c.getString(10),if(c.isNull(11)) null else c.getString(11),paid,(charge-paid).coerceAtLeast(0L)))
         } }
         return out
     }
@@ -174,8 +190,12 @@ class ServiceTransferRepository(context:Context) {
     /** Syriatel balance and Syriatel Cash share one float; Sham Cash has its own float. */
     fun executeTransfer(actor:String,serviceType:String,deliveredMinor:Long,providerFeeMinor:Long,receiptAccountId:String,
                         operationId:String,reference:String?=null,note:String?=null,
-                        occurredAt:String?=null,operatingDate:String?=null,syncOrigin:Boolean=false):ServiceTransferResult {
+                        occurredAt:String?=null,operatingDate:String?=null,syncOrigin:Boolean=false,
+                        paymentMode:String="CASH",customerId:String?=null):ServiceTransferResult {
         require(deliveredMinor>0L&&providerFeeMinor>=0L&&operationId.isNotBlank()){"تحقق من مبلغ التحويل ورسوم الشركة"}
+        require(paymentMode in setOf("CASH","CREDIT")){"طريقة دفع تحويل الرصيد غير صالحة"}
+        if(paymentMode=="CREDIT") require(!customerId.isNullOrBlank()){"اختر الزبون لتسجيل التحويل الآجل"}
+        else require(customerId.isNullOrBlank()){"لا تربط زبوناً بعملية تحويل نقدية"}
         require(serviceType in listOf(SYRIATEL_BALANCE,SYRIATEL_CASH,SHAM_CASH_TRANSFER)){"نوع خدمة التحويل غير معروف"}
         if(serviceType==SHAM_CASH_TRANSFER) require(providerFeeMinor==0L){"لا توجد رسوم شركة على تحويل شام كاش وفق السياسة المعتمدة"}
         val serviceKey=if(serviceType==SHAM_CASH_TRANSFER)SHAM_CASH else SYRIATEL_SHARED
@@ -187,8 +207,17 @@ class ServiceTransferRepository(context:Context) {
             val localRole=db.rawQuery("SELECT state_value FROM sync_protocol_state WHERE state_key='local_device_role'",null).use{if(it.moveToFirst())it.getString(0)else null}
             if(localRole=="SECONDARY") PermissionPolicy.requireAssigned(db,actor,PermissionPolicy.SERVICE_TRANSFERS_EXECUTE)
             else PermissionPolicy.require(db,actor,PermissionPolicy.SERVICE_TRANSFERS_EXECUTE)
-            val account=receiptAccount(db,receiptAccountId)
+            if(paymentMode=="CREDIT") {
+                require(localRole==null || localRole=="PRIMARY"){"إنشاء ديون تحويل الرصيد متاح من الجهاز الأساسي فقط"}
+                require(db.rawQuery("SELECT 1 FROM customers WHERE id=? AND is_active=1",arrayOf(customerId)).use{it.moveToFirst()}) {
+                    "الزبون غير موجود أو موقوف"
+                }
+                ensureSystemAccounts(db)
+            }
+            val effectiveReceiptAccountId=if(paymentMode=="CREDIT") serviceAccountId(db,serviceKey) else receiptAccountId
+            val account=receiptAccount(db,effectiveReceiptAccountId)
             require(account.second=="SYP"&&account.third){"اختر حساب قبض نشطاً بالليرة السورية"}
+            if(paymentMode=="CREDIT") require(account.first=="WALLET"){"حساب حفظ التحويل الآجل غير صالح"}
             val priorSecondaryPayload=if(localRole=="SECONDARY") db.rawQuery(
                 "SELECT payload_json FROM sync_operation_envelopes WHERE operation_id=?",arrayOf(operationId)
             ).use { c -> if(c.moveToFirst()) org.json.JSONObject(c.getString(0)) else null } else null
@@ -196,16 +225,18 @@ class ServiceTransferRepository(context:Context) {
             val eventDate=operatingDate ?: priorSecondaryPayload?.optString("operating_date")?.takeIf{it.matches(Regex("\\d{4}-\\d{2}-\\d{2}"))} ?: StoreTime.operatingDate(db,eventAt)
             require(eventAt.matches(Regex("\\d{4}-\\d{2}-\\d{2}T.*")) &&
                 eventDate.matches(Regex("\\d{4}-\\d{2}-\\d{2}"))){"تاريخ أو وقت التحويل غير صالح"}
-            if(account.first=="CASH_BOX") {
-                val primary=db.rawQuery("SELECT primary_cash_account_id FROM daily_cash_sessions WHERE operating_date=?",arrayOf(eventDate)).use{if(it.moveToFirst())it.getString(0)else null}
-                require(primary==receiptAccountId){"القبض النقدي يجب أن يذهب إلى درج اليوم الرئيسي"}
-            } else require(account.first=="WALLET"){"حساب الاستلام يجب أن يكون درجاً نقدياً أو محفظة إلكترونية"}
-            val payload=hash("$serviceType|$deliveredMinor|$providerFeeMinor|$receiptAccountId|$reference|$note")
-            val old=db.rawQuery("SELECT id,service_type,amount_delivered_minor,profit_minor,provider_fee_minor,customer_charge_minor,payload_hash FROM service_transfers WHERE operation_id=?",arrayOf(operationId)).use{
-                if(it.moveToFirst()) arrayOf(it.getString(0),it.getString(1),it.getLong(2).toString(),it.getLong(3).toString(),it.getLong(4).toString(),it.getLong(5).toString(),it.getString(6)) else null
+            if(paymentMode=="CASH") {
+                if(account.first=="CASH_BOX") {
+                    val primary=db.rawQuery("SELECT primary_cash_account_id FROM daily_cash_sessions WHERE operating_date=?",arrayOf(eventDate)).use{if(it.moveToFirst())it.getString(0)else null}
+                    require(primary==effectiveReceiptAccountId){"القبض النقدي يجب أن يذهب إلى درج اليوم الرئيسي"}
+                } else require(account.first=="WALLET"){"حساب الاستلام يجب أن يكون درجاً نقدياً أو محفظة إلكترونية"}
+            }
+            val payload=hash("$serviceType|$deliveredMinor|$providerFeeMinor|$effectiveReceiptAccountId|$paymentMode|${customerId.orEmpty()}|$reference|$note")
+            val old=db.rawQuery("SELECT id,service_type,amount_delivered_minor,profit_minor,provider_fee_minor,customer_charge_minor,payload_hash,payment_mode,customer_id FROM service_transfers WHERE operation_id=?",arrayOf(operationId)).use{
+                if(it.moveToFirst()) arrayOf(it.getString(0),it.getString(1),it.getLong(2).toString(),it.getLong(3).toString(),it.getLong(4).toString(),it.getLong(5).toString(),it.getString(6),it.getString(7),if(it.isNull(8)) "" else it.getString(8)) else null
             }
             if(old!=null) {
-                require(old[1]==serviceType&&old[2]==deliveredMinor.toString()&&old[3]==profit.toString()&&old[4]==providerFeeMinor.toString()&&old[5]==charge.toString()&&old[6]==payload){"معرّف التحويل مستخدم لبيانات مختلفة"}
+                require(old[1]==serviceType&&old[2]==deliveredMinor.toString()&&old[3]==profit.toString()&&old[4]==providerFeeMinor.toString()&&old[5]==charge.toString()&&old[6]==payload&&old[7]==paymentMode&&old[8]==customerId.orEmpty()){"معرّف التحويل مستخدم لبيانات مختلفة"}
                 db.setTransactionSuccessful()
                 return ServiceTransferResult(old[0]!!,deliveredMinor,profit,providerFeeMinor,charge,true)
             }
@@ -216,8 +247,9 @@ class ServiceTransferRepository(context:Context) {
                     .put("service_type",serviceType).put("service_key",serviceKey)
                     .put("delivered_minor",deliveredMinor).put("provider_fee_minor",providerFeeMinor)
                     .put("profit_minor",profit).put("customer_charge_minor",charge)
-                    .put("cash_account_id",receiptAccountId).put("cash_account_type",account.first)
+                    .put("cash_account_id",effectiveReceiptAccountId).put("cash_account_type",account.first)
                     .put("cash_account_currency_code",account.second)
+                    .put("payment_mode",paymentMode).put("customer_id",customerId ?: org.json.JSONObject.NULL)
                     .put("reference",reference ?: org.json.JSONObject.NULL).put("note",note ?: org.json.JSONObject.NULL)
                     .put("occurred_at",eventAt).put("operating_date",eventDate)
                 SyncProtocolRepository(appContext).enqueueSecondaryCommand(
@@ -233,21 +265,26 @@ class ServiceTransferRepository(context:Context) {
             val v=ContentValues().apply {
                 put("id",id);put("operation_id",operationId);put("service_type",serviceType);put("service_key",serviceKey)
                 put("amount_delivered_minor",deliveredMinor);put("profit_minor",profit);put("provider_fee_minor",providerFeeMinor)
-                put("customer_charge_minor",charge);put("receipt_account_id",receiptAccountId)
+                put("customer_charge_minor",charge);put("receipt_account_id",effectiveReceiptAccountId)
                 put("receipt_channel",if(account.first=="WALLET")"ELECTRONIC" else "CASH")
+                put("payment_mode",paymentMode);if(customerId.isNullOrBlank())putNull("customer_id")else put("customer_id",customerId)
                 put("reference",reference);put("note",note);put("payload_hash",payload);put("created_by",actor)
                 put("created_at",now);put("operating_date",eventDate);put("status","POSTED")
             }
             db.insertOrThrow("service_transfers",null,v)
+            if(paymentMode=="CREDIT") db.insertOrThrow("service_transfer_receivables",null,ContentValues().apply {
+                put("transfer_id",id);put("customer_id",customerId);put("original_amount_minor",charge)
+                put("status","OPEN");put("note",note);put("created_at",now)
+            })
             insertWalletMovement(db,serviceKey,"OUT",deliveredMinor,"TRANSFER_OUT",id,operationId,0L,note?:serviceTypeName(serviceType),actor,now,null,eventDate)
-            insertCashMovement(db,receiptAccountId,"IN",charge,"SERVICE_TRANSFER_RECEIPT","SERVICE_TRANSFER",id,operationId+":RECEIPT",actor,
+            if(paymentMode=="CASH") insertCashMovement(db,effectiveReceiptAccountId,"IN",charge,"SERVICE_TRANSFER_RECEIPT","SERVICE_TRANSFER",id,operationId+":RECEIPT",actor,
                 "مقبوض تحويل رصيد • ${serviceTypeName(serviceType)} • ربح $profit ل.س • رسوم الشركة $providerFeeMinor ل.س",now,eventDate)
             if(!syncOrigin) {
                 val syncPayload=org.json.JSONObject().put("business_operation","EXECUTE_SERVICE_TRANSFER")
                     .put("service_type",serviceType).put("service_key",serviceKey)
                     .put("delivered_minor",deliveredMinor).put("provider_fee_minor",providerFeeMinor)
                     .put("profit_minor",profit).put("customer_charge_minor",charge)
-                    .put("cash_account_id",receiptAccountId).put("cash_account_type",account.first)
+                    .put("cash_account_id",effectiveReceiptAccountId).put("cash_account_type",account.first)
                     .put("cash_account_currency_code",account.second)
                     .put("reference",reference ?: org.json.JSONObject.NULL).put("note",note ?: org.json.JSONObject.NULL)
                     .put("occurred_at",now).put("operating_date",eventDate)
@@ -269,9 +306,14 @@ class ServiceTransferRepository(context:Context) {
         try {
             requireManager(db,actor)
             ensureSystemAccounts(db)
-            val row=db.rawQuery("SELECT service_key,amount_delivered_minor,customer_charge_minor,receipt_account_id,status FROM service_transfers WHERE id=?",arrayOf(transferId)).use{
+            val row=db.rawQuery("SELECT service_key,amount_delivered_minor,customer_charge_minor,receipt_account_id,status,payment_mode FROM service_transfers WHERE id=?",arrayOf(transferId)).use{
                 require(it.moveToFirst()){"عملية التحويل غير موجودة"}
-                arrayOf(it.getString(0),it.getLong(1).toString(),it.getLong(2).toString(),it.getString(3),it.getString(4))
+                arrayOf(it.getString(0),it.getLong(1).toString(),it.getLong(2).toString(),it.getString(3),it.getString(4),it.getString(5))
+            }
+            val isCredit=row[5]=="CREDIT"
+            if(isCredit) {
+                val paid=db.rawQuery("SELECT COALESCE(SUM(amount_minor),0) FROM service_transfer_receivable_payments WHERE transfer_id=?",arrayOf(transferId)).use{it.moveToFirst();it.getLong(0)}
+                require(paid==0L){"لا يمكن عكس تحويل آجل بعد تسجيل أي تحصيل عليه"}
             }
             val receipt=row[3]!!;val charge=row[2]!!.toLong()
             val prior=db.rawQuery(
@@ -287,20 +329,23 @@ class ServiceTransferRepository(context:Context) {
                     "معرّف العكس مستخدم مسبقاً لعملية أو بيانات مختلفة"
                 }
                 require(row[4]=="REVERSED") { "يوجد سجل عكس دون اكتمال حالة العملية؛ يلزم فحص سلامة الدفتر" }
-                val receiptReversal=db.rawQuery(
-                    """SELECT 1 FROM cash_transactions WHERE operation_id=? AND account_id=?
-                       AND direction='OUT' AND amount_minor=? AND transaction_type='SERVICE_TRANSFER_REVERSAL'""".trimIndent(),
-                    arrayOf(operationId+":RECEIPT",receipt,charge.toString())
-                ).use { it.moveToFirst() }
-                require(receiptReversal) { "سجل عكس المحفظة موجود لكن حركة حساب القبض مفقودة" }
+                if(!isCredit) {
+                    val receiptReversal=db.rawQuery(
+                        """SELECT 1 FROM cash_transactions WHERE operation_id=? AND account_id=?
+                           AND direction='OUT' AND amount_minor=? AND transaction_type='SERVICE_TRANSFER_REVERSAL'""".trimIndent(),
+                        arrayOf(operationId+":RECEIPT",receipt,charge.toString())
+                    ).use { it.moveToFirst() }
+                    require(receiptReversal) { "سجل عكس المحفظة موجود لكن حركة حساب القبض مفقودة" }
+                }
                 db.setTransactionSuccessful()
                 return
             }
             require(row[4]=="POSTED"){"عملية التحويل معكوسة مسبقاً أو غير قابلة للعكس"}
-            require(cashBalance(db,receipt)>=charge){"لا يمكن عكس العملية: الرصيد المتبقي في حساب القبض أقل من المبلغ المقبوض"}
+            if(!isCredit) require(cashBalance(db,receipt)>=charge){"لا يمكن عكس العملية: الرصيد المتبقي في حساب القبض أقل من المبلغ المقبوض"}
             val now=stamp()
             insertWalletMovement(db,row[0]!!,"IN",row[1]!!.toLong(),"TRANSFER_REVERSAL",transferId,operationId,0L,reason,actor,now)
-            insertCashMovement(db,receipt,"OUT",charge,"SERVICE_TRANSFER_REVERSAL","SERVICE_TRANSFER_REVERSAL",transferId,operationId+":RECEIPT",actor,"عكس تحويل رصيد: $reason",now)
+            if(!isCredit) insertCashMovement(db,receipt,"OUT",charge,"SERVICE_TRANSFER_REVERSAL","SERVICE_TRANSFER_REVERSAL",transferId,operationId+":RECEIPT",actor,"عكس تحويل رصيد: $reason",now)
+            else db.update("service_transfer_receivables",ContentValues().apply{put("status","REVERSED")},"transfer_id=? AND status='OPEN'",arrayOf(transferId))
             val update=ContentValues().apply{put("status","REVERSED");put("reversed_at",now);put("reversed_by",actor);put("reversal_reason",reason)}
             db.update("service_transfers",update,"id=? AND status='POSTED'",arrayOf(transferId))
             audit(db,actor,"SERVICE_TRANSFER_REVERSED",transferId,"{\"status\":\"POSTED\"}","{\"status\":\"REVERSED\",\"reason\":\"${esc(reason)}\"}",now)
