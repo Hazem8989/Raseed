@@ -1667,6 +1667,9 @@ class SyncDomainApplier(context: Context) {
             val createdAt = payload.optString("created_at").takeIf {
                 it.matches(Regex("\\d{4}-\\d{2}-\\d{2}T.*"))
             } ?: row[6]
+            val serviceWalletKey = payload.optString("service_wallet_key").takeIf {
+                it.isNotBlank() && it != "null"
+            }
             require(payload.optString("business_operation") == "UPSERT_CASH_ACCOUNT" &&
                 id.isNotBlank() && id == row[3] && name.isNotEmpty() && name.length <= 200 &&
                 accountType in setOf("CASH_BOX", "WALLET", "BANK", "OTHER") &&
@@ -1674,6 +1677,8 @@ class SyncDomainApplier(context: Context) {
                 payload.has("sales_receipt_allowed") &&
                 (!payload.optBoolean("sales_receipt_allowed") ||
                     (active && accountType in setOf("CASH_BOX", "WALLET"))) &&
+                (serviceWalletKey == null || (serviceWalletKey in setOf("SYRIATEL_SHARED", "SHAM_CASH") &&
+                    accountType == "WALLET" && currency == "SYP" && active)) &&
                 createdAt.matches(Regex("\\d{4}-\\d{2}-\\d{2}T.*"))) {
                 "بيانات تعريف الحساب المالي الواردة غير صالحة"
             }
@@ -1704,6 +1709,35 @@ class SyncDomainApplier(context: Context) {
                     put("is_active", if (active) 1 else 0)
                     put("created_at", createdAt)
                 })
+            }
+            if (serviceWalletKey != null) {
+                val expectedName = if (serviceWalletKey == "SYRIATEL_SHARED") "رصيد سيرياتيل المشترك" else "رصيد شام كاش"
+                db.insertWithOnConflict("service_wallets", null, ContentValues().apply {
+                    put("service_key", serviceWalletKey)
+                    put("name", expectedName)
+                    put("created_at", createdAt)
+                }, android.database.sqlite.SQLiteDatabase.CONFLICT_IGNORE)
+                val existingByKey = db.rawQuery(
+                    "SELECT account_id FROM service_wallet_account_links WHERE service_key=?",
+                    arrayOf(serviceWalletKey)
+                ).use { c -> if (c.moveToFirst()) c.getString(0) else null }
+                val existingByAccount = db.rawQuery(
+                    "SELECT service_key FROM service_wallet_account_links WHERE account_id=?",
+                    arrayOf(id)
+                ).use { c -> if (c.moveToFirst()) c.getString(0) else null }
+                require(existingByKey == null || existingByKey == id) {
+                    "محفظة الخدمة مرتبطة مسبقاً بحساب مالي مختلف"
+                }
+                require(existingByAccount == null || existingByAccount == serviceWalletKey) {
+                    "الحساب المالي مرتبط مسبقاً بمحفظة خدمة مختلفة"
+                }
+                if (existingByKey == null) {
+                    db.insertOrThrow("service_wallet_account_links", null, ContentValues().apply {
+                        put("service_key", serviceWalletKey)
+                        put("account_id", id)
+                        put("linked_at", timestamp())
+                    })
+                }
             }
             db.insertWithOnConflict("sync_protocol_state", null, ContentValues().apply {
                 put("state_key", "cash_account_sales_allowed:$id")
