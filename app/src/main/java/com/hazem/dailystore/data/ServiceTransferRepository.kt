@@ -123,7 +123,7 @@ class ServiceTransferRepository(context:Context) {
         database.readableDatabase.rawQuery(
             """SELECT t.id,t.service_type,t.amount_delivered_minor,t.profit_minor,t.provider_fee_minor,
                       t.customer_charge_minor,a.name,t.receipt_channel,t.created_at,t.status,t.payment_mode,c.name,
-                      COALESCE(SUM(p.amount_minor),0)
+                      COALESCE(SUM(p.amount_minor),0),t.amount_debited_minor,t.amount_delivered_milli_syp,t.profit_milli_syp
                FROM service_transfers t JOIN cash_accounts a ON a.id=t.receipt_account_id
                LEFT JOIN customers c ON c.id=t.customer_id
                LEFT JOIN service_transfer_receivable_payments p ON p.transfer_id=t.id
@@ -134,7 +134,8 @@ class ServiceTransferRepository(context:Context) {
             val charge=c.getLong(5);val paid=c.getLong(12)
             out.add(ServiceTransferRecord(c.getString(0),type,serviceTypeName(type),c.getLong(2),c.getLong(3),
                 c.getLong(4),charge,c.getString(6),c.getString(7),c.getString(8),c.getString(9),
-                c.getString(10),if(c.isNull(11)) null else c.getString(11),paid,(charge-paid).coerceAtLeast(0L)))
+                c.getString(10),if(c.isNull(11)) null else c.getString(11),paid,(charge-paid).coerceAtLeast(0L),
+                c.getLong(13),c.getLong(14),c.getLong(15)))
         } }
         return out
     }
