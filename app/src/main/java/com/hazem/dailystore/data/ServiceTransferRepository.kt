@@ -34,6 +34,16 @@ class ServiceTransferRepository(context:Context) {
         const val SYRIATEL_BALANCE="SYRIATEL_BALANCE"
         const val SYRIATEL_CASH="SYRIATEL_CASH"
         const val SHAM_CASH_TRANSFER="SHAM_CASH"
+        const val SYRIATEL_CASH_FEE_THRESHOLD_MINOR=200L
+        /** 1.5 SYP is rounded half-up to the app's whole-SYP unit; 2 SYP remains 2. */
+        fun expectedProviderFeeMinor(serviceType:String, deliveredMinor:Long):Long {
+            require(deliveredMinor>0L) { "مبلغ التحويل يجب أن يكون أكبر من صفر" }
+            return when(serviceType) {
+                SYRIATEL_CASH -> if(deliveredMinor<SYRIATEL_CASH_FEE_THRESHOLD_MINOR) 2L else 2L
+                SHAM_CASH_TRANSFER -> 0L
+                else -> -1L // Other service fee handling is unchanged.
+            }
+        }
     }
 
     fun ensureSystemAccounts() {
@@ -198,6 +208,9 @@ class ServiceTransferRepository(context:Context) {
         else require(customerId.isNullOrBlank()){"لا تربط زبوناً بعملية تحويل نقدية"}
         require(serviceType in listOf(SYRIATEL_BALANCE,SYRIATEL_CASH,SHAM_CASH_TRANSFER)){"نوع خدمة التحويل غير معروف"}
         if(serviceType==SHAM_CASH_TRANSFER) require(providerFeeMinor==0L){"لا توجد رسوم شركة على تحويل شام كاش وفق السياسة المعتمدة"}
+        if(serviceType==SYRIATEL_CASH) require(providerFeeMinor==expectedProviderFeeMinor(serviceType,deliveredMinor)) {
+            "رسم شركة سيريتل كاش يُحتسب تلقائياً وفق السياسة المعتمدة"
+        }
         val serviceKey=if(serviceType==SHAM_CASH_TRANSFER)SHAM_CASH else SYRIATEL_SHARED
         val profitRate=when(serviceType){SYRIATEL_BALANCE->20L;SYRIATEL_CASH->10L;else->5L}
         val profit=percent(deliveredMinor,profitRate)
