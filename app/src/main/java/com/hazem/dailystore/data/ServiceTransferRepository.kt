@@ -88,18 +88,19 @@ class ServiceTransferRepository(context:Context) {
         require(date.matches(Regex("\\d{4}-\\d{2}-\\d{2}"))){"تاريخ الكشف غير صالح"}
         val out=mutableListOf<ServiceDailySummary>()
         database.readableDatabase.rawQuery(
-            """SELECT service_type,SUM(operation_count),SUM(delivered_minor),SUM(customer_receipts_minor),SUM(profit_minor),SUM(provider_fee_minor),SUM(credit_charges_minor),SUM(delivered_milli_syp),SUM(profit_milli_syp)
+            """SELECT service_type,SUM(operation_count),SUM(delivered_minor),SUM(customer_receipts_minor),SUM(profit_minor),SUM(provider_fee_minor),SUM(credit_charges_minor),SUM(delivered_milli_syp),SUM(profit_milli_syp),SUM(debited_minor)
                FROM (
                  SELECT service_type,COUNT(*) operation_count,COALESCE(SUM(amount_delivered_minor),0) delivered_minor,
                         COALESCE(SUM(CASE WHEN payment_mode='CASH' THEN customer_charge_minor ELSE 0 END),0) customer_receipts_minor,
                         COALESCE(SUM(profit_minor),0) profit_minor,COALESCE(SUM(provider_fee_minor),0) provider_fee_minor,
                         COALESCE(SUM(CASE WHEN payment_mode='CREDIT' THEN customer_charge_minor ELSE 0 END),0) credit_charges_minor,
                         COALESCE(SUM(amount_delivered_milli_syp),0) delivered_milli_syp,
-                        COALESCE(SUM(profit_milli_syp),0) profit_milli_syp
+                        COALESCE(SUM(profit_milli_syp),0) profit_milli_syp,
+                        COALESCE(SUM(amount_debited_minor),0) debited_minor
                  FROM service_transfers WHERE operating_date=? AND status='POSTED' GROUP BY service_type
                  UNION ALL
                  SELECT CASE service_key WHEN 'SYRIATEL_SHARED' THEN 'SYRIATEL_BALANCE' ELSE 'SHAM_CASH' END,
-                        0,0,0,0,0,0,0,0 FROM service_wallet_transactions
+                        0,0,0,0,0,0,0,0,0 FROM service_wallet_transactions
                  WHERE transaction_type='RECHARGE' AND operating_date=?
                  GROUP BY service_key
                ) GROUP BY service_type ORDER BY service_type""".trimIndent(),arrayOf(date,date)
@@ -117,7 +118,7 @@ class ServiceTransferRepository(context:Context) {
                     arrayOf(key,date)
                 ).use { it.moveToFirst();it.getLong(0) }
             } ?: 0L
-            out.add(ServiceDailySummary(type,serviceTypeName(type),c.getInt(1),delivered,c.getLong(3),c.getLong(4),c.getLong(5),rechargeFeePaid,delivered,c.getLong(6),c.getLong(7),c.getLong(8)))
+            out.add(ServiceDailySummary(type,serviceTypeName(type),c.getInt(1),delivered,c.getLong(3),c.getLong(4),c.getLong(5),rechargeFeePaid,c.getLong(9),c.getLong(6),c.getLong(7),c.getLong(8)))
         } }
         return out
     }
