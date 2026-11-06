@@ -3287,7 +3287,7 @@ class MainActivity : Activity() {
             customerOptions.map{it.second}.ifEmpty{listOf("لا يوجد عملاء نشطون")})}
         val customerLabel=label("الزبون المدين",12f,mutedColor,false,Gravity.RIGHT)
         val amount=fieldForDialog("المبلغ الواصل للزبون").apply{inputType=InputType.TYPE_CLASS_NUMBER or InputType.TYPE_NUMBER_FLAG_DECIMAL}
-        val companyFee=fieldForDialog("رسوم الشركة (أدخلها يدوياً إن وجدت)").apply{inputType=InputType.TYPE_CLASS_NUMBER or InputType.TYPE_NUMBER_FLAG_DECIMAL;setText("0")}
+        val companyFee=fieldForDialog("رسوم الشركة (تُحسب تلقائياً لسيريتل كاش)").apply{inputType=InputType.TYPE_CLASS_NUMBER or InputType.TYPE_NUMBER_FLAG_DECIMAL;setText("0")}
         val receipt=Spinner(this).apply{adapter=ArrayAdapter(this@MainActivity,android.R.layout.simple_spinner_dropdown_item,receiptOptions.map{it.name+if(it.accountType=="WALLET")" • قبض إلكتروني" else " • قبض نقدي"})}
         fun selectDefaultServiceWallet() {
             val key=if(service.selectedItemPosition==2) ServiceTransferRepository.SHAM_CASH else ServiceTransferRepository.SYRIATEL_SHARED
@@ -3300,10 +3300,11 @@ class MainActivity : Activity() {
         val preview=label("أدخل مبلغ التحويل لاحتساب ربح المتجر وإجمالي المقبوض.",13f,green,true,Gravity.RIGHT)
         fun updatePreview(){
             val rate=when(service.selectedItemPosition){0->20L;1->10L;else->5L}
-            companyFee.isEnabled=service.selectedItemPosition!=2
-            if(!companyFee.isEnabled&&companyFee.text.toString()!="0")companyFee.setText("0")
+            companyFee.isEnabled=service.selectedItemPosition==0
+            val automaticFee=when(service.selectedItemPosition){1->2L;2->0L;else->null}
+            if(automaticFee!=null&&companyFee.text.toString()!=automaticFee.toString())companyFee.setText(automaticFee.toString())
             val delivered=runCatching{parseSypAmount(amount.text.toString())}.getOrNull()
-            val fee=runCatching{parseSypAmount(companyFee.text.toString())}.getOrNull()
+            val fee=automaticFee ?: runCatching{parseSypAmount(companyFee.text.toString())}.getOrNull()
             preview.text=if(delivered==null||delivered<=0L||fee==null)"أدخل مبلغاً صحيحاً." else{
                 val profit=BigDecimal.valueOf(delivered).multiply(BigDecimal.valueOf(rate)).divide(BigDecimal.valueOf(100),0,RoundingMode.HALF_UP).longValueExact()
                 "ربح المتجر ($rate%): "+formatSypAmount(profit)+" ل.س\nرسوم الشركة: "+formatSypAmount(fee)+" ل.س\nالمبلغ المطلوب من الزبون: "+formatSypAmount(Math.addExact(Math.addExact(delivered,profit),fee))+" ل.س"
