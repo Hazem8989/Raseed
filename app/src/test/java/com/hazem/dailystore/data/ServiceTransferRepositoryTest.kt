@@ -243,6 +243,8 @@ class ServiceTransferRepositoryTest {
             repo.listWallets().single{it.serviceKey==ServiceTransferRepository.SYRIATEL_SHARED}.balanceMinor)
         val partialProfit=repo.dailySummary().single{it.serviceType==ServiceTransferRepository.SYRIATEL_BALANCE}
         assertEquals("يُحتسب ربح الجزء المحصل فقط",83L,partialProfit.profitMinor)
+        assertEquals("يظهر المقبوض الجزئي في يوم التحصيل دون اعتباره تحويلاً جديداً",500L,partialProfit.customerReceiptsMinor)
+        assertEquals("لا يتكرر عدد التحويلات عند تحصيل الذمة",1,partialProfit.operationCount)
         assertEquals(83L,repo.listTransfers().first().profitMinor)
         assertEquals(83_333L,repo.listTransfers().first().profitMilliSyp)
         assertEquals("لا يُخصم أصل التحويل مجدداً عند التحصيل؛ يُضاف المقبوض فقط",9_500L,
@@ -277,8 +279,9 @@ class ServiceTransferRepositoryTest {
         assertEquals(0L,PartyStatementRepository(context).customer(customerId).closingBalanceSypMinor)
         assertTrue(receivables.listOpenReceivables(customerId).isEmpty())
         val summary=repo.dailySummary().single{it.serviceType==ServiceTransferRepository.SYRIATEL_BALANCE}
-        assertEquals(0L,summary.customerReceiptsMinor)
-        assertEquals(1_200L,summary.creditChargesMinor)
+        assertEquals("يظهر كامل ما تم قبضه من الذمة في يوم التحصيل",1_200L,summary.customerReceiptsMinor)
+        assertEquals("يبقى أصل الذمة الجديدة في بند مستقل ولا يُسجل كمقبوض",1_200L,summary.creditChargesMinor)
+        assertEquals("التحصيل ليس عملية تحويل جديدة",1,summary.operationCount)
     }
 
     private fun dailyTransferToCash(walletId:String,drawerId:String,amount:Long) {
