@@ -755,7 +755,8 @@ class SyncProtocolRepository(private val context: Context, private val credentia
         require(state(db, "authority_device_id").isNullOrBlank().not()) { "الجهاز الأساسي غير محدد" }
         require(businessOperation in setOf(
             "POST_SALE_INVOICE", "COLLECT_CUSTOMER_PAYMENT",
-            "COLLECT_SERVICE_TRANSFER_DEBT", "SYNC_TRANSPORT_PROBE"
+            "COLLECT_SERVICE_TRANSFER_DEBT", "EXECUTE_SERVICE_TRANSFER_CREDIT",
+            "SYNC_TRANSPORT_PROBE"
         )) {
             "الجهاز الثانوي مخول بإرسال فواتير البيع وتحصيل ديون العملاء وتحويلات الرصيد الآجلة واختبارات المزامنة فقط"
         }
@@ -764,6 +765,7 @@ class SyncProtocolRepository(private val context: Context, private val credentia
             when (businessOperation) {
                 "POST_SALE_INVOICE" -> PermissionPolicy.SALES_CHECKOUT
                 "COLLECT_CUSTOMER_PAYMENT", "COLLECT_SERVICE_TRANSFER_DEBT" -> PermissionPolicy.CUSTOMERS_COLLECT
+                "EXECUTE_SERVICE_TRANSFER_CREDIT" -> PermissionPolicy.SERVICE_TRANSFERS_EXECUTE
                 else -> PermissionPolicy.SYNC_MANAGE
             }
         )
@@ -906,6 +908,7 @@ class SyncProtocolRepository(private val context: Context, private val credentia
         when (operation) {
             "POST_SALE_INVOICE" -> PermissionPolicy.SALES_CHECKOUT
             "COLLECT_CUSTOMER_PAYMENT", "COLLECT_SERVICE_TRANSFER_DEBT" -> PermissionPolicy.CUSTOMERS_COLLECT
+            "EXECUTE_SERVICE_TRANSFER_CREDIT" -> PermissionPolicy.SERVICE_TRANSFERS_EXECUTE
             else -> throw IllegalArgumentException(
                 "الجهاز الثانوي مخول بإرسال فواتير البيع وتحصيل ديون العملاء وتحويلات الرصيد الآجلة واختبارات المزامنة فقط"
             )
