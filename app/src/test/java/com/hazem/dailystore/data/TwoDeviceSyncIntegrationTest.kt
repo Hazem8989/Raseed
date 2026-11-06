@@ -1149,7 +1149,7 @@ class TwoDeviceSyncIntegrationTest {
         // Settle the remaining amount through the secondary and verify the final mirror reaches PAID.
         val finalOperation=UUID.randomUUID().toString()
         val finalQueued=ServiceTransferReceivableRepository(context).collect(
-            secondaryAdminId,transfer.transferId,finalOperation,receiptWallet.id,9_000L,"تسوية نهائية"
+            secondaryAdminId,transfer.transferId,finalOperation,receiptWallet.id,4_037L,"تسوية نهائية"
         )
         assertTrue(finalQueued.pending)
         assertEquals(0,scalar(secondaryDb,"SELECT COUNT(*) FROM cash_transactions WHERE operation_id=?",finalOperation))
