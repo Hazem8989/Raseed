@@ -1443,6 +1443,16 @@ class SyncProtocolRepository(private val context: Context, private val credentia
         }
         require(account[2] in setOf("USD", "SYP")) { "عملة الحساب المالي غير مدعومة للمزامنة" }
         val active = account[3] == "1"
+        val serviceWalletKey = db.rawQuery(
+            "SELECT service_key FROM service_wallet_account_links WHERE account_id=?",
+            arrayOf(accountId)
+        ).use { c -> if (c.moveToFirst()) c.getString(0) else null }
+        if (serviceWalletKey != null) {
+            require(serviceWalletKey in setOf("SYRIATEL_SHARED", "SHAM_CASH") &&
+                account[1] == "WALLET" && account[2] == "SYP" && active) {
+                "ربط محفظة الخدمة غير صالح للمزامنة"
+            }
+        }
         val dailyDrawerId = db.rawQuery(
             "SELECT account_id FROM system_cash_account_roles WHERE role_key='DAILY_DRAWER'", null
         ).use { if (it.moveToFirst()) it.getString(0) else null }
@@ -1465,6 +1475,7 @@ class SyncProtocolRepository(private val context: Context, private val credentia
             .put("is_active", active)
             .put("sales_receipt_allowed", salesReceiptAllowed)
             .put("created_at", account[4])
+        if (serviceWalletKey != null) payload.put("service_wallet_key", serviceWalletKey)
         val sequence = enqueueLocalOperation(
             db, actorUserId, UUID.randomUUID().toString(), "UPSERT_CASH_ACCOUNT",
             "CASH_ACCOUNT", accountId, "UPDATE", payload.toString()
