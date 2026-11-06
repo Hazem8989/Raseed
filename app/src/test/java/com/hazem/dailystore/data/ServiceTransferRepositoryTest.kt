@@ -241,6 +241,8 @@ class ServiceTransferRepositoryTest {
         assertEquals(500L,accounts.balance(drawer.id))
         val partialProfit=repo.dailySummary().single{it.serviceType==ServiceTransferRepository.SYRIATEL_BALANCE}
         assertEquals("يُحتسب ربح الجزء المحصل فقط",83L,partialProfit.profitMinor)
+        assertEquals(83L,repo.listTransfers().first().profitMinor)
+        assertEquals(83_333L,repo.listTransfers().first().profitMilliSyp)
         assertEquals("خصم المحفظة لا يتكرر عند التحصيل الجزئي",9_000L,
             repo.listWallets().single{it.serviceKey==ServiceTransferRepository.SYRIATEL_SHARED}.balanceMinor)
         val partialStatement=PartyStatementRepository(context).customer(customerId)
@@ -265,6 +267,8 @@ class ServiceTransferRepositoryTest {
         assertEquals(1_200L,accounts.balance(drawer.id))
         val finalProfit=repo.dailySummary().single{it.serviceType==ServiceTransferRepository.SYRIATEL_BALANCE}
         assertEquals("يكتمل الربح عند تحصيل كامل الذمة",200L,finalProfit.profitMinor)
+        assertEquals(200L,repo.listTransfers().first().profitMinor)
+        assertEquals(200_000L,repo.listTransfers().first().profitMilliSyp)
         assertEquals(9_000L,repo.listWallets().single{it.serviceKey==ServiceTransferRepository.SYRIATEL_SHARED}.balanceMinor)
         assertEquals(0L,PartyStatementRepository(context).customer(customerId).closingBalanceSypMinor)
         assertTrue(receivables.listOpenReceivables(customerId).isEmpty())
