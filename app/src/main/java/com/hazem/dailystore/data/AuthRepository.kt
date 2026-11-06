@@ -90,7 +90,7 @@ class AuthRepository(context: Context) {
             db.insertOrThrow("audit_log", null, ContentValues().apply {
                 put("id", UUID.randomUUID().toString()); put("user_id", id)
                 put("action", "INITIAL_ADMIN_SETUP"); put("entity_type", "USER")
-                put("entity_id", id); put("after_json", "{\\"username\\":\\"$cleanUsername\\",\\"role\\":\\"ADMIN\\"}")
+                put("entity_id", id); put("after_json", org.json.JSONObject().put("username", cleanUsername).put("role", "ADMIN").toString())
                 put("created_at", now)
             })
             db.setTransactionSuccessful()
