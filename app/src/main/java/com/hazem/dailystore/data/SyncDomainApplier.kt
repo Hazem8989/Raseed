@@ -1240,17 +1240,20 @@ class SyncDomainApplier(context: Context) {
             val occurredAt=payload.getString("occurred_at")
             val operatingDate=payload.getString("operating_date")
             require(occurredAt.matches(Regex("\\d{4}-\\d{2}-\\d{2}T.*")) && operatingDate.matches(Regex("\\d{4}-\\d{2}-\\d{2}"))) { "تاريخ أو وقت التحويل الأصلي غير صالح" }
-            val delivered=payload.getLong("delivered_minor")
+            val schemaVersion=payload.optInt("schema_version",1)
+            require(schemaVersion in 1..2) { "إصدار بيانات تحويل الرصيد غير مدعوم" }
+            val delivered=if(schemaVersion>=2) payload.getLong("amount_debited_minor") else payload.getLong("delivered_minor")
             val providerFee=payload.getLong("provider_fee_minor")
             require(payload.getLong("profit_minor")>=0L && payload.getLong("customer_charge_minor")>0L) { "قيم ربح أو قبض التحويل غير صالحة" }
             val reference=if(payload.isNull("reference")) null else payload.getString("reference").take(200)
             val note=if(payload.isNull("note")) null else payload.getString("note").take(500)
             val result=ServiceTransferRepository(appContext).executeTransfer(
                 actor,serviceType,delivered,providerFee,mappedAccount,operationId,reference,note,
-                occurredAt,operatingDate,true,"CREDIT",customerId
+                occurredAt,operatingDate,true,"CREDIT",customerId,schemaVersion<2
             )
             require(result.profitMinor==payload.getLong("profit_minor") &&
-                result.customerChargeMinor==payload.getLong("customer_charge_minor")) {
+                result.customerChargeMinor==payload.getLong("customer_charge_minor") &&
+                (schemaVersion<2 || (result.deliveredMilliSyp==payload.getLong("delivered_milli_syp") && result.profitMilliSyp==payload.getLong("profit_milli_syp")))) {
                 "حساب الربح أو مبلغ ذمة التحويل لا يطابق سياسة التحويل المعتمدة على الجهاز الأساسي"
             }
             ServiceTransferReceivableRepository(appContext).enqueueMirrorSnapshot(
