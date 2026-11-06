@@ -25,14 +25,81 @@ data class ManagedUserSummary(
 class AuthRepository(context: Context) {
     private val database = AppDatabase.getInstance(context)
 
-    /** Creates the temporary first manager account only when the users table is empty. */
-    fun ensureInitialAdmin() {
-        val db = database.writableDatabase
+    /**
+     * First-run setup is required when no account exists, or when upgrading an
+     * installation that still has the old, unclaimed temporary admin account.
+     */
+    fun needsInitialAdminSetup(): Boolean {
+        val db = database.readableDatabase
         val count = db.rawQuery("SELECT COUNT(*) FROM users", null).use {
             if (it.moveToFirst()) it.getInt(0) else 0
         }
-        if (count != 0) return
-        createUserInternal("admin", "مدير المتجر", "1234", "ADMIN", null, true)
+        if (count == 0) return true
+        if (count != 1) return false
+        return db.rawQuery(
+            "SELECT 1 FROM users WHERE username='admin' COLLATE NOCASE AND role_key='ADMIN' AND is_active=1 AND must_change_password=1",
+            null
+        ).use { it.moveToFirst() }
+    }
+
+    /**
+     * Creates the first administrator with credentials chosen by the owner.
+     * Also safely claims the legacy temporary admin on already-installed builds.
+     */
+    fun createInitialAdmin(username: String, displayName: String, password: String): String {
+        val cleanUsername = username.trim()
+        val cleanDisplayName = displayName.trim()
+        require(cleanUsername.length >= 3) { "اسم المستخدم يجب ألا يقل عن 3 أحرف" }
+        require(cleanDisplayName.isNotEmpty()) { "اسم العرض مطلوب" }
+        require(isStrongPassword(password)) {
+            "كلمة المرور يجب أن تتكون من 10 أحرف على الأقل وتتضمن حرفاً ورقماً"
+        }
+
+        val db = database.writableDatabase
+        val salt = Base64.encodeToString(ByteArray(16).also { SecureRandom().nextBytes(it) }, Base64.NO_WRAP)
+        val hash = Base64.encodeToString(derive(password, salt), Base64.NO_WRAP)
+        val now = timestamp()
+        db.beginTransaction()
+        try {
+            val count = db.rawQuery("SELECT COUNT(*) FROM users", null).use {
+                if (it.moveToFirst()) it.getInt(0) else 0
+            }
+            val id = if (count == 0) {
+                val newId = UUID.randomUUID().toString()
+                db.insertOrThrow("users", null, ContentValues().apply {
+                    put("id", newId); put("username", cleanUsername); put("display_name", cleanDisplayName)
+                    put("password_hash", hash); put("password_salt", salt); put("role_key", "ADMIN")
+                    put("is_active", 1); put("must_change_password", 0)
+                    put("created_at", now); put("updated_at", now)
+                })
+                newId
+            } else {
+                val legacyId = db.rawQuery(
+                    "SELECT id FROM users WHERE username='admin' COLLATE NOCASE AND role_key='ADMIN' AND is_active=1 AND must_change_password=1 AND (SELECT COUNT(*) FROM users)=1",
+                    null
+                ).use { c -> if (c.moveToFirst()) c.getString(0) else null }
+                    ?: throw IllegalStateException("تم إعداد حساب مستخدم مسبقاً؛ لا يمكن إعادة تهيئة المدير")
+                val changed = db.update("users", ContentValues().apply {
+                    put("username", cleanUsername); put("display_name", cleanDisplayName)
+                    put("password_hash", hash); put("password_salt", salt)
+                    put("must_change_password", 0); put("updated_at", now)
+                }, "id=?", arrayOf(legacyId))
+                require(changed == 1) { "تعذر حفظ حساب المدير" }
+                legacyId
+            }
+            db.insertOrThrow("audit_log", null, ContentValues().apply {
+                put("id", UUID.randomUUID().toString()); put("user_id", id)
+                put("action", "INITIAL_ADMIN_SETUP"); put("entity_type", "USER")
+                put("entity_id", id); put("after_json", "{\\"username\\":\\"$cleanUsername\\",\\"role\\":\\"ADMIN\\"}")
+                put("created_at", now)
+            })
+            db.setTransactionSuccessful()
+            return id
+        } catch (e: SQLiteConstraintException) {
+            throw IllegalArgumentException("اسم المستخدم مستخدم مسبقاً")
+        } finally {
+            db.endTransaction()
+        }
     }
 
     fun authenticate(username: String, password: String): AuthenticatedUser? {
