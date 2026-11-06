@@ -72,9 +72,6 @@ class ServiceTransferReceivableRepository(context:Context) {
                 require(c.moveToFirst()){"دين تحويل الرصيد غير موجود"}
                 arrayOf(c.getLong(0).toString(),c.getString(1),c.getString(2))
             }
-            require(transfer[1]=="POSTED"&&transfer[2] in setOf("OPEN","PARTIALLY_PAID")) {
-                "هذا الدين غير قابل للتحصيل أو أُغلق سابقاً"
-            }
             val existing=db.rawQuery(
                 "SELECT id,transfer_id,amount_minor,payload_hash FROM service_transfer_receivable_payments WHERE operation_id=?",
                 arrayOf(operationId)
@@ -86,6 +83,9 @@ class ServiceTransferReceivableRepository(context:Context) {
                 val state=receivableState(db,transferId,transfer[0]!!.toLong())
                 db.setTransactionSuccessful()
                 return ServiceTransferDebtPaymentResult(existing[0]!!,transferId,state.first,state.second,state.third,true)
+            }
+            require(transfer[1]=="POSTED"&&transfer[2] in setOf("OPEN","PARTIALLY_PAID")) {
+                "هذا الدين غير قابل للتحصيل أو أُغلق سابقاً"
             }
             val account=db.rawQuery("SELECT account_type,currency_code,is_active FROM cash_accounts WHERE id=?",
                 arrayOf(cashAccountId)).use{c->
@@ -104,6 +104,7 @@ class ServiceTransferReceivableRepository(context:Context) {
                 else -> throw IllegalArgumentException("اختر الدرج اليومي الرئيسي أو محفظة إلكترونية نشطة")
             }
             val state=receivableState(db,transferId,transfer[0]!!.toLong())
+            require(state.first<=transfer[0]!!.toLong()){"دفتر تحصيل دين تحويل الرصيد غير متوازن؛ يلزم التدقيق قبل التحصيل"}
             require(state.second>0L){"تم تسديد الدين بالكامل"}
             require(amountSypMinor<=state.second){"مبلغ التحصيل يتجاوز المتبقي المستحق"}
             val now=timestamp();val date=StoreTime.today(db)

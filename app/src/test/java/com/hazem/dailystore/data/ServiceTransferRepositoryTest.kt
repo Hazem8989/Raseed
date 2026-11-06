@@ -181,6 +181,10 @@ class ServiceTransferRepositoryTest {
         assertEquals(0L,immediateReceipts)
         assertEquals(9_000L,repo.listWallets().single{it.serviceKey==ServiceTransferRepository.SYRIATEL_SHARED}.balanceMinor)
         val receivables=ServiceTransferReceivableRepository(context)
+        val replayedTransfer=repo.executeTransfer(actor,ServiceTransferRepository.SYRIATEL_BALANCE,1_000L,0L,wallet,operationId,
+            paymentMode="CREDIT",customerId=customerId)
+        assertTrue(replayedTransfer.replayed)
+        assertEquals(9_000L,repo.listWallets().single{it.serviceKey==ServiceTransferRepository.SYRIATEL_SHARED}.balanceMinor)
         val debt=receivables.listOpenReceivables(customerId).single()
         assertEquals(1_200L,debt.outstandingMinor)
         val paymentOperation="svc-debt-pay-"+UUID.randomUUID()
@@ -197,9 +201,13 @@ class ServiceTransferRepositoryTest {
         } catch(expected:IllegalArgumentException) {
             assertTrue(expected.message!!.contains("يتجاوز"))
         }
-        val final=receivables.collect(actor,transfer.transferId,"svc-debt-final-"+UUID.randomUUID(),drawer.id,700L,"دفعة أخيرة")
+        val finalOperation="svc-debt-final-"+UUID.randomUUID()
+        val final=receivables.collect(actor,transfer.transferId,finalOperation,drawer.id,700L,"دفعة أخيرة")
         assertEquals("PAID",final.status)
         assertEquals(0L,final.outstandingMinor)
+        val finalReplay=receivables.collect(actor,transfer.transferId,finalOperation,drawer.id,700L,"دفعة أخيرة")
+        assertTrue(finalReplay.replayed)
+        assertEquals(1_200L,accounts.balance(drawer.id))
         assertTrue(receivables.listOpenReceivables(customerId).isEmpty())
         val summary=repo.dailySummary().single{it.serviceType==ServiceTransferRepository.SYRIATEL_BALANCE}
         assertEquals(0L,summary.customerReceiptsMinor)

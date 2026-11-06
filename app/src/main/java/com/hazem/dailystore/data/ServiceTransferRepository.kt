@@ -286,6 +286,7 @@ class ServiceTransferRepository(context:Context) {
                     .put("profit_minor",profit).put("customer_charge_minor",charge)
                     .put("cash_account_id",effectiveReceiptAccountId).put("cash_account_type",account.first)
                     .put("cash_account_currency_code",account.second)
+                    .put("payment_mode",paymentMode).put("customer_id",customerId ?: org.json.JSONObject.NULL)
                     .put("reference",reference ?: org.json.JSONObject.NULL).put("note",note ?: org.json.JSONObject.NULL)
                     .put("occurred_at",now).put("operating_date",eventDate)
                 SyncProtocolRepository(appContext).enqueueLocalOperation(

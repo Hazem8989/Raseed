@@ -50,7 +50,8 @@ class AppDatabaseTest {
             "daily_supplier_rollovers", "wallet_daily_openings", "cash_account_transfers",
             "service_wallet_account_links", "system_cash_account_roles", "operation_registry", "sync_queue",
             "sync_conflicts", "audit_log", "inventory_cost_layers", "sales_item_cost_allocations", "inventory_adjustments",
-            "sync_category_mappings", "sync_unit_mappings"
+            "sync_category_mappings", "sync_unit_mappings",
+            "service_transfer_receivables", "service_transfer_receivable_payments"
         )
 
         requiredTables.forEach { table ->
@@ -120,7 +121,8 @@ class AppDatabaseTest {
                 "return_cost_allocations", "inventory_adjustments", "supplier_return_refund_allocations",
                 "supplier_return_cost_allocations", "expense_categories", "operating_expenses", "sync_devices", "sync_pairing_invitations",
                 "sync_protocol_state", "sync_operation_envelopes", "sync_inbox",
-                "sync_acknowledgements", "sync_cursors", "sync_category_mappings", "sync_unit_mappings"
+                "sync_acknowledgements", "sync_cursors", "sync_category_mappings", "sync_unit_mappings",
+                "service_transfer_receivables", "service_transfer_receivable_payments"
             ).forEach { table ->
                 upgraded.rawQuery(
                     "SELECT 1 FROM sqlite_master WHERE type='table' AND name=?",
@@ -144,7 +146,13 @@ class AppDatabaseTest {
         fun dropIndex(name: String) { db.execSQL("DROP INDEX IF EXISTS $name") }
         fun dropTable(name: String) { db.execSQL("DROP TABLE IF EXISTS $name") }
         // Version 27 introduced category mappings and version 28 introduced
-        // unit mappings; remove each table when simulating an earlier schema.
+        // unit mappings; version 31 introduced deferred service-transfer receivables.
+        if (targetVersion < 31) {
+            dropIndex("idx_service_transfer_receivables_customer")
+            dropIndex("idx_service_transfer_debt_payments_transfer")
+            dropTable("service_transfer_receivable_payments")
+            dropTable("service_transfer_receivables")
+        }
         if (targetVersion < 27) dropTable("sync_category_mappings")
         if (targetVersion < 28) dropTable("sync_unit_mappings")
         fun dropColumn(table: String, column: String) {
