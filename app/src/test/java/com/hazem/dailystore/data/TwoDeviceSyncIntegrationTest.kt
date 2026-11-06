@@ -961,10 +961,9 @@ class TwoDeviceSyncIntegrationTest {
                 assertEquals(operationId,id);assertEquals(secondaryId,recipient);probeAck=frame;true
             }
         )
+        val probeFrame=secondaryRepository.encryptedAuthenticatedOutbox(operationId,primaryId)
         setLocalDeviceId(primaryId);AppDatabase.installForTests(primaryDb)
-        primaryProbeProcessor.onEncryptedFrame(
-            secondaryId,operationId,secondaryRepository.encryptedAuthenticatedOutbox(operationId,primaryId)
-        )
+        primaryProbeProcessor.onEncryptedFrame(secondaryId,operationId,probeFrame)
         assertEquals(null,probeError)
         setLocalDeviceId(secondaryId);AppDatabase.installForTests(secondaryDb)
         SyncRelayProcessor(secondaryRepository,SyncDomainApplier(context),sendFrame={_,_,_->true})
