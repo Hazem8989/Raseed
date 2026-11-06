@@ -63,7 +63,7 @@ class ServiceTransferRepositoryTest {
         assertEquals(90_000L, repo.listWallets().single { it.serviceKey == ServiceTransferRepository.SYRIATEL_SHARED }.balanceMinor)
 
         val second = repo.executeTransfer(actor, ServiceTransferRepository.SYRIATEL_CASH,
-            20_000L, 0L, drawer.id, "svc-cash-" + UUID.randomUUID())
+            20_000L, 2L, drawer.id, "svc-cash-" + UUID.randomUUID())
         assertEquals(2_000L, second.profitMinor)
         assertEquals(70_000L, repo.listWallets().single { it.serviceKey == ServiceTransferRepository.SYRIATEL_SHARED }.balanceMinor)
         val daily = repo.dailySummary()
@@ -72,7 +72,7 @@ class ServiceTransferRepositoryTest {
         assertEquals(2_000L, normal.profitMinor)
         assertEquals(2_000L, cash.profitMinor)
         assertEquals(12_500L, normal.customerReceiptsMinor)
-        assertEquals(22_000L, cash.customerReceiptsMinor)
+        assertEquals(22_002L, cash.customerReceiptsMinor)
         assertEquals(10_000L, normal.rechargeReserveMinor)
         assertEquals(20_000L, cash.rechargeReserveMinor)
     }
