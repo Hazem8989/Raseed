@@ -1252,6 +1252,15 @@ class TwoDeviceSyncIntegrationTest {
         assertTrue("The secondary must receive the service-wallet link, not seed it locally",
             scalar(secondaryDb,"SELECT COUNT(*) FROM service_wallet_account_links WHERE service_key=? AND account_id=?",
                 ServiceTransferRepository.SYRIATEL_SHARED,mirroredServiceAccount)==1)
+        var secondaryCashTransferRejected=false
+        try {
+            ServiceTransferRepository(context).executeTransfer(
+                secondaryAdminId,ServiceTransferRepository.SYRIATEL_BALANCE,1_000L,0L,
+                mirroredServiceAccount,UUID.randomUUID().toString(),paymentMode="CASH"
+            )
+        } catch(_:IllegalArgumentException) { secondaryCashTransferRejected=true }
+        assertTrue("Secondary service transfer must be deferred-only",secondaryCashTransferRejected)
+
         val transferOperation=UUID.randomUUID().toString()
         val pendingTransfer=ServiceTransferRepository(context).executeTransfer(
             secondaryAdminId,ServiceTransferRepository.SYRIATEL_BALANCE,10_000L,0L,
@@ -1259,6 +1268,7 @@ class TwoDeviceSyncIntegrationTest {
         )
         assertEquals("pending-service-transfer-$transferOperation",pendingTransfer.transferId)
         assertEquals(0,scalar(secondaryDb,"SELECT COUNT(*) FROM service_transfers WHERE operation_id=?",transferOperation))
+        assertEquals(0,scalar(secondaryDb,"SELECT COUNT(*) FROM service_wallet_transactions WHERE operation_id=?",transferOperation))
         assertEquals(0,scalar(secondaryDb,"SELECT COUNT(*) FROM cash_transactions WHERE operation_id=?",transferOperation))
         assertEquals("PENDING",queueStatus(secondaryDb,transferOperation))
 
