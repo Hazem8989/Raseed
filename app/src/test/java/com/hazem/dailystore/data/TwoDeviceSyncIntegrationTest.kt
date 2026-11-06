@@ -989,7 +989,7 @@ class TwoDeviceSyncIntegrationTest {
         )
         primaryRepository.mapSecondaryCashAccount(primaryAdminId,secondaryId,receiptWallet.id,receiptWallet.id)
         val serviceRepo=ServiceTransferRepository(context)
-        serviceRepo.setOpeningBalance(primaryAdminId,ServiceTransferRepository.SYRIATEL_SHARED,50_000L,"رصيد اختبار")
+        serviceRepo.setOpeningBalance(primaryAdminId,ServiceTransferRepository.SHAM_CASH,50_000L,"رصيد اختبار شام كاش")
         val transferOperation=UUID.randomUUID().toString()
         val transfer=serviceRepo.executeTransfer(
             primaryAdminId,ServiceTransferRepository.SHAM_CASH_TRANSFER,10_000L,0L,
