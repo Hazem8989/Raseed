@@ -257,7 +257,9 @@ class SyncProtocolRepository(private val context: Context, private val credentia
                 "لا يمكن تحويل جهاز أساسي قائم إلى ثانوي تلقائياً"
             }
             val now = timestamp()
-            clearUncommittedLocalServiceWalletSeedsForSecondary(db, actorUserId, now)
+            if (oldRole == null && enrolledRole == null) {
+                clearUncommittedLocalServiceWalletSeedsForSecondary(db, actorUserId, now)
+            }
             db.insertWithOnConflict("sync_devices", null, ContentValues().apply {
                 put("device_id", primaryDeviceId); put("display_name", "الجهاز الأساسي")
                 put("device_role", "PRIMARY"); put("status", "ACTIVE")
