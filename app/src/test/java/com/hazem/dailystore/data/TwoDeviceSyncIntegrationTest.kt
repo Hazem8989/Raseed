@@ -986,7 +986,8 @@ class TwoDeviceSyncIntegrationTest {
         )
         assertEquals(12_000L,transfer.customerChargeMinor)
         assertEquals(0,scalar(primaryDb,
-            "SELECT COUNT(*) FROM cash_transactions WHERE operation_id=?",transferOperation))
+            "SELECT COUNT(*) FROM cash_transactions WHERE source_id=? AND transaction_type='SERVICE_TRANSFER_RECEIPT'",
+            transfer.transferId))
         val referenceItems=primaryRepository.pendingOutboxForDevice(secondaryId)
         assertTrue(referenceItems.any{it.entityType=="CUSTOMER"&&it.entityId==customer.id})
         assertTrue(referenceItems.any{it.entityType=="CASH_ACCOUNT"&&it.entityId==receiptWallet.id})
