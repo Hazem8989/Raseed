@@ -53,6 +53,7 @@ import com.hazem.dailystore.data.CashAccountRepository
 import com.hazem.dailystore.data.CashAccountSummary
 import com.hazem.dailystore.data.DailyBalanceRepository
 import com.hazem.dailystore.data.ServiceTransferRepository
+import com.hazem.dailystore.data.ServiceTransferReceivableRepository
 import com.hazem.dailystore.data.PurchasePaymentRepository
 import com.hazem.dailystore.data.PurchasePaymentRecord
 import com.hazem.dailystore.data.PurchaseInvoicePaymentSummary
@@ -2022,6 +2023,23 @@ class MainActivity : Activity() {
         summaryCard.addView(label("المطلوب حالياً: " + formatSypAmount(summary?.outstandingSypMinor ?: 0L) + " ل.س",
             17f, green, true, Gravity.RIGHT))
         content.addView(summaryCard, fieldParams(-2, dp(16)))
+        val serviceDebts=ServiceTransferReceivableRepository(this).listOpenReceivables(customerId)
+        if(serviceDebts.isNotEmpty()) {
+            content.addView(sectionHeading("تحويلات الرصيد الآجلة"))
+            serviceDebts.forEach { debt ->
+                val serviceName=when(debt.serviceType) {
+                    ServiceTransferRepository.SYRIATEL_BALANCE -> "سيرياتيل العادي"
+                    ServiceTransferRepository.SYRIATEL_CASH -> "سيرياتيل كاش"
+                    else -> "شام كاش"
+                }
+                val debtCard=LinearLayout(this).apply{orientation=LinearLayout.VERTICAL;background=cardBackground();setPadding(dp(12),dp(10),dp(12),dp(10))}
+                debtCard.addView(label(serviceName+" • "+StoreTime.formatTimestamp(AppDatabase.getInstance(this).readableDatabase,debt.createdAt),13f,green,true,Gravity.RIGHT))
+                debtCard.addView(label("إجمالي الدين: "+formatSypAmount(debt.chargeMinor)+" ل.س • المسدد: "+formatSypAmount(debt.paidMinor)+" ل.س",12f,textColor,false,Gravity.RIGHT))
+                debtCard.addView(label("المتبقي: "+formatSypAmount(debt.outstandingMinor)+" ل.س",15f,gold.toInt(),true,Gravity.RIGHT))
+                debtCard.addView(smallButton("تحصيل دفعة"){showServiceTransferDebtPaymentDialog(debt.transferId){showCustomerAccount(customerId)}},fieldParams(dp(42),dp(6)))
+                content.addView(debtCard,fieldParams(-2,dp(7)))
+            }
+        }
         val customerStatement = PartyStatementRepository(this).customer(customerId)
         val customerExportRow = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
         customerExportRow.addView(smallButton("تصدير Excel") {
@@ -3012,10 +3030,27 @@ class MainActivity : Activity() {
             val card=LinearLayout(this).apply{orientation=LinearLayout.VERTICAL;setPadding(dp(12),dp(10),dp(12),dp(10));background=cardBackground()}
             card.addView(label(d.serviceName+" • "+d.operationCount+" عملية",14f,green,true,Gravity.RIGHT))
             card.addView(label("إجمالي ما أُرسل من رصيد الخدمة: "+formatSypAmount(d.deliveredMinor)+" ل.س",12f,textColor,false,Gravity.RIGHT))
-            card.addView(label("إجمالي ما قبضه المتجر من الزبائن: "+formatSypAmount(d.customerReceiptsMinor)+" ل.س",12f,textColor,false,Gravity.RIGHT))
+            card.addView(label("إجمالي ما قبضه المتجر من الزبائن نقداً أو إلكترونياً: "+formatSypAmount(d.customerReceiptsMinor)+" ل.س",12f,textColor,false,Gravity.RIGHT))
+            if(d.creditChargesMinor>0L) card.addView(label("ديون تحويلات آجلة جديدة: "+formatSypAmount(d.creditChargesMinor)+" ل.س",12f,gold.toInt(),true,Gravity.RIGHT))
             card.addView(label("ربح المتجر: "+formatSypAmount(d.profitMinor)+" ل.س • رسوم الشركة: "+formatSypAmount(d.providerFeeMinor)+" ل.س",12f,green,true,Gravity.RIGHT))
             card.addView(label("رسوم التعبئة المدفوعة فعلياً اليوم: "+formatSypAmount(d.rechargeFeePaidMinor)+" ل.س • قيمة الرصيد اللازم تعويضه: "+formatSypAmount(d.rechargeReserveMinor)+" ل.س",12f,mutedColor,true,Gravity.RIGHT))
             content.addView(card,fieldParams(-2,dp(7)))
+        }
+        content.addView(sectionHeading("ديون تحويل الرصيد الآجلة"))
+        val openServiceDebts=ServiceTransferReceivableRepository(this).listOpenReceivables()
+        if(openServiceDebts.isEmpty()) content.addView(label("لا توجد ديون تحويل رصيد مفتوحة.",12f,mutedColor,false,Gravity.CENTER))
+        openServiceDebts.forEach { debt ->
+            val typeName=when(debt.serviceType) {
+                ServiceTransferRepository.SYRIATEL_BALANCE -> "سيرياتيل العادي"
+                ServiceTransferRepository.SYRIATEL_CASH -> "سيرياتيل كاش"
+                else -> "شام كاش"
+            }
+            val debtCard=LinearLayout(this).apply{orientation=LinearLayout.VERTICAL;setPadding(dp(12),dp(10),dp(12),dp(10));background=cardBackground()}
+            debtCard.addView(label(debt.customerName+" • "+typeName,14f,green,true,Gravity.RIGHT))
+            debtCard.addView(label("إجمالي الدين: "+formatSypAmount(debt.chargeMinor)+" ل.س • المسدد: "+formatSypAmount(debt.paidMinor)+" ل.س",12f,textColor,false,Gravity.RIGHT))
+            debtCard.addView(label("المتبقي: "+formatSypAmount(debt.outstandingMinor)+" ل.س",15f,gold.toInt(),true,Gravity.RIGHT))
+            debtCard.addView(smallButton("تحصيل دفعة") { showServiceTransferDebtPaymentDialog(debt.transferId) },fieldParams(dp(42),dp(6)))
+            content.addView(debtCard,fieldParams(-2,dp(7)))
         }
         content.addView(label("المقبوض النقدي يذهب إلى الدرج الرئيسي، والمقبوض الإلكتروني يضاف إلى محفظة الخدمة نفسها افتراضياً أو إلى المحفظة التي تختارها. عند تصريف المحفظة إلى النقدية تنقص المحفظة ويزيد الصندوق بالمبلغ نفسه. عمولة 2% تُسجل فقط عند تعبئة رصيد سيرياتيل أو شام كاش من تاجر خارجي، ولا تُضاف إلى تحويلات الزبائن.",11f,mutedColor,false,Gravity.RIGHT).apply{setPadding(0,dp(3),0,dp(10))})
         content.addView(sectionHeading("سجل تحويلات الرصيد"))
@@ -3026,11 +3061,63 @@ class MainActivity : Activity() {
             card.addView(label(r.serviceName+" • "+if(r.status=="REVERSED")"معكوسة" else "منفذة",15f,green,true,Gravity.RIGHT))
             card.addView(label("الواصل للزبون: "+formatSypAmount(r.deliveredMinor)+" ل.س",13f,textColor,false,Gravity.RIGHT))
             card.addView(label("ربح المتجر: "+formatSypAmount(r.profitMinor)+" • رسوم الشركة: "+formatSypAmount(r.providerFeeMinor)+" ل.س",12f,mutedColor,false,Gravity.RIGHT))
-            card.addView(label("المقبوض: "+formatSypAmount(r.customerChargeMinor)+" ل.س • "+r.receiptAccountName+(if(r.receiptChannel=="ELECTRONIC")" (إلكتروني)" else " (نقدي)"),13f,green,true,Gravity.RIGHT))
+            if(r.paymentMode=="CREDIT") {
+                card.addView(label("آجل على الزبون: "+(r.customerName ?: "غير معروف"),13f,gold.toInt(),true,Gravity.RIGHT))
+                card.addView(label("المسدد: "+formatSypAmount(r.paidMinor)+" ل.س • المتبقي: "+formatSypAmount(r.outstandingMinor)+" ل.س",12f,textColor,false,Gravity.RIGHT))
+            } else {
+                card.addView(label("المقبوض: "+formatSypAmount(r.customerChargeMinor)+" ل.س • "+r.receiptAccountName+(if(r.receiptChannel=="ELECTRONIC")" (إلكتروني)" else " (نقدي)"),13f,green,true,Gravity.RIGHT))
+            }
             card.addView(label(StoreTime.formatTimestamp(AppDatabase.getInstance(this).readableDatabase, r.createdAt),10f,mutedColor,false,Gravity.RIGHT))
             content.addView(card,fieldParams(-2,dp(8)))
         }
         body.addView(content);page.addView(header,matchWidth());page.addView(body,LinearLayout.LayoutParams(-1,0,1f));setContentView(page)
+    }
+
+    private fun showServiceTransferDebtPaymentDialog(transferId:String,onSaved:(()->Unit)?=null) {
+        val repository=ServiceTransferReceivableRepository(this)
+        val debt=repository.listOpenReceivables().firstOrNull{it.transferId==transferId}
+        if(debt==null) {
+            Toast.makeText(this,"هذا الدين غير مفتوح أو تم تسديده.",Toast.LENGTH_SHORT).show()
+            if(onSaved!=null)onSaved() else showServiceTransfers()
+            return
+        }
+        val accountRepository=CashAccountRepository(this)
+        val drawer=accountRepository.currentDayPrimaryDrawer()
+        val options=accountRepository.listActive().filter{
+            it.currencyCode=="SYP"&&(it.accountType=="WALLET"||(it.accountType=="CASH_BOX"&&it.id==drawer?.id))
+        }
+        if(options.isEmpty()) {
+            AlertDialog.Builder(this).setMessage("عيّن درج اليوم الرئيسي أو أنشئ محفظة قبض إلكترونية بالليرة السورية أولاً.")
+                .setPositiveButton("حسناً",null).show()
+            return
+        }
+        val form=LinearLayout(this).apply{orientation=LinearLayout.VERTICAL;setPadding(dp(18),dp(8),dp(18),dp(4))}
+        val amount=fieldForDialog("مبلغ الدفعة • المتبقي "+formatSypAmount(debt.outstandingMinor)+" ل.س")
+            .apply{inputType=InputType.TYPE_CLASS_NUMBER or InputType.TYPE_NUMBER_FLAG_DECIMAL}
+        val account=Spinner(this).apply{adapter=ArrayAdapter(this@MainActivity,android.R.layout.simple_spinner_dropdown_item,
+            options.map{it.name+if(it.accountType=="WALLET")" • قبض إلكتروني" else " • درج اليوم الرئيسي"})}
+        val note=fieldForDialog("ملاحظة / مرجع التحصيل")
+        form.addView(amount,fieldParams(dp(48),dp(8)))
+        form.addView(label("استلام الدفعة في",12f,mutedColor,false,Gravity.RIGHT))
+        form.addView(account,fieldParams(dp(48),dp(8)))
+        form.addView(note,fieldParams(dp(48),dp(8)))
+        val dialog=AlertDialog.Builder(this).setTitle("تحصيل دين تحويل الرصيد").setView(form)
+            .setNegativeButton("إلغاء",null).setPositiveButton("تسجيل التحصيل",null).create()
+        dialog.setOnShowListener{dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener{
+            try {
+                val selected=options.getOrNull(account.selectedItemPosition)?:error("اختر حساب القبض")
+                val result=repository.collect(currentUserId?:error("جلسة المستخدم غير صالحة"),transferId,
+                    UUID.randomUUID().toString(),selected.id,parseSypAmount(amount.text.toString()),
+                    note.text.toString().trim().ifEmpty{null})
+                dialog.dismiss()
+                AlertDialog.Builder(this).setTitle("تم تسجيل التحصيل")
+                    .setMessage("المسدد حتى الآن: "+formatSypAmount(result.paidMinor)+" ل.س\nالمتبقي: "+formatSypAmount(result.outstandingMinor)+" ل.س")
+                    .setPositiveButton("حسناً"){_,_->if(onSaved!=null)onSaved() else showServiceTransfers()}.show()
+            } catch(e:Exception) {
+                Toast.makeText(this,e.message?:"تعذر تسجيل التحصيل",Toast.LENGTH_LONG).show()
+            }
+        }}
+        dialog.show()
     }
 
     private fun showServiceOpeningDialog() {
@@ -3087,12 +3174,21 @@ class MainActivity : Activity() {
 
     private fun showServiceTransferDialog() {
         val repo=ServiceTransferRepository(this)
+        repo.ensureSystemAccounts()
         val accountRepo=CashAccountRepository(this)
         val drawer=accountRepo.currentDayPrimaryDrawer()
         val receiptOptions=accountRepo.listActive().filter{it.currencyCode=="SYP"&&(it.accountType=="WALLET"||(it.accountType=="CASH_BOX"&&it.id==drawer?.id))}
         if(receiptOptions.isEmpty()){AlertDialog.Builder(this).setMessage("عيّن درج اليوم الرئيسي أو أنشئ محفظة قبض إلكترونية بالليرة السورية قبل تنفيذ التحويل.").setPositiveButton("فتح الصناديق والمحافظ"){_,_->showCashAccounts()}.show();return}
         val form=LinearLayout(this).apply{orientation=LinearLayout.VERTICAL;setPadding(dp(18),dp(8),dp(18),dp(4))}
         val service=Spinner(this).apply{adapter=ArrayAdapter(this@MainActivity,android.R.layout.simple_spinner_dropdown_item,listOf("سيرياتيل العادي • ربح 20%","سيرياتيل كاش • ربح 10%","شام كاش • ربح 5%"))}
+        val paymentMode=Spinner(this).apply{adapter=ArrayAdapter(this@MainActivity,android.R.layout.simple_spinner_dropdown_item,listOf("نقدي • قبض فوري","آجل • يسدد لاحقاً"))}
+        val customerOptions=mutableListOf<Pair<String,String>>()
+        AppDatabase.getInstance(this).readableDatabase.rawQuery("SELECT id,name FROM customers WHERE is_active=1 ORDER BY name COLLATE NOCASE",null).use{c->
+            while(c.moveToNext())customerOptions.add(c.getString(0) to c.getString(1))
+        }
+        val customerSpinner=Spinner(this).apply{adapter=ArrayAdapter(this@MainActivity,android.R.layout.simple_spinner_dropdown_item,
+            customerOptions.map{it.second}.ifEmpty{listOf("لا يوجد عملاء نشطون")})}
+        val customerLabel=label("الزبون المدين",12f,mutedColor,false,Gravity.RIGHT)
         val amount=fieldForDialog("المبلغ الواصل للزبون").apply{inputType=InputType.TYPE_CLASS_NUMBER or InputType.TYPE_NUMBER_FLAG_DECIMAL}
         val companyFee=fieldForDialog("رسوم الشركة (أدخلها يدوياً إن وجدت)").apply{inputType=InputType.TYPE_CLASS_NUMBER or InputType.TYPE_NUMBER_FLAG_DECIMAL;setText("0")}
         val receipt=Spinner(this).apply{adapter=ArrayAdapter(this@MainActivity,android.R.layout.simple_spinner_dropdown_item,receiptOptions.map{it.name+if(it.accountType=="WALLET")" • قبض إلكتروني" else " • قبض نقدي"})}
@@ -3126,21 +3222,47 @@ class MainActivity : Activity() {
             override fun afterTextChanged(s:Editable?){}
         }
         amount.addTextChangedListener(watcher);companyFee.addTextChangedListener(watcher)
+        val receiptLabel=label("استلام المبلغ من الزبون في",12f,mutedColor,false,Gravity.RIGHT)
+        fun updatePaymentModeVisibility() {
+            val credit=paymentMode.selectedItemPosition==1
+            customerLabel.visibility=if(credit)View.VISIBLE else View.GONE
+            customerSpinner.visibility=if(credit)View.VISIBLE else View.GONE
+            receiptLabel.visibility=if(credit)View.GONE else View.VISIBLE
+            receipt.visibility=if(credit)View.GONE else View.VISIBLE
+            if(credit&&customerOptions.isEmpty()) {
+                Toast.makeText(this,"أضف ملف الزبون أولاً قبل تسجيل تحويل آجل.",Toast.LENGTH_LONG).show()
+                paymentMode.setSelection(0)
+            }
+        }
+        paymentMode.onItemSelectedListener=object:android.widget.AdapterView.OnItemSelectedListener{
+            override fun onNothingSelected(parent:android.widget.AdapterView<*>?){}
+            override fun onItemSelected(parent:android.widget.AdapterView<*>?,view:View?,position:Int,id:Long){updatePaymentModeVisibility()}
+        }
         form.addView(label("نوع الخدمة",12f,mutedColor,false,Gravity.RIGHT));form.addView(service,fieldParams(dp(48),dp(8)))
+        form.addView(label("طريقة السداد",12f,mutedColor,false,Gravity.RIGHT));form.addView(paymentMode,fieldParams(dp(48),dp(8)))
+        form.addView(customerLabel);form.addView(customerSpinner,fieldParams(dp(48),dp(8)))
         form.addView(amount,fieldParams(dp(48),dp(8)));form.addView(companyFee,fieldParams(dp(48),dp(8)))
-        form.addView(preview,fieldParams(-2,dp(10)));form.addView(label("استلام المبلغ من الزبون في",12f,mutedColor,false,Gravity.RIGHT))
-        form.addView(receipt,fieldParams(dp(48),dp(8)));form.addView(ref,fieldParams(dp(48),dp(8)));updatePreview()
+        form.addView(preview,fieldParams(-2,dp(10)));form.addView(receiptLabel);form.addView(receipt,fieldParams(dp(48),dp(8)))
+        form.addView(ref,fieldParams(dp(48),dp(8)));updatePreview();updatePaymentModeVisibility()
         val op=UUID.randomUUID().toString()
         val dialog=AlertDialog.Builder(this).setTitle("تنفيذ تحويل رصيد").setView(ScrollView(this).apply{addView(form)}).setNegativeButton("إلغاء",null).setPositiveButton("تنفيذ التحويل",null).create()
         dialog.setOnShowListener{dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener{
             try{
                 val type=when(service.selectedItemPosition){0->ServiceTransferRepository.SYRIATEL_BALANCE;1->ServiceTransferRepository.SYRIATEL_CASH;else->ServiceTransferRepository.SHAM_CASH_TRANSFER}
-                val selected=receiptOptions.getOrNull(receipt.selectedItemPosition)?:error("اختر حساب استلام المبلغ")
+                val credit=paymentMode.selectedItemPosition==1
+                val selected=if(credit)null else receiptOptions.getOrNull(receipt.selectedItemPosition)?:error("اختر حساب استلام المبلغ")
+                val customer=if(credit)customerOptions.getOrNull(customerSpinner.selectedItemPosition)?:error("اختر الزبون") else null
                 val note=ref.text.toString().trim().ifEmpty{null}
-                val result=repo.executeTransfer(currentUserId?:error("جلسة المستخدم غير صالحة"),type,parseSypAmount(amount.text.toString()),parseSypAmount(companyFee.text.toString()),selected.id,op,note,note)
+                val serviceKey=if(type==ServiceTransferRepository.SHAM_CASH_TRANSFER)ServiceTransferRepository.SHAM_CASH else ServiceTransferRepository.SYRIATEL_SHARED
+                val receiptAccountId=if(credit)repo.serviceAccountId(serviceKey) else selected!!.id
+                val result=repo.executeTransfer(currentUserId?:error("جلسة المستخدم غير صالحة"),type,
+                    parseSypAmount(amount.text.toString()),parseSypAmount(companyFee.text.toString()),receiptAccountId,op,note,note,
+                    paymentMode=if(credit)"CREDIT" else "CASH",customerId=customer?.first)
                 dialog.dismiss()
-                AlertDialog.Builder(this).setTitle("تم تسجيل التحويل")
-                    .setMessage("الواصل للزبون: "+formatSypAmount(result.deliveredMinor)+" ل.س\nربح المتجر: "+formatSypAmount(result.profitMinor)+" ل.س\nرسوم الشركة: "+formatSypAmount(result.providerFeeMinor)+" ل.س\nالمقبوض من الزبون: "+formatSypAmount(result.customerChargeMinor)+" ل.س")
+                val settlement=if(credit)"طريقة السداد: آجل\nالزبون: "+customer!!.second+"\nالمبلغ المستحق: "+formatSypAmount(result.customerChargeMinor)+" ل.س"
+                    else "المقبوض من الزبون: "+formatSypAmount(result.customerChargeMinor)+" ل.س"
+                AlertDialog.Builder(this).setTitle(if(credit)"تم تنفيذ التحويل وتسجيل الدين" else "تم تسجيل التحويل")
+                    .setMessage("الواصل للزبون: "+formatSypAmount(result.deliveredMinor)+" ل.س\nربح المتجر: "+formatSypAmount(result.profitMinor)+" ل.س\nرسوم الشركة: "+formatSypAmount(result.providerFeeMinor)+" ل.س\n"+settlement)
                     .setPositiveButton("حسناً"){_,_->showServiceTransfers()}.show()
             }catch(e:Exception){Toast.makeText(this,e.message?:"تعذر تنفيذ التحويل",Toast.LENGTH_LONG).show()}
         }}

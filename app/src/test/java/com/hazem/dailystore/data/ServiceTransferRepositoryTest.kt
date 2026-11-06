@@ -156,6 +156,56 @@ class ServiceTransferRepositoryTest {
         assertEquals(6_000L, report.accounts.single { it.accountId == drawer.id }.closingMinor)
     }
 
+    @Test fun deferredTransferCreatesReceivableWithoutImmediateReceiptAndSupportsPartialSettlement() {
+        val context=RuntimeEnvironment.getApplication()
+        val customerId="service-credit-customer-"+UUID.randomUUID()
+        val now="2026-11-06T10:00:00.000Z"
+        database.writableDatabase.execSQL(
+            "INSERT INTO customers(id,name,is_active,created_at,updated_at) VALUES(?,?,1,?,?)",
+            arrayOf(customerId,"زبون تحويل آجل",now,now)
+        )
+        val drawer=accounts.create(actor,"درج تحصيل دين "+UUID.randomUUID(),"CASH_BOX","SYP",0L)
+        accounts.setCurrentDayPrimaryDrawer("ADMIN",actor,drawer.id)
+        val wallet=repo.serviceAccountId(ServiceTransferRepository.SYRIATEL_SHARED)
+        repo.setOpeningBalance(actor,ServiceTransferRepository.SYRIATEL_SHARED,10_000L)
+        val operationId="svc-credit-"+UUID.randomUUID()
+        val transfer=repo.executeTransfer(actor,ServiceTransferRepository.SYRIATEL_BALANCE,1_000L,0L,wallet,operationId,
+            paymentMode="CREDIT",customerId=customerId)
+        assertEquals(1_000L,transfer.deliveredMinor)
+        assertEquals(1_200L,transfer.customerChargeMinor)
+        assertEquals(0L,accounts.balance(drawer.id))
+        val immediateReceipts=database.readableDatabase.rawQuery(
+            "SELECT COUNT(*) FROM cash_transactions WHERE transaction_type='SERVICE_TRANSFER_RECEIPT' AND source_id=?",
+            arrayOf(transfer.transferId)
+        ).use{it.moveToFirst();it.getLong(0)}
+        assertEquals(0L,immediateReceipts)
+        assertEquals(9_000L,repo.listWallets().single{it.serviceKey==ServiceTransferRepository.SYRIATEL_SHARED}.balanceMinor)
+        val receivables=ServiceTransferReceivableRepository(context)
+        val debt=receivables.listOpenReceivables(customerId).single()
+        assertEquals(1_200L,debt.outstandingMinor)
+        val paymentOperation="svc-debt-pay-"+UUID.randomUUID()
+        val first=receivables.collect(actor,transfer.transferId,paymentOperation,drawer.id,500L,"دفعة أولى")
+        assertEquals(500L,first.paidMinor)
+        assertEquals(700L,first.outstandingMinor)
+        assertEquals(500L,accounts.balance(drawer.id))
+        val replay=receivables.collect(actor,transfer.transferId,paymentOperation,drawer.id,500L,"دفعة أولى")
+        assertTrue(replay.replayed)
+        assertEquals(500L,accounts.balance(drawer.id))
+        try {
+            receivables.collect(actor,transfer.transferId,"svc-overpay-"+UUID.randomUUID(),drawer.id,701L)
+            throw AssertionError("Over-collection must be rejected")
+        } catch(expected:IllegalArgumentException) {
+            assertTrue(expected.message!!.contains("يتجاوز"))
+        }
+        val final=receivables.collect(actor,transfer.transferId,"svc-debt-final-"+UUID.randomUUID(),drawer.id,700L,"دفعة أخيرة")
+        assertEquals("PAID",final.status)
+        assertEquals(0L,final.outstandingMinor)
+        assertTrue(receivables.listOpenReceivables(customerId).isEmpty())
+        val summary=repo.dailySummary().single{it.serviceType==ServiceTransferRepository.SYRIATEL_BALANCE}
+        assertEquals(0L,summary.customerReceiptsMinor)
+        assertEquals(1_200L,summary.creditChargesMinor)
+    }
+
     private fun dailyTransferToCash(walletId:String,drawerId:String,amount:Long) {
         DailyBalanceRepository(RuntimeEnvironment.getApplication()).transferWalletToDrawer(
             actor,walletId,drawerId,amount,"service-wallet-cash-" + UUID.randomUUID(),"تصريف قبض خدمة","تحويل داخلي"
