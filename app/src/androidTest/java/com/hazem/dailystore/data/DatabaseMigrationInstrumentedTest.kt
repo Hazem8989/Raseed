@@ -90,9 +90,15 @@ class DatabaseMigrationInstrumentedTest {
             )
             val hexKey = key.joinToString("") { "%02x".format(it) }
             val escapedEncryptedPath = encrypted.absolutePath.replace("'", "''")
-            // The x'...' expression must be parsed as SQL, not bound as text.
+            // Use the same passphrase representation for ATTACH and reopen.
+            // x'...' tells SQLCipher to treat the bytes as a raw cipher key,
+            // while openDatabase(ByteArray) treats its bytes as a passphrase
+            // and derives the cipher key. Mixing the two produces an unreadable
+            // destination even though sqlcipher_export itself completes.
+            val sqlCipherPassphrase = hexKey.toByteArray(Charsets.US_ASCII)
+            val escapedPassphrase = hexKey.replace("'", "''")
             sourceCipherConnection.execSQL(
-                "ATTACH DATABASE '$escapedEncryptedPath' AS encrypted KEY \"x'$hexKey'\""
+                "ATTACH DATABASE '$escapedEncryptedPath' AS encrypted KEY '$escapedPassphrase'"
             )
             sourceCipherConnection.rawQuery("SELECT sqlcipher_export('encrypted')", null).use { cursor ->
                 assertTrue("sqlcipher_export must return a result row", cursor.moveToFirst())
@@ -144,7 +150,7 @@ class DatabaseMigrationInstrumentedTest {
 
             encryptedConnection = CipherSQLiteDatabase.openDatabase(
                 encrypted.absolutePath,
-                key,
+                sqlCipherPassphrase,
                 null,
                 CipherSQLiteDatabase.OPEN_READWRITE,
                 null,
