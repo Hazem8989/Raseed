@@ -48,9 +48,24 @@ class BackupKeyEnvelopeTest {
             BackupKeyEnvelope.unwrap(byteArrayOf(1, 2, 3), password)
         }
         val envelope = BackupKeyEnvelope.wrap(key, password)
-        envelope[8] = 0
+        // Version is a big-endian Int at bytes 8..11. Mutate its least
+        // significant byte; changing byte 8 to zero leaves version 1 unchanged.
+        envelope[11] = (envelope[11].toInt() xor 0x01).toByte()
         assertThrows(IllegalArgumentException::class.java) {
             BackupKeyEnvelope.unwrap(envelope, password)
+        }
+
+        val invalidKdfParameters = BackupKeyEnvelope.wrap(key, password)
+        // Iteration count is the big-endian Int at bytes 12..15.
+        invalidKdfParameters[15] = 1
+        assertThrows(IllegalArgumentException::class.java) {
+            BackupKeyEnvelope.unwrap(invalidKdfParameters, password)
+        }
+
+        val invalidMagic = BackupKeyEnvelope.wrap(key, password)
+        invalidMagic[0] = (invalidMagic[0].toInt() xor 0x01).toByte()
+        assertThrows(IllegalArgumentException::class.java) {
+            BackupKeyEnvelope.unwrap(invalidMagic, password)
         }
     }
 
