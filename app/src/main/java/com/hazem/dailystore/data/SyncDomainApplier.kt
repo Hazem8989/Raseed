@@ -1314,11 +1314,12 @@ class SyncDomainApplier(context: Context) {
                     ServiceTransferRepository.SHAM_CASH_TRANSFER
                 )){"بيانات تعريف ذمة تحويل الرصيد غير صالحة"}
             val delivered=p.getLong("delivered_minor")
+            val deliveredMilliSyp=p.optLong("delivered_milli_syp",Math.multiplyExact(delivered,1000L))
             val charge=p.getLong("charge_minor")
             val paid=p.getLong("paid_minor")
             val outstanding=p.getLong("outstanding_minor")
             val reversed=p.optString("status")=="REVERSED"
-            require(delivered>0L&&charge>=delivered&&paid>=0L&&paid<=charge&&
+            require(delivered>0L&&deliveredMilliSyp>0L&&deliveredMilliSyp<=Math.multiplyExact(charge,1000L)&&charge>=delivered&&paid>=0L&&paid<=charge&&
                 (if(reversed) paid==0L&&outstanding==0L else outstanding==charge-paid)) {
                 "مبالغ ذمة تحويل الرصيد غير متوازنة"
             }
@@ -1375,7 +1376,7 @@ class SyncDomainApplier(context: Context) {
             val mirrorValues=ContentValues().apply{
                 put("transfer_id",row[3]);put("customer_id",p.getString("customer_id"))
                 put("customer_name",p.getString("customer_name"));put("service_type",p.getString("service_type"))
-                put("delivered_minor",delivered);put("charge_minor",charge);put("paid_minor",paid)
+                put("delivered_minor",delivered);put("delivered_milli_syp",deliveredMilliSyp);put("charge_minor",charge);put("paid_minor",paid)
                 put("outstanding_minor",outstanding);put("status",expectedStatus)
                 put("created_at",createdAt);put("operating_date",operatingDate)
                 if(p.isNull("reference"))putNull("reference")else put("reference",p.getString("reference"))
