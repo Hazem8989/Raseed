@@ -1095,7 +1095,10 @@ class SyncDomainApplierTest {
             .put("operating_date", "2026-11-03")
         assertLegacyServiceTransferRejected(payload)
         assertEquals(beforeFloat, wallet.listWallets().single { it.serviceKey == ServiceTransferRepository.SYRIATEL_SHARED }.balanceMinor)
-        assertEquals(0, database.readableDatabase.rawQuery(
+        val transferCountBefore = database.readableDatabase.rawQuery(
+            "SELECT COUNT(*) FROM service_transfers", null
+        ).use { it.moveToFirst(); it.getInt(0) }
+        assertEquals(transferCountBefore, database.readableDatabase.rawQuery(
             "SELECT COUNT(*) FROM service_transfers", null
         ).use { it.moveToFirst(); it.getInt(0) })
     }
@@ -1113,7 +1116,10 @@ class SyncDomainApplierTest {
             .put("operating_date", "2026-11-03")
         assertLegacyServiceTransferRejected(payload)
         assertEquals(beforeFloat, wallet.listWallets().single { it.serviceKey == ServiceTransferRepository.SYRIATEL_SHARED }.balanceMinor)
-        assertEquals(0, database.readableDatabase.rawQuery(
+        val transferCountBefore = database.readableDatabase.rawQuery(
+            "SELECT COUNT(*) FROM service_transfers", null
+        ).use { it.moveToFirst(); it.getInt(0) }
+        assertEquals(transferCountBefore, database.readableDatabase.rawQuery(
             "SELECT COUNT(*) FROM service_transfers", null
         ).use { it.moveToFirst(); it.getInt(0) })
     }
@@ -1131,7 +1137,10 @@ class SyncDomainApplierTest {
         assertLegacyServiceTransferRejected(payload)
         assertEquals(beforeFloat, wallet.listWallets().single { it.serviceKey == ServiceTransferRepository.SYRIATEL_SHARED }.balanceMinor)
         assertEquals(0L, CashAccountRepository(context).balance(receipt.id))
-        assertEquals(0, database.readableDatabase.rawQuery(
+        val transferCountBefore = database.readableDatabase.rawQuery(
+            "SELECT COUNT(*) FROM service_transfers", null
+        ).use { it.moveToFirst(); it.getInt(0) }
+        assertEquals(transferCountBefore, database.readableDatabase.rawQuery(
             "SELECT COUNT(*) FROM service_transfers", null
         ).use { it.moveToFirst(); it.getInt(0) })
         assertEquals(0, protocol.pendingOutbox().size)
