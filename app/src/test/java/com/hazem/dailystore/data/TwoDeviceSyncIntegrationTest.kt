@@ -1123,6 +1123,66 @@ class TwoDeviceSyncIntegrationTest {
             )
         } catch(_:IllegalArgumentException){excessiveRejected=true}
         assertTrue("يجب رفض التحصيل الذي يتجاوز الرصيد المتبقي على الثانوي",excessiveRejected)
+
+        // Settle the remaining amount through the secondary and verify the final mirror reaches PAID.
+        val finalOperation=UUID.randomUUID().toString()
+        val finalQueued=ServiceTransferReceivableRepository(context).collect(
+            secondaryAdminId,transfer.transferId,finalOperation,receiptWallet.id,9_000L,"تسوية نهائية"
+        )
+        assertTrue(finalQueued.pending)
+        assertEquals(0,scalar(secondaryDb,"SELECT COUNT(*) FROM cash_transactions WHERE operation_id=?",finalOperation))
+        val finalFrame=secondaryRepository.encryptedAuthenticatedOutbox(finalOperation,primaryId)
+        var finalAck:String?=null
+        var finalError:String?=null
+        setLocalDeviceId(primaryId);AppDatabase.installForTests(primaryDb)
+        val finalPrimaryProcessor=SyncRelayProcessor(
+            primaryRepository,SyncDomainApplier(context),
+            listener=object:SyncRelayProcessor.Listener{
+                override fun onProtocolError(operationId:String?,message:String){finalError="$operationId: $message"}
+            },
+            sendFrame={id,recipient,frame->
+                assertEquals(finalOperation,id);assertEquals(secondaryId,recipient);finalAck=frame;true
+            }
+        )
+        finalPrimaryProcessor.onEncryptedFrame(secondaryId,finalOperation,finalFrame)
+        assertEquals("فشل التحصيل النهائي: $finalError",null,finalError)
+        assertEquals(2,scalar(primaryDb,
+            "SELECT COUNT(*) FROM cash_transactions WHERE source_id=? AND transaction_type='SERVICE_TRANSFER_DEBT_COLLECTION'",
+            transfer.transferId))
+        setLocalDeviceId(secondaryId);AppDatabase.installForTests(secondaryDb)
+        SyncRelayProcessor(secondaryRepository,SyncDomainApplier(context),sendFrame={_,_,_->true})
+            .onEncryptedFrame(primaryId,finalOperation,finalAck!!)
+        assertEquals("SYNCED",queueStatus(secondaryDb,finalOperation))
+
+        setLocalDeviceId(primaryId);AppDatabase.installForTests(primaryDb)
+        val finalMirror=primaryRepository.pendingOutboxForDevice(secondaryId)
+            .single{it.entityType=="SERVICE_TRANSFER_RECEIVABLE"&&it.entityId==transfer.transferId}
+        val finalMirrorFrame=primaryRepository.encryptedAuthenticatedOutbox(finalMirror.operationId,secondaryId)
+        var finalMirrorAck:String?=null
+        var finalMirrorError:String?=null
+        setLocalDeviceId(secondaryId);AppDatabase.installForTests(secondaryDb)
+        val finalMirrorProcessor=SyncRelayProcessor(
+            secondaryRepository,SyncDomainApplier(context),
+            listener=object:SyncRelayProcessor.Listener{
+                override fun onProtocolError(operationId:String?,message:String){finalMirrorError="$operationId: $message"}
+            },
+            sendFrame={id,recipient,frame->
+                assertEquals(finalMirror.operationId,id);assertEquals(primaryId,recipient);finalMirrorAck=frame;true
+            }
+        )
+        finalMirrorProcessor.onEncryptedFrame(primaryId,finalMirror.operationId,finalMirrorFrame)
+        assertEquals("فشل مزامنة التسوية النهائية: $finalMirrorError",null,finalMirrorError)
+        assertTrue(ServiceTransferReceivableRepository(context).listOpenReceivables(customer.id).isEmpty())
+        assertEquals("PAID",secondaryDb.readableDatabase.rawQuery(
+            "SELECT status FROM service_transfer_receivable_mirrors WHERE transfer_id=?",arrayOf(transfer.transferId)
+        ).use{c->assertTrue(c.moveToFirst());c.getString(0)})
+        assertEquals(0L,PartyStatementRepository(context).customer(customer.id).closingBalanceSypMinor)
+        assertEquals(2,scalar(primaryDb,
+            "SELECT COUNT(*) FROM service_transfer_receivable_payments WHERE transfer_id=?",transfer.transferId))
+
+        setLocalDeviceId(primaryId);AppDatabase.installForTests(primaryDb)
+        SyncRelayProcessor(primaryRepository,SyncDomainApplier(context),sendFrame={_,_,_->true})
+            .onEncryptedFrame(secondaryId,finalMirror.operationId,finalMirrorAck!!)
     }
 
     @Test fun secondaryOutboxWaitsDuringNetworkOutageAndCompletesAfterReconnect() {
