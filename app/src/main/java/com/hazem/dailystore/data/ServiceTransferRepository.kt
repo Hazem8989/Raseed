@@ -331,8 +331,10 @@ class ServiceTransferRepository(context:Context) {
             if(!syncOrigin) {
                 val syncPayload=org.json.JSONObject().put("business_operation","EXECUTE_SERVICE_TRANSFER")
                     .put("service_type",serviceType).put("service_key",serviceKey)
-                    .put("delivered_minor",deliveredMinor).put("provider_fee_minor",providerFeeMinor)
-                    .put("profit_minor",profit).put("customer_charge_minor",charge)
+                    .put("schema_version",2).put("amount_debited_minor",amountDebitedMinor)
+                    .put("delivered_minor",deliveredDisplayMinor).put("delivered_milli_syp",deliveredMilliSyp)
+                    .put("profit_minor",profit).put("profit_milli_syp",profitMilliSyp)
+                    .put("provider_fee_minor",providerFeeMinor).put("customer_charge_minor",charge)
                     .put("cash_account_id",effectiveReceiptAccountId).put("cash_account_type",account.first)
                     .put("cash_account_currency_code",account.second)
                     .put("payment_mode",paymentMode).put("customer_id",customerId ?: org.json.JSONObject.NULL)
