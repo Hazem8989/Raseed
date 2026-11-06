@@ -46,7 +46,8 @@ class PermissionPolicyTest {
         assertTrue(allowed(cashierId, PermissionPolicy.CUSTOMERS_READ))
         assertTrue(allowed(cashierId, PermissionPolicy.CUSTOMERS_CREATE))
         assertTrue(allowed(cashierId, PermissionPolicy.CUSTOMERS_COLLECT))
-        assertTrue(allowed(cashierId, PermissionPolicy.SERVICE_TRANSFERS_EXECUTE))
+        // Service-transfer execution is manager-granted, never a default cashier permission.
+        assertFalse(allowed(cashierId, PermissionPolicy.SERVICE_TRANSFERS_EXECUTE))
         assertFalse(allowed(cashierId, PermissionPolicy.SERVICE_TRANSFERS_MANAGE))
         assertFalse(allowed(cashierId, PermissionPolicy.PURCHASES_MANAGE))
         assertFalse(allowed(cashierId, PermissionPolicy.CATALOG_MANAGE))
@@ -209,7 +210,7 @@ class PermissionPolicyTest {
     }
 
     @Test
-    fun versionThirteenUpgradeSeedsServiceTransferExecutionPermission() {
+    fun versionThirteenUpgradeSeedsServiceTransferPermissionAsDeniedForCashiers() {
         val cashier = auth.createUser(
             "ADMIN", adminId, "migration-cashier", "Migration cashier",
             "Cashier12345", "CASHIER"
@@ -222,7 +223,18 @@ class PermissionPolicyTest {
         val context = RuntimeEnvironment.getApplication()
         AppDatabase.resetForTests(context, deleteExisting = false)
         database = AppDatabase.getInstance(context)
-        assertTrue(allowed(cashier, PermissionPolicy.SERVICE_TRANSFERS_EXECUTE))
+
+        // Upgrade must restore the permission catalogue and role row without
+        // silently granting service-transfer execution to every cashier.
+        assertTrue(database.readableDatabase.rawQuery(
+            "SELECT 1 FROM permissions WHERE permission_key=?",
+            arrayOf(PermissionPolicy.SERVICE_TRANSFERS_EXECUTE)
+        ).use { it.moveToFirst() })
+        assertTrue(database.readableDatabase.rawQuery(
+            "SELECT 1 FROM role_permissions WHERE role_key='CASHIER' AND permission_key=? AND allowed=0",
+            arrayOf(PermissionPolicy.SERVICE_TRANSFERS_EXECUTE)
+        ).use { it.moveToFirst() })
+        assertFalse(allowed(cashier, PermissionPolicy.SERVICE_TRANSFERS_EXECUTE))
         assertEquals(AppDatabase.DATABASE_VERSION, database.readableDatabase.version)
     }
 
