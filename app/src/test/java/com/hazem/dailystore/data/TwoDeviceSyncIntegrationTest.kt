@@ -50,6 +50,9 @@ class TwoDeviceSyncIntegrationTest {
         val primaryVault = SyncCredentialVault(context) { vaultKey }
         primaryRepository = SyncProtocolRepository(context, primaryVault)
         primaryRepository.configureAsPrimary(primaryAdminId, "جهاز التكامل الأساسي")
+        // The service wallet references must exist before pairing so the primary can
+        // mirror their identity (not balances) to the secondary terminal.
+        ServiceTransferRepository(context).ensureSystemAccounts()
         cashAccountId = CashAccountRepository(context).create(
             primaryAdminId, "صندوق اختبار التكامل", "CASH_BOX", "USD", 50000L
         ).id
