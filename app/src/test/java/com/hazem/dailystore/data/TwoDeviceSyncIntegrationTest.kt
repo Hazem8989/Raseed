@@ -1023,7 +1023,7 @@ class TwoDeviceSyncIntegrationTest {
         assertEquals(transfer.transferId,secondaryDebt.transferId)
         assertEquals(12_000L,secondaryDebt.outstandingMinor)
         assertEquals(0,scalar(secondaryDb,
-            "SELECT COUNT(*) FROM cash_transactions WHERE source_type='SERVICE_TRANSFER_DEBT_COLLECTION'",transfer.transferId))
+            "SELECT COUNT(*) FROM cash_transactions WHERE source_type='SERVICE_TRANSFER_DEBT_COLLECTION' AND source_id=?",transfer.transferId))
 
         val collectionOperation=UUID.randomUUID().toString()
         val queued=ServiceTransferReceivableRepository(context).collect(
