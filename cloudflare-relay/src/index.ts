@@ -97,7 +97,7 @@ function rootTrust(env: Env, storeId: string): RootTrust | null {
 async function readJsonLimited<T>(request: Request, maxBytes: number): Promise<T> {
   const declaredLength = request.headers.get("Content-Length");
   if (declaredLength !== null) {
-    if (!/^\\d+$/.test(declaredLength)) throw new Error("invalid content length");
+    if (!/^\d+$/.test(declaredLength)) throw new Error("invalid content length");
     if (Number(declaredLength) > maxBytes) throw new RangeError("request body too large");
   }
   const reader = request.body?.getReader();
