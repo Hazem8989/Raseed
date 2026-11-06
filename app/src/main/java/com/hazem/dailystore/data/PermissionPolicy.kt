@@ -103,7 +103,7 @@ object PermissionPolicy {
     // Customer lookup is needed by POS; only sales checkout and sync controls
     // may authorize writes/actions there. Every other permission fails closed.
     private val secondaryAllowedPermissions = setOf(
-        SALES_CHECKOUT, CUSTOMERS_READ, CUSTOMERS_COLLECT, SYNC_MANAGE
+        SALES_CHECKOUT, CUSTOMERS_READ, CUSTOMERS_COLLECT, SERVICE_TRANSFERS_EXECUTE, SYNC_MANAGE
     )
 
     /**
