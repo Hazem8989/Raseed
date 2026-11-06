@@ -323,7 +323,7 @@ class ServiceTransferRepositoryTest {
             .digest("${ServiceTransferRepository.SYRIATEL_BALANCE}|2000|0|${drawer.id}|null|null".toByteArray(Charsets.UTF_8))
             .joinToString(""){"%02x".format(it)}
         database.writableDatabase.execSQL("UPDATE service_transfers SET payload_hash=? WHERE operation_id=?",arrayOf(legacyHash,op))
-        val replay = repo.executeTransfer(actor, ServiceTransferRepository.SYRIATEL_BALANCE, 2_000L, 0L, drawer.id, op)
+        val replay = repo.executeTransfer(actor, ServiceTransferRepository.SYRIATEL_BALANCE, 2_000L, 0L, drawer.id, op,legacyBalanceDelivered=true)
         assertFalse(first.replayed)
         assertTrue(replay.replayed)
         assertEquals(2_400L, accounts.balance(drawer.id))
