@@ -238,7 +238,12 @@ class ServiceTransferRepository(context:Context) {
         val profitMilliSyp=roundRatioMilli(deliveredMilliSyp,profitRate,100L)
         val deliveredDisplayMinor=roundMilliToWhole(deliveredMilliSyp)
         val profit=roundMilliToWhole(profitMilliSyp)
-        val charge=roundMilliToWhole(Math.addExact(deliveredMilliSyp,profitMilliSyp))
+        // Provider fees are the shop's expense for Syriatel Cash, not part of the customer's charge.
+        // Preserve the legacy provider-fee charge behavior for other service types.
+        val charge=roundMilliToWhole(Math.addExact(
+            Math.addExact(deliveredMilliSyp,profitMilliSyp),
+            if(serviceType==SYRIATEL_CASH) 0L else Math.multiplyExact(providerFeeMinor,1000L)
+        ))
         val walletDebitMinor=amountDebitedMinor
         val db=database.writableDatabase;db.beginTransaction()
         try {
