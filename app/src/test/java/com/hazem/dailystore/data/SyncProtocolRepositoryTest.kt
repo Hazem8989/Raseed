@@ -77,6 +77,34 @@ class SyncProtocolRepositoryTest {
     }
 
 
+    @Test fun secondaryEnrollmentRefusesToDeleteLocalServiceWalletWithBalance() {
+        val context = RuntimeEnvironment.getApplication()
+        val service = ServiceTransferRepository(context)
+        service.ensureSystemAccounts()
+        val localWalletId = service.serviceAccountId(ServiceTransferRepository.SYRIATEL_SHARED)
+        service.setOpeningBalance(adminId, ServiceTransferRepository.SYRIATEL_SHARED, 5_000L, "رصيد محلي قبل الاقتران")
+        val localDeviceId = SyncDeviceIdentity.getOrCreate(context)
+        val primaryDeviceId = UUID.randomUUID().toString()
+        val storeId = UUID.randomUUID().toString()
+        val credential = android.util.Base64.encodeToString(
+            ByteArray(32) { 21 },
+            android.util.Base64.URL_SAFE or android.util.Base64.NO_WRAP or android.util.Base64.NO_PADDING
+        )
+        try {
+            configureSecondaryForTest(storeId, primaryDeviceId, credential, "جهاز ثانوي")
+            throw AssertionError("Enrollment must not delete a local wallet with an opening balance")
+        } catch (expected: IllegalArgumentException) {
+            assertTrue(expected.message!!.contains("أرصدة أو حركات محلية"))
+        }
+        assertNull(repository.localDeviceRole())
+        assertEquals(5_000L, CashAccountRepository(context).balance(localWalletId))
+        assertEquals(1, database.readableDatabase.rawQuery(
+            "SELECT COUNT(*) FROM service_wallet_account_links WHERE service_key=? AND account_id=?",
+            arrayOf(ServiceTransferRepository.SYRIATEL_SHARED, localWalletId)
+        ).use { c -> c.moveToFirst(); c.getInt(0) })
+        assertTrue(localDeviceId != primaryDeviceId)
+    }
+
     @Test fun primaryIssuesRootSignedDeviceCertificateAndRevocationStatement() {
         repository.configureAsPrimary(adminId, "الرئيسي")
         val remoteId = UUID.randomUUID().toString()
