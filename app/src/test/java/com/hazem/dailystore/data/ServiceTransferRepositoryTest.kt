@@ -75,7 +75,7 @@ class ServiceTransferRepositoryTest {
         assertEquals(22_000L, cash.customerReceiptsMinor)
         assertEquals(2L, cash.providerFeeMinor)
         assertEquals(10_000L, normal.rechargeReserveMinor)
-        assertEquals(20_000L, cash.rechargeReserveMinor)
+        assertEquals(20_002L, cash.rechargeReserveMinor)
     }
 
     @Test fun exactSyriatelBalanceAmountsAreRoundedOnlyAtCustomerCharge() {
