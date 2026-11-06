@@ -3083,8 +3083,10 @@ class MainActivity : Activity() {
         }
         val accountRepository=CashAccountRepository(this)
         val drawer=accountRepository.currentDayPrimaryDrawer()
+        val secondary=SyncProtocolRepository(this).isConfiguredSecondary()
         val options=accountRepository.listActive().filter{
-            it.currencyCode=="SYP"&&(it.accountType=="WALLET"||(it.accountType=="CASH_BOX"&&it.id==drawer?.id))
+            it.currencyCode=="SYP"&&(it.accountType=="WALLET"||
+                (it.accountType=="CASH_BOX"&&(secondary||it.id==drawer?.id)))
         }
         if(options.isEmpty()) {
             AlertDialog.Builder(this).setMessage("عيّن درج اليوم الرئيسي أو أنشئ محفظة قبض إلكترونية بالليرة السورية أولاً.")
@@ -3110,8 +3112,10 @@ class MainActivity : Activity() {
                     UUID.randomUUID().toString(),selected.id,parseSypAmount(amount.text.toString()),
                     note.text.toString().trim().ifEmpty{null})
                 dialog.dismiss()
-                AlertDialog.Builder(this).setTitle("تم تسجيل التحصيل")
-                    .setMessage("المسدد حتى الآن: "+formatSypAmount(result.paidMinor)+" ل.س\nالمتبقي: "+formatSypAmount(result.outstandingMinor)+" ل.س")
+                AlertDialog.Builder(this).setTitle(if(result.pending)"تم حفظ طلب التحصيل للمزامنة" else "تم تسجيل التحصيل")
+                    .setMessage(if(result.pending)
+                        "حُفظ طلب التحصيل على الجهاز الثانوي وسيُرسل إلى الجهاز الأساسي. لن يُرحّل إلى الصندوق أو يُعتمد في رصيد الدين حتى يؤكد الأساسي تطبيقه."
+                        else "المسدد حتى الآن: "+formatSypAmount(result.paidMinor)+" ل.س\nالمتبقي: "+formatSypAmount(result.outstandingMinor)+" ل.س")
                     .setPositiveButton("حسناً"){_,_->if(onSaved!=null)onSaved() else showServiceTransfers()}.show()
             } catch(e:Exception) {
                 Toast.makeText(this,e.message?:"تعذر تسجيل التحصيل",Toast.LENGTH_LONG).show()

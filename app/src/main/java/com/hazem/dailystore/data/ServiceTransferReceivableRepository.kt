@@ -28,9 +28,8 @@ class ServiceTransferReceivableRepository(context:Context) {
     fun listOpenReceivables(customerId:String?=null,limit:Int=100):List<ServiceTransferReceivableSummary> {
         val result=mutableListOf<ServiceTransferReceivableSummary>()
         val readDb=database.readableDatabase
-        val role=readDb.rawQuery("SELECT state_value FROM sync_protocol_state WHERE state_key='local_device_role'",null)
-            .use{if(it.moveToFirst())it.getString(0)else null}
-        if(role=="SECONDARY") {
+        val isSecondary=SyncProtocolRepository(appContext).isConfiguredSecondary()
+        if(isSecondary) {
             readDb.rawQuery(
                 """SELECT transfer_id,customer_id,customer_name,service_type,delivered_minor,
                           charge_minor,paid_minor,outstanding_minor,created_at,note
@@ -81,15 +80,16 @@ class ServiceTransferReceivableRepository(context:Context) {
                 .use{if(it.moveToFirst())it.getString(0)else null}
             if(role=="SECONDARY") {
                 PermissionPolicy.requireAssigned(db,actorUserId,PermissionPolicy.CUSTOMERS_COLLECT)
+                data class MirrorDebt(val customerId:String,val charge:Long,val paid:Long,val outstanding:Long,val status:String)
                 val mirror=db.rawQuery(
                     "SELECT customer_id,charge_minor,paid_minor,outstanding_minor,status FROM service_transfer_receivable_mirrors WHERE transfer_id=?",
                     arrayOf(transferId)
                 ).use{c->
                     require(c.moveToFirst()){"دين تحويل الرصيد غير متاح على هذا الجهاز؛ انتظر مزامنة الأساسي"}
-                    arrayOf(c.getString(0),c.getLong(1),c.getLong(2),c.getLong(3),c.getString(4))
+                    MirrorDebt(c.getString(0),c.getLong(1),c.getLong(2),c.getLong(3),c.getString(4))
                 }
-                require(mirror[4] in setOf("OPEN","PARTIALLY_PAID") && mirror[3]>0L){"تم تسديد هذا الدين أو إغلاقه"}
-                require(amountSypMinor<=mirror[3]){"مبلغ التحصيل يتجاوز المتبقي المستحق"}
+                require(mirror.status in setOf("OPEN","PARTIALLY_PAID") && mirror.outstanding>0L){"تم تسديد هذا الدين أو إغلاقه"}
+                require(amountSypMinor<=mirror.outstanding){"مبلغ التحصيل يتجاوز المتبقي المستحق"}
                 val account=db.rawQuery("SELECT account_type,currency_code,is_active FROM cash_accounts WHERE id=?",
                     arrayOf(cashAccountId)).use{c->
                     require(c.moveToFirst()&&c.getInt(2)==1){"حساب القبض غير موجود أو موقوف"}
@@ -109,7 +109,7 @@ class ServiceTransferReceivableRepository(context:Context) {
                 val payload=org.json.JSONObject()
                     .put("business_operation","COLLECT_SERVICE_TRANSFER_DEBT")
                     .put("transfer_id",transferId).put("payment_id",paymentId)
-                    .put("customer_id",mirror[0])
+                    .put("customer_id",mirror.customerId)
                     .put("amount_minor",amountSypMinor)
                     .put("cash_account_id",cashAccountId)
                     .put("cash_account_type",account.first)
@@ -122,7 +122,7 @@ class ServiceTransferReceivableRepository(context:Context) {
                 )
                 db.setTransactionSuccessful()
                 return ServiceTransferDebtPaymentResult(
-                    paymentId,transferId,mirror[2],mirror[3],mirror[4],false,true
+                    paymentId,transferId,mirror.paid,mirror.outstanding,mirror.status,false,true
                 )
             }
             require(role==null||role=="PRIMARY"){"دور الجهاز غير صالح لتحصيل دين تحويل الرصيد"}
