@@ -62,7 +62,7 @@ dependencies {
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
 
     // Modern SQLCipher Android API; minSdk 23 is supported.
-    implementation("net.zetetic:sqlcipher-android:4.20.0")
+    implementation("net.zetetic:sqlcipher-android:4.17.0")
     implementation("androidx.sqlite:sqlite:2.7.0")
 
     testImplementation("com.squareup.okhttp3:mockwebserver:4.12.0")
