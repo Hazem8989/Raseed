@@ -551,8 +551,9 @@ class ServiceTransferRepository(context:Context) {
     }
 
     private fun realizedProfitMilliSyp(profitMilliSyp:Long,chargeMinor:Long,paidMinor:Long):Long {
-        if(profitMilliSyp<=0L||chargeMinor<=0L||paidMinor<=0L) return 0L
-        return roundRatioMilli(profitMilliSyp,paidMinor.coerceAtMost(chargeMinor),chargeMinor)
+        if(profitMilliSyp<=0L||paidMinor<=0L) return 0L
+        require(chargeMinor>0L&&paidMinor<=chargeMinor) { "تحصيل ذمة تحويل الرصيد يتجاوز أصل الدين" }
+        return roundRatioMilli(profitMilliSyp,paidMinor,chargeMinor)
     }
 
     private fun walletBalance(db:SQLiteDatabase,key:String):Long =
