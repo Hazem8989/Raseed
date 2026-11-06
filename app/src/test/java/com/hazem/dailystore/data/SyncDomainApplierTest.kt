@@ -1093,12 +1093,7 @@ class SyncDomainApplierTest {
             .put("cash_account_id", "unmapped-service-receipt").put("cash_account_type", "WALLET")
             .put("cash_account_currency_code", "SYP").put("occurred_at", "2026-11-03T14:15:00Z")
             .put("operating_date", "2026-11-03")
-        var rejected = false
-        try { receiveRaw("EXECUTE_SERVICE_TRANSFER", "unused", payload) }
-        catch (expected: IllegalArgumentException) {
-            rejected = expected.message?.contains("مخول") == true
-        }
-        assertTrue(rejected)
+        assertLegacyServiceTransferRejected(payload)
         assertEquals(beforeFloat, wallet.listWallets().single { it.serviceKey == ServiceTransferRepository.SYRIATEL_SHARED }.balanceMinor)
         assertEquals(0, database.readableDatabase.rawQuery(
             "SELECT COUNT(*) FROM service_transfers", null
@@ -1116,12 +1111,7 @@ class SyncDomainApplierTest {
             .put("cash_account_id", "unmapped-service-receipt").put("cash_account_type", "WALLET")
             .put("cash_account_currency_code", "SYP").put("occurred_at", "2026-11-03T14:15:00Z")
             .put("operating_date", "2026-11-03")
-        var rejected = false
-        try { receiveRaw("EXECUTE_SERVICE_TRANSFER", "unused", payload) }
-        catch (expected: IllegalArgumentException) {
-            rejected = expected.message?.contains("مخول") == true
-        }
-        assertTrue(rejected)
+        assertLegacyServiceTransferRejected(payload)
         assertEquals(beforeFloat, wallet.listWallets().single { it.serviceKey == ServiceTransferRepository.SYRIATEL_SHARED }.balanceMinor)
         assertEquals(0, database.readableDatabase.rawQuery(
             "SELECT COUNT(*) FROM service_transfers", null
@@ -1138,12 +1128,7 @@ class SyncDomainApplierTest {
             .put("delivered_minor", 2_000L).put("provider_fee_minor", 100L).put("profit_minor", 400L).put("customer_charge_minor", 2_500L)
             .put("cash_account_id", "remote-service-wallet").put("cash_account_type", "WALLET").put("cash_account_currency_code", "SYP")
             .put("reference", "اختبار").put("note", JSONObject.NULL).put("occurred_at", "2026-11-03T14:15:00Z").put("operating_date", "2026-11-03")
-        var rejected = false
-        try { receiveRaw("EXECUTE_SERVICE_TRANSFER", "unused", payload) }
-        catch (expected: IllegalArgumentException) {
-            rejected = expected.message?.contains("مخول") == true
-        }
-        assertTrue(rejected)
+        assertLegacyServiceTransferRejected(payload)
         assertEquals(beforeFloat, wallet.listWallets().single { it.serviceKey == ServiceTransferRepository.SYRIATEL_SHARED }.balanceMinor)
         assertEquals(0L, CashAccountRepository(context).balance(receipt.id))
         assertEquals(0, database.readableDatabase.rawQuery(
@@ -1179,6 +1164,30 @@ class SyncDomainApplierTest {
         assertEquals(1,database.readableDatabase.rawQuery(
             "SELECT COUNT(*) FROM daily_supplier_rollovers WHERE operating_date='2026-11-03'",null
         ).use { it.moveToFirst();it.getInt(0) })
+    }
+
+    private fun assertLegacyServiceTransferRejected(payload: JSONObject) {
+        val db = database.readableDatabase
+        val storeId = db.rawQuery(
+            "SELECT state_value FROM sync_protocol_state WHERE state_key='store_id'", null
+        ).use { c -> assertTrue(c.moveToFirst()); c.getString(0) }
+        val operationId = UUID.randomUUID().toString()
+        val envelope = SyncEnvelopeSecurity.create(
+            storeId, operationId, nextSequence(), secondaryId, "remote-admin",
+            "CREATE", "SERVICE_TRANSFER", "pending-service-transfer-$operationId", 0L,
+            payload.put("business_operation", "EXECUTE_SERVICE_TRANSFER").toString(),
+            "2026-11-03T14:15:00Z", secondarySecret
+        )
+        var rejected = false
+        try {
+            protocol.recordIncomingFromSecondary(SyncEnvelopeSecurity.encode(envelope))
+        } catch (error: IllegalArgumentException) {
+            rejected = error.message?.contains("مخول") == true
+        }
+        assertTrue("يجب رفض أمر التحويل النقدي القديم عند بوابة المزامنة", rejected)
+        assertEquals(0, db.rawQuery(
+            "SELECT COUNT(*) FROM sync_inbox WHERE operation_id=?", arrayOf(operationId)
+        ).use { it.moveToFirst(); it.getInt(0) })
     }
 
     private fun receiveRaw(operation: String, entityId: String, payload: JSONObject): String {
