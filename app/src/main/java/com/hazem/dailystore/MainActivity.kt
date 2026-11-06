@@ -3269,6 +3269,7 @@ class MainActivity : Activity() {
 
     private fun showServiceTransferDialog() {
         val repo=ServiceTransferRepository(this)
+        val secondary=SyncProtocolRepository(this).isConfiguredSecondary()
         repo.ensureSystemAccounts()
         val accountRepo=CashAccountRepository(this)
         val drawer=accountRepo.currentDayPrimaryDrawer()
@@ -3276,7 +3277,8 @@ class MainActivity : Activity() {
         if(receiptOptions.isEmpty()){AlertDialog.Builder(this).setMessage("عيّن درج اليوم الرئيسي أو أنشئ محفظة قبض إلكترونية بالليرة السورية قبل تنفيذ التحويل.").setPositiveButton("فتح الصناديق والمحافظ"){_,_->showCashAccounts()}.show();return}
         val form=LinearLayout(this).apply{orientation=LinearLayout.VERTICAL;setPadding(dp(18),dp(8),dp(18),dp(4))}
         val service=Spinner(this).apply{adapter=ArrayAdapter(this@MainActivity,android.R.layout.simple_spinner_dropdown_item,listOf("سيرياتيل العادي • ربح 20%","سيرياتيل كاش • ربح 10%","شام كاش • ربح 5%"))}
-        val paymentMode=Spinner(this).apply{adapter=ArrayAdapter(this@MainActivity,android.R.layout.simple_spinner_dropdown_item,listOf("نقدي • قبض فوري","آجل • يسدد لاحقاً"))}
+        val paymentMode=Spinner(this).apply{adapter=ArrayAdapter(this@MainActivity,android.R.layout.simple_spinner_dropdown_item,
+            if(secondary) listOf("آجل • يسدد لاحقاً") else listOf("نقدي • قبض فوري","آجل • يسدد لاحقاً"))}
         val customerOptions=mutableListOf<Pair<String,String>>()
         AppDatabase.getInstance(this).readableDatabase.rawQuery("SELECT id,name FROM customers WHERE is_active=1 ORDER BY name COLLATE NOCASE",null).use{c->
             while(c.moveToNext())customerOptions.add(c.getString(0) to c.getString(1))
@@ -3319,7 +3321,7 @@ class MainActivity : Activity() {
         amount.addTextChangedListener(watcher);companyFee.addTextChangedListener(watcher)
         val receiptLabel=label("استلام المبلغ من الزبون في",12f,mutedColor,false,Gravity.RIGHT)
         fun updatePaymentModeVisibility() {
-            val credit=paymentMode.selectedItemPosition==1
+            val credit=secondary || paymentMode.selectedItemPosition==1
             customerLabel.visibility=if(credit)View.VISIBLE else View.GONE
             customerSpinner.visibility=if(credit)View.VISIBLE else View.GONE
             receiptLabel.visibility=if(credit)View.GONE else View.VISIBLE
@@ -3344,7 +3346,7 @@ class MainActivity : Activity() {
         dialog.setOnShowListener{dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener{
             try{
                 val type=when(service.selectedItemPosition){0->ServiceTransferRepository.SYRIATEL_BALANCE;1->ServiceTransferRepository.SYRIATEL_CASH;else->ServiceTransferRepository.SHAM_CASH_TRANSFER}
-                val credit=paymentMode.selectedItemPosition==1
+                val credit=secondary || paymentMode.selectedItemPosition==1
                 val selected=if(credit)null else receiptOptions.getOrNull(receipt.selectedItemPosition)?:error("اختر حساب استلام المبلغ")
                 val customer=if(credit)customerOptions.getOrNull(customerSpinner.selectedItemPosition)?:error("اختر الزبون") else null
                 val note=ref.text.toString().trim().ifEmpty{null}
@@ -3356,8 +3358,17 @@ class MainActivity : Activity() {
                 dialog.dismiss()
                 val settlement=if(credit)"طريقة السداد: آجل\nالزبون: "+customer!!.second+"\nالمبلغ المستحق: "+formatSypAmount(result.customerChargeMinor)+" ل.س"
                     else "المقبوض من الزبون: "+formatSypAmount(result.customerChargeMinor)+" ل.س"
-                AlertDialog.Builder(this).setTitle(if(credit)"تم تنفيذ التحويل وتسجيل الدين" else "تم تسجيل التحويل")
-                    .setMessage("الواصل للزبون: "+formatSypAmount(result.deliveredMinor)+" ل.س\nربح المتجر: "+formatSypAmount(result.profitMinor)+" ل.س\nرسوم الشركة: "+formatSypAmount(result.providerFeeMinor)+" ل.س\n"+settlement)
+                val queuedOnSecondary=secondary&&credit
+                val title=when {
+                    queuedOnSecondary -> "تم حفظ طلب التحويل للمزامنة"
+                    credit -> "تم تنفيذ التحويل وتسجيل الدين"
+                    else -> "تم تسجيل التحويل"
+                }
+                val pendingNotice=if(queuedOnSecondary)
+                    "\n\nالطلب محفوظ على الجهاز الثانوي وسيُرسل إلى الجهاز الأساسي. لم يُرحّل التحويل أو يُنشأ الدين نهائياً بعد؛ يعتمد ذلك على تحقق الجهاز الأساسي من الرصيد والبيانات."
+                    else ""
+                AlertDialog.Builder(this).setTitle(title)
+                    .setMessage("الواصل للزبون: "+formatSypAmount(result.deliveredMinor)+" ل.س\nربح المتجر: "+formatSypAmount(result.profitMinor)+" ل.س\nرسوم الشركة: "+formatSypAmount(result.providerFeeMinor)+" ل.س\n"+settlement+pendingNotice)
                     .setPositiveButton("حسناً"){_,_->showServiceTransfers()}.show()
             }catch(e:Exception){Toast.makeText(this,e.message?:"تعذر تنفيذ التحويل",Toast.LENGTH_LONG).show()}
         }}
