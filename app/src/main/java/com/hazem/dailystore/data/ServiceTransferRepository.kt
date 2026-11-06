@@ -264,7 +264,7 @@ class ServiceTransferRepository(context:Context) {
                     .put("reference",reference ?: org.json.JSONObject.NULL).put("note",note ?: org.json.JSONObject.NULL)
                     .put("occurred_at",eventAt).put("operating_date",eventDate)
                 SyncProtocolRepository(appContext).enqueueSecondaryCommand(
-                    db,actor,operationId,"EXECUTE_SERVICE_TRANSFER","SERVICE_TRANSFER",pendingId,command.toString()
+                    db,actor,operationId,"EXECUTE_SERVICE_TRANSFER_CREDIT","SERVICE_TRANSFER",pendingId,command.toString()
                 )
                 db.setTransactionSuccessful()
                 return ServiceTransferResult(pendingId,deliveredMinor,profit,providerFeeMinor,charge,false)
