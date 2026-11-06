@@ -3149,8 +3149,8 @@ class MainActivity : Activity() {
         rows.forEach { r ->
             val card=LinearLayout(this).apply{orientation=LinearLayout.VERTICAL;setPadding(dp(12),dp(10),dp(12),dp(10));background=cardBackground()}
             card.addView(label(r.serviceName+" • "+if(r.status=="REVERSED")"معكوسة" else "منفذة",15f,green,true,Gravity.RIGHT))
-            card.addView(label("الواصل للزبون: "+formatSypAmount(r.deliveredMinor)+" ل.س",13f,textColor,false,Gravity.RIGHT))
-            card.addView(label("ربح المتجر: "+formatSypAmount(r.profitMinor)+" • رسوم الشركة: "+formatSypAmount(r.providerFeeMinor)+" ل.س",12f,mutedColor,false,Gravity.RIGHT))
+            card.addView(label("الواصل للزبون: "+BigDecimal.valueOf(r.deliveredMilliSyp,3).stripTrailingZeros().toPlainString()+" ل.س • المخصوم من المحفظة: "+formatSypAmount(r.amountDebitedMinor)+" ل.س",13f,textColor,false,Gravity.RIGHT))
+            card.addView(label("ربح المتجر: "+BigDecimal.valueOf(r.profitMilliSyp,3).stripTrailingZeros().toPlainString()+" ل.س • رسوم الشركة: "+formatSypAmount(r.providerFeeMinor)+" ل.س",12f,mutedColor,false,Gravity.RIGHT))
             if(r.paymentMode=="CREDIT") {
                 card.addView(label("آجل على الزبون: "+(r.customerName ?: "غير معروف"),13f,gold.toInt(),true,Gravity.RIGHT))
                 card.addView(label("المسدد: "+formatSypAmount(r.paidMinor)+" ل.س • المتبقي: "+formatSypAmount(r.outstandingMinor)+" ل.س",12f,textColor,false,Gravity.RIGHT))
