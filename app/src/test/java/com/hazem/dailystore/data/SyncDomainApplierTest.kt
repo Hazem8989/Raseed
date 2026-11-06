@@ -584,20 +584,42 @@ class SyncDomainApplierTest {
             arrayOf("sale-cash-mapped")
         ).use { it.moveToFirst(); it.getString(0) })
 
-        // Replaying after the ledger transaction committed must not duplicate cash or stock.
+        // Simulate process/database shutdown after the financial transaction committed.
+        // Reopen the production singleton and reconstruct repositories before replaying
+        // the durable inbox command, rather than relying on the old in-memory instances.
+        database.close()
+        database = AppDatabase.getInstance(context)
+        protocol = SyncProtocolRepository(context, vault)
+        val recoveredApplier = SyncDomainApplier(context)
+
+        assertEquals("APPLIED", inboxStatus(operationId))
+        assertEquals("PAID", invoiceStatus("sales_invoices", "sale-cash-mapped"))
+        assertEquals(8.0, stock(), 0.000001)
+
+        // Requeue the same durable inbox item as a transport retry would require after
+        // recovery, then verify the domain idempotency keys protect every ledger effect.
         database.writableDatabase.execSQL(
             "UPDATE sync_inbox SET status='RECEIVED',applied_at=NULL WHERE operation_id=?",
             arrayOf(operationId)
         )
-        assertTrue(applyWithDiagnostic(applier, operationId).applied)
+        assertTrue(applyWithDiagnostic(recoveredApplier, operationId).applied)
         assertEquals(1, database.readableDatabase.rawQuery(
             "SELECT COUNT(*) FROM cash_transactions WHERE source_type='SALES_INVOICE' AND source_id=?",
+            arrayOf("sale-cash-mapped")
+        ).use { it.moveToFirst(); it.getInt(0) })
+        assertEquals(1, database.readableDatabase.rawQuery(
+            "SELECT COUNT(*) FROM invoice_payments WHERE invoice_id=?",
             arrayOf("sale-cash-mapped")
         ).use { it.moveToFirst(); it.getInt(0) })
         assertEquals(1, database.readableDatabase.rawQuery(
             "SELECT COUNT(*) FROM inventory_movements WHERE source_id=? AND movement_type='SALE'",
             arrayOf("sale-cash-mapped")
         ).use { it.moveToFirst(); it.getInt(0) })
+        assertEquals(300L, database.readableDatabase.rawQuery(
+            "SELECT amount_minor FROM cash_transactions WHERE source_type='SALES_INVOICE' AND source_id=?",
+            arrayOf("sale-cash-mapped")
+        ).use { it.moveToFirst(); it.getLong(0) })
+        assertEquals("APPLIED", inboxStatus(operationId))
     }
 
     @Test fun rejectsCashSaleWithoutApplyingOrChangingInventory() {
