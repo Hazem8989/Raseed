@@ -326,6 +326,12 @@ class CustomerPaymentRepositoryTest {
         val credential = android.util.Base64.encodeToString(ByteArray(32) { 11 },
             android.util.Base64.URL_SAFE or android.util.Base64.NO_WRAP or android.util.Base64.NO_PADDING)
         sync.configureAsSecondary(adminId, storeId, primaryDeviceId, credential, "جهاز ثانوي اختباري")
+        insertRate(20_000_000L, "2026-11-03T00:00:00.000Z")
+        payments.listInvoices(customerId)
+        assertEquals("The secondary may display the current FX value but must not create accounting revaluation entries",
+            0, database.readableDatabase.rawQuery(
+                "SELECT COUNT(*) FROM customer_credit_revaluations", null
+            ).use { c -> c.moveToFirst(); c.getInt(0) })
 
         val result = payments.addPayment(
             adminId, invoiceId, "secondary-customer-collection-" + UUID.randomUUID(),
