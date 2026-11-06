@@ -359,6 +359,8 @@ class ServiceTransferRepository(context:Context) {
             val update=ContentValues().apply{put("status","REVERSED");put("reversed_at",now);put("reversed_by",actor);put("reversal_reason",reason)}
             db.update("service_transfers",update,"id=? AND status='POSTED'",arrayOf(transferId))
             audit(db,actor,"SERVICE_TRANSFER_REVERSED",transferId,"{\"status\":\"POSTED\"}","{\"status\":\"REVERSED\",\"reason\":\"${esc(reason)}\"}",now)
+            if(isCredit) ServiceTransferReceivableRepository(appContext)
+                .enqueueMirrorSnapshot(db,actor,transferId,operationId)
             db.setTransactionSuccessful()
         } finally {db.endTransaction()}
     }

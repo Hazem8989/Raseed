@@ -227,7 +227,7 @@ class ServiceTransferReceivableRepository(context:Context) {
                JOIN service_transfer_receivables r ON r.transfer_id=t.id
                JOIN customers c ON c.id=r.customer_id
                LEFT JOIN service_transfer_receivable_payments p ON p.transfer_id=t.id
-               WHERE t.id=? AND t.status='POSTED'
+               WHERE t.id=? AND t.status IN ('POSTED','REVERSED')
                GROUP BY t.id""".trimIndent(),arrayOf(transferId)
         ).use{c->
             require(c.moveToFirst()){"تعذر تجهيز نسخة مزامنة ذمة تحويل الرصيد"}
@@ -238,7 +238,7 @@ class ServiceTransferReceivableRepository(context:Context) {
                 .put("customer_name",c.getString(1)).put("service_type",c.getString(2))
                 .put("delivered_minor",c.getLong(3)).put("charge_minor",charge)
                 .put("paid_minor",paid).put("outstanding_minor",(charge-paid).coerceAtLeast(0L))
-                .put("status",if(paid>=charge)"PAID" else if(paid>0L)"PARTIALLY_PAID" else c.getString(9))
+                .put("status",if(c.getString(9)=="REVERSED")"REVERSED" else if(paid>=charge)"PAID" else if(paid>0L)"PARTIALLY_PAID" else c.getString(9))
                 .put("created_at",c.getString(5)).put("operating_date",c.getString(6))
                 .put("reference",if(c.isNull(7))org.json.JSONObject.NULL else c.getString(7))
                 .put("note",if(c.isNull(8))org.json.JSONObject.NULL else c.getString(8))

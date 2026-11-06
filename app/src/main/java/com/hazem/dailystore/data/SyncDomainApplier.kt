@@ -1278,7 +1278,10 @@ class SyncDomainApplier(context: Context) {
             val outstanding=p.getLong("outstanding_minor")
             require(delivered>0L&&charge>=delivered&&paid>=0L&&paid<=charge&&
                 outstanding==charge-paid){"مبالغ ذمة تحويل الرصيد غير متوازنة"}
-            val expectedStatus=if(outstanding==0L)"PAID" else if(paid>0L)"PARTIALLY_PAID" else "OPEN"
+            val expectedStatus=if(p.optString("status")=="REVERSED") {
+                require(paid==0L&&outstanding==0L){"لا يمكن عكس ذمة سبق تحصيلها"}
+                "REVERSED"
+            } else if(outstanding==0L)"PAID" else if(paid>0L)"PARTIALLY_PAID" else "OPEN"
             require(p.optString("status")==expectedStatus){"حالة ذمة تحويل الرصيد لا تطابق رصيدها"}
             val createdAt=p.optString("created_at")
             val operatingDate=p.optString("operating_date")
