@@ -3286,7 +3286,7 @@ class MainActivity : Activity() {
         val customerSpinner=Spinner(this).apply{adapter=ArrayAdapter(this@MainActivity,android.R.layout.simple_spinner_dropdown_item,
             customerOptions.map{it.second}.ifEmpty{listOf("لا يوجد عملاء نشطون")})}
         val customerLabel=label("الزبون المدين",12f,mutedColor,false,Gravity.RIGHT)
-        val amount=fieldForDialog("المبلغ الواصل للزبون").apply{inputType=InputType.TYPE_CLASS_NUMBER or InputType.TYPE_NUMBER_FLAG_DECIMAL}
+        val amount=fieldForDialog("المبلغ المخصوم من محفظتك").apply{inputType=InputType.TYPE_CLASS_NUMBER or InputType.TYPE_NUMBER_FLAG_DECIMAL}
         val companyFee=fieldForDialog("رسوم الشركة (تُحسب تلقائياً لسيريتل كاش)").apply{inputType=InputType.TYPE_CLASS_NUMBER or InputType.TYPE_NUMBER_FLAG_DECIMAL;setText("0")}
         val receipt=Spinner(this).apply{adapter=ArrayAdapter(this@MainActivity,android.R.layout.simple_spinner_dropdown_item,receiptOptions.map{it.name+if(it.accountType=="WALLET")" • قبض إلكتروني" else " • قبض نقدي"})}
         fun selectDefaultServiceWallet() {
@@ -3303,11 +3303,20 @@ class MainActivity : Activity() {
             companyFee.isEnabled=service.selectedItemPosition==0
             val automaticFee=when(service.selectedItemPosition){1->2L;2->0L;else->null}
             if(automaticFee!=null&&companyFee.text.toString()!=automaticFee.toString())companyFee.setText(automaticFee.toString())
-            val delivered=runCatching{parseSypAmount(amount.text.toString())}.getOrNull()
+            val entered=runCatching{parseSypAmount(amount.text.toString())}.getOrNull()
             val fee=automaticFee ?: runCatching{parseSypAmount(companyFee.text.toString())}.getOrNull()
-            preview.text=if(delivered==null||delivered<=0L||fee==null)"أدخل مبلغاً صحيحاً." else{
-                val profit=BigDecimal.valueOf(delivered).multiply(BigDecimal.valueOf(rate)).divide(BigDecimal.valueOf(100),0,RoundingMode.HALF_UP).longValueExact()
-                "ربح المتجر ($rate%): "+formatSypAmount(profit)+" ل.س\nرسوم الشركة: "+formatSypAmount(fee)+" ل.س\nالمبلغ المطلوب من الزبون: "+formatSypAmount(Math.addExact(Math.addExact(delivered,profit),fee))+" ل.س"
+            if(service.selectedItemPosition==0) amount.hint="المبلغ المخصوم من محفظتك"
+            else amount.hint="المبلغ الواصل للزبون"
+            preview.text=if(entered==null||entered<=0L||fee==null)"أدخل مبلغاً صحيحاً." else{
+                val delivered=if(service.selectedItemPosition==0)
+                    BigDecimal.valueOf(entered).multiply(BigDecimal.valueOf(4134L))
+                        .divide(BigDecimal.valueOf(4300L),3,RoundingMode.HALF_UP)
+                    else BigDecimal.valueOf(entered)
+                val profit=delivered.multiply(BigDecimal.valueOf(rate))
+                    .divide(BigDecimal.valueOf(100L),3,RoundingMode.HALF_UP)
+                val charge=delivered.add(profit).add(BigDecimal.valueOf(fee))
+                    .setScale(0,RoundingMode.HALF_UP).longValueExact()
+                "الواصل للزبون: "+delivered.stripTrailingZeros().toPlainString()+" ل.س\nربح المتجر ($rate%): "+profit.stripTrailingZeros().toPlainString()+" ل.س\nرسوم الشركة: "+formatSypAmount(fee)+" ل.س\nالمبلغ المطلوب من الزبون بعد التقريب: "+formatSypAmount(charge)+" ل.س"
             }
         }
         service.onItemSelectedListener=object:android.widget.AdapterView.OnItemSelectedListener{
