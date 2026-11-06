@@ -257,6 +257,7 @@ class SyncProtocolRepository(private val context: Context, private val credentia
                 "لا يمكن تحويل جهاز أساسي قائم إلى ثانوي تلقائياً"
             }
             val now = timestamp()
+            clearUncommittedLocalServiceWalletSeedsForSecondary(db, actorUserId, now)
             db.insertWithOnConflict("sync_devices", null, ContentValues().apply {
                 put("device_id", primaryDeviceId); put("display_name", "الجهاز الأساسي")
                 put("device_role", "PRIMARY"); put("status", "ACTIVE")
@@ -301,6 +302,60 @@ class SyncProtocolRepository(private val context: Context, private val credentia
         } finally {
             db.endTransaction()
             secret.fill(0)
+        }
+    }
+
+    /**
+     * A fresh installation may have created empty service-wallet placeholders
+     * before the operator selected its device role. A secondary must receive the
+     * primary's canonical wallet IDs, so discard only provably unused local seeds.
+     * Any opening balance or financial history blocks pairing instead of deleting it.
+     */
+    private fun clearUncommittedLocalServiceWalletSeedsForSecondary(
+        db: SQLiteDatabase, actorUserId: String, now: String
+    ) {
+        val links = mutableListOf<Pair<String, String>>()
+        db.rawQuery(
+            """SELECT l.service_key,l.account_id,a.opening_balance_minor
+               FROM service_wallet_account_links l
+               JOIN cash_accounts a ON a.id=l.account_id""".trimIndent(), null
+        ).use { c ->
+            while (c.moveToNext()) {
+                val serviceKey = c.getString(0)
+                val accountId = c.getString(1)
+                val opening = c.getLong(2)
+                val hasCashHistory = db.rawQuery(
+                    "SELECT 1 FROM cash_transactions WHERE account_id=? LIMIT 1", arrayOf(accountId)
+                ).use { it.moveToFirst() }
+                val hasWalletHistory = db.rawQuery(
+                    "SELECT 1 FROM service_wallet_transactions WHERE service_key=? LIMIT 1", arrayOf(serviceKey)
+                ).use { it.moveToFirst() }
+                val hasTransferHistory = db.rawQuery(
+                    "SELECT 1 FROM service_transfers WHERE service_key=? LIMIT 1", arrayOf(serviceKey)
+                ).use { it.moveToFirst() }
+                val hasAccountTransfers = db.rawQuery(
+                    "SELECT 1 FROM cash_account_transfers WHERE source_account_id=? OR destination_account_id=? LIMIT 1",
+                    arrayOf(accountId, accountId)
+                ).use { it.moveToFirst() }
+                require(opening == 0L && !hasCashHistory && !hasWalletHistory &&
+                    !hasTransferHistory && !hasAccountTransfers) {
+                    "توجد أرصدة أو حركات محلية في محفظة خدمة على هذا الهاتف. لا يمكن ربطه كثانوي قبل مطابقة هذه البيانات وحفظها."
+                }
+                links.add(serviceKey to accountId)
+            }
+        }
+        links.forEach { (serviceKey, accountId) ->
+            db.delete("wallet_daily_openings", "account_id=?", arrayOf(accountId))
+            db.delete("service_wallet_account_links", "service_key=?", arrayOf(serviceKey))
+            db.delete("service_wallets", "service_key=?", arrayOf(serviceKey))
+            require(db.delete("cash_accounts", "id=?", arrayOf(accountId)) == 1) {
+                "تعذر إزالة حساب محفظة محلي فارغ قبل ربط الجهاز الثانوي"
+            }
+            audit(
+                db, actorUserId, "SECONDARY_EMPTY_SERVICE_WALLET_RESET", accountId,
+                JSONObject().put("service_key", serviceKey).put("account_id", accountId).toString(),
+                JSONObject().put("removed_before_primary_mirror", true).toString(), now
+            )
         }
     }
 
