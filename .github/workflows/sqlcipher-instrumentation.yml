@@ -7,6 +7,7 @@ on:
     paths:
       - "app/**"
       - ".github/workflows/sqlcipher-instrumentation.yml"
+      - ".github/scripts/run-sqlcipher-instrumentation.sh"
   workflow_dispatch:
 
 permissions:
@@ -46,16 +47,16 @@ jobs:
           "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" \
             "platform-tools" \
             "platforms;android-34" \
-            "system-images;android-34;google_apis;x86_64"
+            "system-images;android-34;default;x86_64"
 
-      - name: Run SQLCipher instrumentation test on emulator
+      - name: Run SQLCipher instrumentation test on lightweight AOSP emulator
         uses: reactivecircus/android-emulator-runner@v2
         with:
           api-level: 34
-          target: google_apis
+          target: default
           arch: x86_64
           profile: pixel_2
-          emulator-options: -no-window -gpu swiftshader_indirect -no-snapshot -noaudio -no-boot-anim -camera-back none -camera-front none
+          emulator-options: -no-window -gpu swiftshader_indirect -no-snapshot -noaudio -no-boot-anim -camera-back none -camera-front none -memory 3072 -cores 2
           emulator-boot-timeout: 900
           disable-animations: true
           script: bash .github/scripts/run-sqlcipher-instrumentation.sh
