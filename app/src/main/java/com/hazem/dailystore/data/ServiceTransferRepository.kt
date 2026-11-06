@@ -24,7 +24,12 @@ data class ServiceDailySummary(
     val customerReceiptsMinor:Long,val profitMinor:Long,val providerFeeMinor:Long,
     val rechargeFeePaidMinor:Long,val rechargeReserveMinor:Long=deliveredMinor,val creditChargesMinor:Long=0L
 )
-data class ServiceTransferResult(val transferId:String,val deliveredMinor:Long,val profitMinor:Long,val providerFeeMinor:Long,val customerChargeMinor:Long,val replayed:Boolean)
+data class ServiceTransferResult(
+    val transferId:String,val deliveredMinor:Long,val profitMinor:Long,val providerFeeMinor:Long,
+    val customerChargeMinor:Long,val replayed:Boolean,
+    val amountDebitedMinor:Long=deliveredMinor,val deliveredMilliSyp:Long=deliveredMinor*1000L,
+    val profitMilliSyp:Long=profitMinor*1000L
+)
 
 /** Each service wallet is one real cash-account wallet used for both provider float and electronic customer receipts. */
 class ServiceTransferRepository(context:Context) {
@@ -264,7 +269,7 @@ class ServiceTransferRepository(context:Context) {
             if(old!=null) {
                 require(old[1]==serviceType&&old[2]==deliveredDisplayMinor.toString()&&old[3]==profit.toString()&&old[4]==providerFeeMinor.toString()&&old[5]==charge.toString()&&old[6]==payload&&old[7]==paymentMode&&old[8]==customerId.orEmpty()&&old[9]==amountDebitedMinor.toString()&&old[10]==deliveredMilliSyp.toString()&&old[11]==profitMilliSyp.toString()){"معرّف التحويل مستخدم لبيانات مختلفة"}
                 db.setTransactionSuccessful()
-                return ServiceTransferResult(old[0]!!,deliveredDisplayMinor,profit,providerFeeMinor,charge,true)
+                return ServiceTransferResult(old[0]!!,deliveredDisplayMinor,profit,providerFeeMinor,charge,true,walletDebitMinor,deliveredMilliSyp,profitMilliSyp)
             }
             if(paymentMode=="CREDIT") {
                 require(db.rawQuery("SELECT 1 FROM customers WHERE id=? AND is_active=1",arrayOf(customerId)).use{it.moveToFirst()}) {
@@ -291,7 +296,7 @@ class ServiceTransferRepository(context:Context) {
                     db,actor,operationId,"EXECUTE_SERVICE_TRANSFER_CREDIT","SERVICE_TRANSFER",pendingId,command.toString()
                 )
                 db.setTransactionSuccessful()
-                return ServiceTransferResult(pendingId,deliveredDisplayMinor,profit,providerFeeMinor,charge,false)
+                return ServiceTransferResult(pendingId,deliveredDisplayMinor,profit,providerFeeMinor,charge,false,walletDebitMinor,deliveredMilliSyp,profitMilliSyp)
             }
             require(localRole==null || localRole=="PRIMARY"){"دور الجهاز غير صالح لتنفيذ تحويل الرصيد"}
             ensureSystemAccounts(db)
@@ -336,7 +341,7 @@ class ServiceTransferRepository(context:Context) {
             audit(db,actor,"SERVICE_TRANSFER_POSTED",id,null,
                 "{\"service_type\":\"$serviceType\",\"delivered_minor\":$deliveredMinor,\"profit_minor\":$profit,\"provider_fee_minor\":$providerFeeMinor,\"customer_charge_minor\":$charge,\"receipt_account_id\":\"${esc(receiptAccountId)}\"}",now)
             db.setTransactionSuccessful()
-            return ServiceTransferResult(id,deliveredDisplayMinor,profit,providerFeeMinor,charge,false)
+            return ServiceTransferResult(id,deliveredDisplayMinor,profit,providerFeeMinor,charge,false,walletDebitMinor,deliveredMilliSyp,profitMilliSyp)
         } finally {db.endTransaction()}
     }
 
