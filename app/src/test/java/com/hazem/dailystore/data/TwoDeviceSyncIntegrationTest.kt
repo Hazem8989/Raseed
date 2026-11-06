@@ -996,7 +996,7 @@ class TwoDeviceSyncIntegrationTest {
             serviceRepo.serviceAccountId(ServiceTransferRepository.SHAM_CASH),
             transferOperation,paymentMode="CREDIT",customerId=customer.id
         )
-        assertEquals(12_000L,transfer.customerChargeMinor)
+        assertEquals(10_500L,transfer.customerChargeMinor)
         assertEquals(0,scalar(primaryDb,
             "SELECT COUNT(*) FROM cash_transactions WHERE source_id=? AND transaction_type='SERVICE_TRANSFER_RECEIPT'",
             transfer.transferId))
@@ -1034,7 +1034,7 @@ class TwoDeviceSyncIntegrationTest {
         setLocalDeviceId(secondaryId);AppDatabase.installForTests(secondaryDb)
         val secondaryDebt=ServiceTransferReceivableRepository(context).listOpenReceivables(customer.id).single()
         assertEquals(transfer.transferId,secondaryDebt.transferId)
-        assertEquals(12_000L,secondaryDebt.outstandingMinor)
+        assertEquals(10_500L,secondaryDebt.outstandingMinor)
         assertEquals(0,scalar(secondaryDb,
             "SELECT COUNT(*) FROM cash_transactions WHERE source_type='SERVICE_TRANSFER_DEBT_COLLECTION' AND source_id=?",transfer.transferId))
 
@@ -1110,7 +1110,7 @@ class TwoDeviceSyncIntegrationTest {
         assertEquals("فشل تحديث الرصيد على الثانوي: $mirrorError",null,mirrorError)
         val updatedDebt=ServiceTransferReceivableRepository(context).listOpenReceivables(customer.id).single()
         assertEquals(3_000L,updatedDebt.paidMinor)
-        assertEquals(9_000L,updatedDebt.outstandingMinor)
+        assertEquals(7_500L,updatedDebt.outstandingMinor)
         assertEquals(3_000L,PartyStatementRepository(context).customer(customer.id).entries
             .single{it.type=="SERVICE_TRANSFER_COLLECTION"}.creditSypMinor)
 
@@ -1141,7 +1141,7 @@ class TwoDeviceSyncIntegrationTest {
         var excessiveRejected=false
         try {
             ServiceTransferReceivableRepository(context).collect(
-                secondaryAdminId,transfer.transferId,UUID.randomUUID().toString(),receiptWallet.id,9_001L,"زيادة غير مسموحة"
+                secondaryAdminId,transfer.transferId,UUID.randomUUID().toString(),receiptWallet.id,7_501L,"زيادة غير مسموحة"
             )
         } catch(_:IllegalArgumentException){excessiveRejected=true}
         assertTrue("يجب رفض التحصيل الذي يتجاوز الرصيد المتبقي على الثانوي",excessiveRejected)
