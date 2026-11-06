@@ -59,7 +59,7 @@ jobs:
           emulator-boot-timeout: 900
           disable-animations: true
           script: |
-            set -euo pipefail
+            bash -euo pipefail <<'BASH'
             REPORT_DIR="app/build/reports/sqlcipher-instrumentation"
             mkdir -p "$REPORT_DIR"
             trap 'adb logcat -d -t 4000 > "$REPORT_DIR/logcat.txt" 2>/dev/null || true' EXIT
@@ -98,6 +98,7 @@ jobs:
               echo "Instrumentation did not report a passing test count."
               exit 1
             fi
+            BASH
 
       - name: Upload instrumentation test reports
         if: always()
