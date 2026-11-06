@@ -60,6 +60,7 @@ class AppDatabase internal constructor(context: Context, databaseName: String = 
             ensureSyncAckDeliverySchema(db)
             ensureServiceTransferReceivableSchema(db)
             ensureServiceTransferReceivableSyncSchema(db)
+            ensureServiceTransferPrecisionSchema(db)
             db.execSQL(
                 """INSERT INTO app_settings(setting_key, setting_value, updated_at)
                    VALUES('base_currency', 'USD', strftime('%Y-%m-%dT%H:%M:%fZ','now'))"""
