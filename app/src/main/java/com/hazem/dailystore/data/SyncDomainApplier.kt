@@ -1276,12 +1276,13 @@ class SyncDomainApplier(context: Context) {
             val charge=p.getLong("charge_minor")
             val paid=p.getLong("paid_minor")
             val outstanding=p.getLong("outstanding_minor")
+            val reversed=p.optString("status")=="REVERSED"
             require(delivered>0L&&charge>=delivered&&paid>=0L&&paid<=charge&&
-                outstanding==charge-paid){"مبالغ ذمة تحويل الرصيد غير متوازنة"}
-            val expectedStatus=if(p.optString("status")=="REVERSED") {
-                require(paid==0L&&outstanding==0L){"لا يمكن عكس ذمة سبق تحصيلها"}
-                "REVERSED"
-            } else if(outstanding==0L)"PAID" else if(paid>0L)"PARTIALLY_PAID" else "OPEN"
+                (if(reversed) paid==0L&&outstanding==0L else outstanding==charge-paid)) {
+                "مبالغ ذمة تحويل الرصيد غير متوازنة"
+            }
+            val expectedStatus=if(reversed) "REVERSED"
+                else if(outstanding==0L)"PAID" else if(paid>0L)"PARTIALLY_PAID" else "OPEN"
             require(p.optString("status")==expectedStatus){"حالة ذمة تحويل الرصيد لا تطابق رصيدها"}
             val createdAt=p.optString("created_at")
             val operatingDate=p.optString("operating_date")
@@ -1330,7 +1331,7 @@ class SyncDomainApplier(context: Context) {
                     "تحديث الذمة لا يتضمن حركة التحصيل اللازمة لتفسير تغير الرصيد"
                 }
             } else require(paid==0L){"لا يمكن استيراد ذمة برصيد مسدد دون سجل تحصيل سابق"}
-            db.insertWithOnConflict("service_transfer_receivable_mirrors",null,ContentValues().apply{
+            val mirrorValues=ContentValues().apply{
                 put("transfer_id",row[3]);put("customer_id",p.getString("customer_id"))
                 put("customer_name",p.getString("customer_name"));put("service_type",p.getString("service_type"))
                 put("delivered_minor",delivered);put("charge_minor",charge);put("paid_minor",paid)
@@ -1339,7 +1340,11 @@ class SyncDomainApplier(context: Context) {
                 if(p.isNull("reference"))putNull("reference")else put("reference",p.getString("reference"))
                 if(p.isNull("note"))putNull("note")else put("note",p.getString("note"))
                 put("updated_at",timestamp())
-            },android.database.sqlite.SQLiteDatabase.CONFLICT_REPLACE)
+            }
+            if(previous==null) db.insertOrThrow("service_transfer_receivable_mirrors",null,mirrorValues)
+            else db.update("service_transfer_receivable_mirrors",mirrorValues,"transfer_id=?",arrayOf(row[3])).also{
+                require(it==1){"تعذر تحديث نسخة ذمة تحويل الرصيد"}
+            }
             db.update("sync_inbox",ContentValues().apply{
                 put("status","APPLIED");put("applied_at",timestamp());putNull("rejection_reason")
             },"operation_id=? AND status='RECEIVED'",arrayOf(operationId)).also{

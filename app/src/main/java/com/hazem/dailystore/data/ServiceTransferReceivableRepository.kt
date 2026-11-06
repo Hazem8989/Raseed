@@ -100,11 +100,7 @@ class ServiceTransferReceivableRepository(context:Context) {
                 }
                 val occurredAt=timestamp()
                 val movementDate=StoreTime.operatingDate(db,occurredAt)
-                if(account.first=="CASH_BOX") {
-                    val primary=db.rawQuery("SELECT primary_cash_account_id FROM daily_cash_sessions WHERE operating_date=?",
-                        arrayOf(movementDate)).use{if(it.moveToFirst())it.getString(0)else null}
-                    require(primary==cashAccountId){"التحصيل النقدي يجب أن يذهب إلى درج اليوم الرئيسي"}
-                }
+                // The primary validates that this mapped account is the official drawer for the event date.
                 val paymentId=UUID.randomUUID().toString()
                 val payload=org.json.JSONObject()
                     .put("business_operation","COLLECT_SERVICE_TRANSFER_DEBT")
@@ -232,13 +228,15 @@ class ServiceTransferReceivableRepository(context:Context) {
         ).use{c->
             require(c.moveToFirst()){"تعذر تجهيز نسخة مزامنة ذمة تحويل الرصيد"}
             val charge=c.getLong(4);val paid=c.getLong(10)
+            val reversed=c.getString(9)=="REVERSED"
+            val outstanding=if(reversed)0L else (charge-paid).coerceAtLeast(0L)
             org.json.JSONObject()
                 .put("business_operation","UPSERT_SERVICE_TRANSFER_RECEIVABLE")
                 .put("transfer_id",transferId).put("customer_id",c.getString(0))
                 .put("customer_name",c.getString(1)).put("service_type",c.getString(2))
                 .put("delivered_minor",c.getLong(3)).put("charge_minor",charge)
-                .put("paid_minor",paid).put("outstanding_minor",(charge-paid).coerceAtLeast(0L))
-                .put("status",if(c.getString(9)=="REVERSED")"REVERSED" else if(paid>=charge)"PAID" else if(paid>0L)"PARTIALLY_PAID" else c.getString(9))
+                .put("paid_minor",paid).put("outstanding_minor",outstanding)
+                .put("status",if(reversed)"REVERSED" else if(paid>=charge)"PAID" else if(paid>0L)"PARTIALLY_PAID" else c.getString(9))
                 .put("created_at",c.getString(5)).put("operating_date",c.getString(6))
                 .put("reference",if(c.isNull(7))org.json.JSONObject.NULL else c.getString(7))
                 .put("note",if(c.isNull(8))org.json.JSONObject.NULL else c.getString(8))
