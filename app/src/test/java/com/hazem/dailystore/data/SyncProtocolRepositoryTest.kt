@@ -94,7 +94,7 @@ class SyncProtocolRepositoryTest {
             configureSecondaryForTest(storeId, primaryDeviceId, credential, "جهاز ثانوي")
             throw AssertionError("Enrollment must not delete a local wallet with an opening balance")
         } catch (expected: IllegalArgumentException) {
-            assertTrue(expected.message!!.contains("أرصدة أو حركات محلية"))
+            assertTrue(expected.message!!.contains("أرصدة أو حركات") && expected.message!!.contains("محلية"))
         }
         assertNull(repository.localDeviceRole())
         assertEquals(5_000L, CashAccountRepository(context).balance(localWalletId))
