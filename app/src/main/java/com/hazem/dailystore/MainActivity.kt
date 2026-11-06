@@ -288,11 +288,16 @@ class MainActivity : Activity() {
         window.decorView.layoutDirection = View.LAYOUT_DIRECTION_RTL
         BackupRestoreManager(this).recoverInterruptedRestore()
         StoreRepository(this).ensureBaseSetup()
-        AuthRepository(this).ensureInitialAdmin()
-        ServiceTransferRepository(this).ensureSystemAccounts()
-        if (restoreSession(savedInstanceState)) restoreActiveScreen() else {
+        val authRepository = AuthRepository(this)
+        if (authRepository.needsInitialAdminSetup()) {
             clearSessionState()
-            showLoginScreen()
+            showInitialAdminSetupScreen()
+        } else {
+            ServiceTransferRepository(this).ensureSystemAccounts()
+            if (restoreSession(savedInstanceState)) restoreActiveScreen() else {
+                clearSessionState()
+                showLoginScreen()
+            }
         }
     }
 
@@ -555,6 +560,85 @@ class MainActivity : Activity() {
         sessionPrefs.edit().clear().apply()
         SecureSessionStore.clear(this)
         SyncForegroundService.stop(this)
+    }
+
+    private fun showInitialAdminSetupScreen() {
+        markScreen("INITIAL_ADMIN_SETUP")
+        val page = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            gravity = Gravity.CENTER
+            setPadding(dp(26), dp(28), dp(26), dp(28))
+            setBackgroundColor(backgroundColor)
+        }
+        val scroll = ScrollView(this).apply { addView(page) }
+        val brand = label("THE DAILY SHOP", 26f, green, true, Gravity.CENTER)
+        brand.letterSpacing = 0.08f
+        val subtitle = label("إعداد المتجر لأول مرة", 21f, green, true, Gravity.CENTER)
+        subtitle.setPadding(0, dp(22), 0, dp(8))
+        val explanation = label(
+            "أنشئ حساب المدير الخاص بك. لن تكون هناك كلمة مرور افتراضية.",
+            14f, mutedColor, false, Gravity.CENTER
+        )
+        explanation.setPadding(0, 0, 0, dp(18))
+
+        fun setupField(hintText: String, passwordField: Boolean = false): EditText =
+            EditText(this).apply {
+                hint = hintText
+                textSize = 16f
+                setSingleLine(true)
+                gravity = Gravity.CENTER_VERTICAL
+                setPadding(dp(16), 0, dp(16), 0)
+                background = inputBackground()
+                if (passwordField) inputType =
+                    InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_PASSWORD
+            }
+
+        val displayName = setupField("اسم المدير")
+        val username = setupField("اسم المستخدم (3 أحرف على الأقل)")
+        val password = setupField("كلمة المرور (10 أحرف على الأقل وحرف ورقم)", true)
+        val confirmPassword = setupField("تأكيد كلمة المرور", true)
+        val create = Button(this).apply {
+            text = "إنشاء حساب المدير"
+            textSize = 17f
+            setTextColor(Color.WHITE)
+            setBackgroundColor(green)
+            isAllCaps = false
+            setOnClickListener {
+                val chosenPassword = password.text.toString()
+                if (chosenPassword != confirmPassword.text.toString()) {
+                    confirmPassword.error = "كلمتا المرور غير متطابقتين"
+                    return@setOnClickListener
+                }
+                try {
+                    val userId = AuthRepository(this@MainActivity).createInitialAdmin(
+                        username.text.toString(), displayName.text.toString(), chosenPassword
+                    )
+                    currentUserId = userId
+                    currentUserRole = "ADMIN"
+                    SecureSessionStore.save(this@MainActivity, userId)
+                    sessionPrefs.edit().putString(SESSION_SCREEN, "POS")
+                        .putString(SESSION_CART, "[]").apply()
+                    ServiceTransferRepository(this@MainActivity).ensureSystemAccounts()
+                    showPointOfSale()
+                } catch (e: IllegalArgumentException) {
+                    password.error = e.message ?: "تعذر إنشاء حساب المدير"
+                } catch (e: Exception) {
+                    Toast.makeText(
+                        this@MainActivity, e.message ?: "تعذر إنشاء حساب المدير",
+                        Toast.LENGTH_LONG
+                    ).show()
+                }
+            }
+        }
+        page.addView(brand, matchWidth())
+        page.addView(subtitle, matchWidth())
+        page.addView(explanation, matchWidth())
+        page.addView(displayName, fieldParams(dp(54), dp(10)))
+        page.addView(username, fieldParams(dp(54), dp(12)))
+        page.addView(password, fieldParams(dp(54), dp(12)))
+        page.addView(confirmPassword, fieldParams(dp(54), dp(12)))
+        page.addView(create, fieldParams(dp(54), dp(20)))
+        setContentView(scroll)
     }
 
     private fun showLoginScreen() {
