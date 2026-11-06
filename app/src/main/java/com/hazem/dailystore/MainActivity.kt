@@ -3003,6 +3003,7 @@ class MainActivity : Activity() {
     private fun showServiceTransfers() {
         markScreen("SERVICE_TRANSFERS")
         val repo = ServiceTransferRepository(this)
+        val secondary = SyncProtocolRepository(this).isConfiguredSecondary()
         val page = LinearLayout(this).apply { orientation=LinearLayout.VERTICAL; setBackgroundColor(backgroundColor) }
         val header = LinearLayout(this).apply { orientation=LinearLayout.HORIZONTAL; gravity=Gravity.CENTER_VERTICAL; setPadding(dp(14),dp(10),dp(14),dp(10)); setBackgroundColor(Color.WHITE) }
         val back = Button(this).apply { text="‹"; textSize=25f; isAllCaps=false; setTextColor(green); setBackgroundColor(Color.TRANSPARENT); setOnClickListener { showPointOfSale() } }
@@ -3010,6 +3011,7 @@ class MainActivity : Activity() {
         header.addView(label("تحويل رصيد",19f,green,true,Gravity.CENTER),LinearLayout.LayoutParams(0,-2,1f))
         val body=ScrollView(this).apply{isFillViewport=true}
         val content=LinearLayout(this).apply{orientation=LinearLayout.VERTICAL;setPadding(dp(16),dp(14),dp(16),dp(24))}
+        if(!secondary) {
         content.addView(label("محافظ التشغيل والقبض الإلكتروني للخدمات",21f,green,true,Gravity.RIGHT))
         content.addView(label("محفظتا سيرياتيل وشام كاش هما رصيد التشغيل نفسه وحساب القبض الإلكتروني للخدمة؛ كل حركة بيع أو قبض أو تحويل داخلي تظهر على رصيد المحفظة ذاتها.",13f,mutedColor,false,Gravity.RIGHT).apply{setPadding(0,dp(5),0,dp(12))})
         repo.listWallets().forEach { w ->
@@ -3023,6 +3025,8 @@ class MainActivity : Activity() {
             content.addView(smallButton("شراء / شحن رصيد الخدمة"){showServiceRechargeDialog()},fieldParams(dp(46),dp(12)))
         }
         content.addView(Button(this).apply{text="＋ تنفيذ تحويل للزبون";isAllCaps=false;setTextColor(Color.WHITE);setBackgroundColor(green);setOnClickListener{showServiceTransferDialog()}},fieldParams(dp(52),dp(12)))
+        }
+        if(!secondary) {
         content.addView(sectionHeading("ملخص عمليات اليوم ومبلغ إعادة التعبئة"))
         val daily=repo.dailySummary()
         if(daily.isEmpty()) content.addView(label("لا توجد عمليات تحويل رصيد اليوم.",12f,mutedColor,false,Gravity.CENTER))
@@ -3035,6 +3039,7 @@ class MainActivity : Activity() {
             card.addView(label("ربح المتجر: "+formatSypAmount(d.profitMinor)+" ل.س • رسوم الشركة: "+formatSypAmount(d.providerFeeMinor)+" ل.س",12f,green,true,Gravity.RIGHT))
             card.addView(label("رسوم التعبئة المدفوعة فعلياً اليوم: "+formatSypAmount(d.rechargeFeePaidMinor)+" ل.س • قيمة الرصيد اللازم تعويضه: "+formatSypAmount(d.rechargeReserveMinor)+" ل.س",12f,mutedColor,true,Gravity.RIGHT))
             content.addView(card,fieldParams(-2,dp(7)))
+        }
         }
         content.addView(sectionHeading("ديون تحويل الرصيد الآجلة"))
         val openServiceDebts=ServiceTransferReceivableRepository(this).listOpenReceivables()
@@ -3052,6 +3057,7 @@ class MainActivity : Activity() {
             debtCard.addView(smallButton("تحصيل دفعة") { showServiceTransferDebtPaymentDialog(debt.transferId) },fieldParams(dp(42),dp(6)))
             content.addView(debtCard,fieldParams(-2,dp(7)))
         }
+        if(!secondary) {
         content.addView(label("المقبوض النقدي يذهب إلى الدرج الرئيسي، والمقبوض الإلكتروني يضاف إلى محفظة الخدمة نفسها افتراضياً أو إلى المحفظة التي تختارها. عند تصريف المحفظة إلى النقدية تنقص المحفظة ويزيد الصندوق بالمبلغ نفسه. عمولة 2% تُسجل فقط عند تعبئة رصيد سيرياتيل أو شام كاش من تاجر خارجي، ولا تُضاف إلى تحويلات الزبائن.",11f,mutedColor,false,Gravity.RIGHT).apply{setPadding(0,dp(3),0,dp(10))})
         content.addView(sectionHeading("سجل تحويلات الرصيد"))
         val rows=repo.listTransfers(80)
@@ -3069,6 +3075,7 @@ class MainActivity : Activity() {
             }
             card.addView(label(StoreTime.formatTimestamp(AppDatabase.getInstance(this).readableDatabase, r.createdAt),10f,mutedColor,false,Gravity.RIGHT))
             content.addView(card,fieldParams(-2,dp(8)))
+        }
         }
         body.addView(content);page.addView(header,matchWidth());page.addView(body,LinearLayout.LayoutParams(-1,0,1f));setContentView(page)
     }
