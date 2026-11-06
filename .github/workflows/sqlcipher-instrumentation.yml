@@ -1,0 +1,56 @@
+name: SQLCipher Android Instrumentation
+
+on:
+  push:
+    branches:
+      - the-daily-shop-development
+    paths:
+      - "app/**"
+      - ".github/workflows/sqlcipher-instrumentation.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: sqlcipher-instrumentation-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  sqlcipher-instrumentation:
+    name: Verify SQLCipher on Android runtime
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Set up Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Run SQLCipher instrumentation test on emulator
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 35
+          target: google_apis
+          arch: x86_64
+          profile: pixel_2
+          disable-animations: true
+          script: ./gradlew :app:connectedDebugAndroidTest --stacktrace
+
+      - name: Upload instrumentation test reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: sqlcipher-instrumentation-reports
+          path: app/build/reports/androidTests/connected/
+          if-no-files-found: ignore
