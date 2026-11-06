@@ -129,6 +129,51 @@ class PartyStatementRepository(context: Context) {
                 ))
             }
         }
+        db.rawQuery(
+            """SELECT t.id,t.service_type,t.customer_charge_minor,
+                      COALESCE(t.operating_date,substr(t.created_at,1,10)),t.created_at,t.reference
+               FROM service_transfers t
+               WHERE t.customer_id=? AND t.payment_mode='CREDIT' AND t.status='POSTED'
+               ORDER BY COALESCE(t.operating_date,substr(t.created_at,1,10)),t.created_at,t.id""".trimIndent(),
+            arrayOf(customerId)
+        ).use { c ->
+            while(c.moveToNext()) {
+                val serviceName=when(c.getString(1)) {
+                    ServiceTransferRepository.SYRIATEL_BALANCE -> "سيرياتيل العادي"
+                    ServiceTransferRepository.SYRIATEL_CASH -> "سيرياتيل كاش"
+                    else -> "شام كاش"
+                }
+                val date=c.getString(3)
+                rows.add(PartyStatementEntry(
+                    c.getString(0),date,"SERVICE_TRANSFER_CREDIT",if(c.isNull(5)) c.getString(0) else c.getString(5),
+                    "تحويل رصيد آجل • $serviceName",debitSypMinor=c.getLong(2),
+                    sortAt="$date|${c.getString(4)}"
+                ))
+            }
+        }
+        db.rawQuery(
+            """SELECT p.id,p.transfer_id,p.amount_minor,p.operating_date,p.created_at,
+                      t.service_type,COALESCE(t.reference,t.id)
+               FROM service_transfer_receivable_payments p
+               JOIN service_transfers t ON t.id=p.transfer_id
+               WHERE t.customer_id=?
+               ORDER BY p.operating_date,p.created_at,p.id""".trimIndent(),
+            arrayOf(customerId)
+        ).use { c ->
+            while(c.moveToNext()) {
+                val serviceName=when(c.getString(5)) {
+                    ServiceTransferRepository.SYRIATEL_BALANCE -> "سيرياتيل العادي"
+                    ServiceTransferRepository.SYRIATEL_CASH -> "سيرياتيل كاش"
+                    else -> "شام كاش"
+                }
+                val date=c.getString(3)
+                rows.add(PartyStatementEntry(
+                    c.getString(0),date,"SERVICE_TRANSFER_COLLECTION",c.getString(6),
+                    "تحصيل دين تحويل رصيد • $serviceName",creditSypMinor=c.getLong(2),
+                    sortAt="$date|${c.getString(4)}"
+                ))
+            }
+        }
         return build(customerId, name, "CUSTOMER", rows, unpriced)
     }
 

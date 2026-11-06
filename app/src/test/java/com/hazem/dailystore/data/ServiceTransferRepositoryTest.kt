@@ -192,6 +192,10 @@ class ServiceTransferRepositoryTest {
         assertEquals(500L,first.paidMinor)
         assertEquals(700L,first.outstandingMinor)
         assertEquals(500L,accounts.balance(drawer.id))
+        val partialStatement=PartyStatementRepository(context).customer(customerId)
+        assertEquals(700L,partialStatement.closingBalanceSypMinor)
+        assertEquals(1_200L,partialStatement.entries.single{it.type=="SERVICE_TRANSFER_CREDIT"}.debitSypMinor)
+        assertEquals(500L,partialStatement.entries.single{it.type=="SERVICE_TRANSFER_COLLECTION"}.creditSypMinor)
         val replay=receivables.collect(actor,transfer.transferId,paymentOperation,drawer.id,500L,"دفعة أولى")
         assertTrue(replay.replayed)
         assertEquals(500L,accounts.balance(drawer.id))
@@ -208,6 +212,7 @@ class ServiceTransferRepositoryTest {
         val finalReplay=receivables.collect(actor,transfer.transferId,finalOperation,drawer.id,700L,"دفعة أخيرة")
         assertTrue(finalReplay.replayed)
         assertEquals(1_200L,accounts.balance(drawer.id))
+        assertEquals(0L,PartyStatementRepository(context).customer(customerId).closingBalanceSypMinor)
         assertTrue(receivables.listOpenReceivables(customerId).isEmpty())
         val summary=repo.dailySummary().single{it.serviceType==ServiceTransferRepository.SYRIATEL_BALANCE}
         assertEquals(0L,summary.customerReceiptsMinor)

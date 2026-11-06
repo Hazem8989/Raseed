@@ -312,7 +312,7 @@ class DailyBalanceRepository(context:Context) {
         val s=MutableList(12){0L}
         db.rawQuery("SELECT transaction_type,direction,SUM(amount_minor) FROM cash_transactions WHERE account_id=? AND COALESCE(operating_date,substr(created_at,1,10))=? AND transaction_type<>'WALLET_DAILY_OPENING_ADJUSTMENT' GROUP BY transaction_type,direction",arrayOf(id,date)).use { c->
             while(c.moveToNext()){val t=c.getString(0);val d=c.getString(1);val n=c.getLong(2)
-                when{t=="SALE_RECEIPT"&&d=="IN"->s[0]+=n;t=="CUSTOMER_CREDIT_COLLECTION"&&d=="IN"->s[1]+=n
+                when{t=="SALE_RECEIPT"&&d=="IN"->s[0]+=n;(t=="CUSTOMER_CREDIT_COLLECTION"||t=="SERVICE_TRANSFER_DEBT_COLLECTION")&&d=="IN"->s[1]+=n
                     t=="SERVICE_TRANSFER_RECEIPT"&&d=="IN"->s[8]+=n
                     t=="ACCOUNT_TRANSFER_IN"&&d=="IN"->s[5]+=n;t=="PURCHASE_PAYMENT"&&d=="OUT"->s[3]+=n
                     t=="PERSONAL_WITHDRAWAL"&&d=="OUT"->s[4]+=n;t=="ACCOUNT_TRANSFER_OUT"&&d=="OUT"->s[6]+=n
@@ -369,7 +369,7 @@ class DailyBalanceRepository(context:Context) {
         }
         require(role==null || role=="PRIMARY") { "دور الجهاز غير صالح لتنفيذ الحركة المالية" }
     }
-    private fun typeName(t:String)=when(t){"SALE_RECEIPT"->"قبض مبيعات";"CUSTOMER_CREDIT_COLLECTION"->"تحصيل ديون";"PURCHASE_PAYMENT"->"دفعة مورد";"PERSONAL_WITHDRAWAL"->"مسحوبات شخصية";"ACCOUNT_TRANSFER_IN","ACCOUNT_TRANSFER_OUT"->"تحويل داخلي – تصريف محفظة";"WALLET_TOP_UP"->"تغذية محفظة";"SERVICE_TRANSFER_RECEIPT"->"مقبوض تحويل رصيد";"SERVICE_RECHARGE"->"شراء رصيد خدمة";"OPERATING_EXPENSE"->"مصروف تشغيلي";"SALE_RETURN_REFUND"->"رد مبلغ مرتجع للعميل";"PURCHASE_RETURN_REFUND"->"مبلغ مسترد من المورد";else->t}
+    private fun typeName(t:String)=when(t){"SALE_RECEIPT"->"قبض مبيعات";"CUSTOMER_CREDIT_COLLECTION"->"تحصيل ديون فواتير البيع";"SERVICE_TRANSFER_DEBT_COLLECTION"->"تحصيل دين تحويل رصيد";"PURCHASE_PAYMENT"->"دفعة مورد";"PERSONAL_WITHDRAWAL"->"مسحوبات شخصية";"ACCOUNT_TRANSFER_IN","ACCOUNT_TRANSFER_OUT"->"تحويل داخلي – تصريف محفظة";"WALLET_TOP_UP"->"تغذية محفظة";"SERVICE_TRANSFER_RECEIPT"->"مقبوض تحويل رصيد";"SERVICE_RECHARGE"->"شراء رصيد خدمة";"OPERATING_EXPENSE"->"مصروف تشغيلي";"SALE_RETURN_REFUND"->"رد مبلغ مرتجع للعميل";"PURCHASE_RETURN_REFUND"->"مبلغ مسترد من المورد";else->t}
     private fun esc(s:String)=s.replace("\\","\\\\").replace("\"","\\\"").replace("\n","\\n").replace("\r","\\r")
     private fun hash(s:String)=MessageDigest.getInstance("SHA-256").digest(s.toByteArray(Charsets.UTF_8)).joinToString(""){"%02x".format(it)}
     private fun today()=StoreTime.today(database.readableDatabase)
