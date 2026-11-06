@@ -1223,7 +1223,7 @@ class TwoDeviceSyncIntegrationTest {
         setLocalDeviceId(primaryId);AppDatabase.installForTests(primaryDb)
         val customer=CustomerRepository(context).create(primaryAdminId,"زبون تحويل ثانوي "+UUID.randomUUID())
         val serviceRepo=ServiceTransferRepository(context)
-        serviceRepo.setOpeningBalance(primaryAdminId,ServiceTransferRepository.SHAM_CASH,30_000L,"رصيد اختبار")
+        serviceRepo.setOpeningBalance(primaryAdminId,ServiceTransferRepository.SHAM_CASH,5_000L,"رصيد اختبار أولي غير كافٍ")
         val referenceItems=primaryRepository.pendingOutboxForDevice(secondaryId)
         assertTrue("The service wallet account must be mirrored with its service identity",
             referenceItems.any { it.entityType=="CASH_ACCOUNT" &&
@@ -1295,7 +1295,14 @@ class TwoDeviceSyncIntegrationTest {
             }
         )
         primaryTransferProcessor.onEncryptedFrame(secondaryId,transferOperation,transferFrame)
-        assertEquals("رفض الأساسي التحويل الآجل: $transferError",null,transferError)
+        assertTrue("An insufficient primary float must leave the immutable command retryable",
+            !transferError.isNullOrBlank())
+        assertEquals("RECEIVED",inboxStatus(primaryDb,transferOperation))
+        assertEquals(0,scalar(primaryDb,"SELECT COUNT(*) FROM service_transfers WHERE operation_id=?",transferOperation))
+        serviceRepo.setOpeningBalance(primaryAdminId,ServiceTransferRepository.SHAM_CASH,30_000L,"تعبئة رصيد قبل إعادة المحاولة")
+        transferError=null
+        primaryTransferProcessor.onEncryptedFrame(secondaryId,transferOperation,transferFrame)
+        assertEquals("رفض الأساسي التحويل الآجل بعد تصحيح الرصيد: $transferError",null,transferError)
         assertEquals("APPLIED",inboxStatus(primaryDb,transferOperation))
         val transferId=primaryDb.readableDatabase.rawQuery(
             "SELECT id FROM service_transfers WHERE operation_id=?",arrayOf(transferOperation)
