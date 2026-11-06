@@ -14,6 +14,7 @@ android {
         // GitHub Actions run numbers make each published build upgradeable.
         versionCode = (System.getenv("GITHUB_RUN_NUMBER")?.toIntOrNull()?.plus(1) ?: 2)
         versionName = System.getenv("APP_VERSION_NAME") ?: "1.0.1"
+        testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 
     val releaseStorePath = System.getenv("ANDROID_KEYSTORE_PATH")
@@ -61,11 +62,15 @@ dependencies {
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
 
     // Modern SQLCipher Android API; minSdk 23 is supported.
-    implementation("net.zetetic:sqlcipher-android:4.20.0@aar")
+    implementation("net.zetetic:sqlcipher-android:4.20.0")
     implementation("androidx.sqlite:sqlite:2.7.0")
 
     testImplementation("com.squareup.okhttp3:mockwebserver:4.12.0")
     testImplementation("com.squareup.okhttp3:okhttp-tls:4.12.0")
     testImplementation("junit:junit:4.13.2")
     testImplementation("org.robolectric:robolectric:4.14.1")
+
+    androidTestImplementation("androidx.test:runner:1.6.2")
+    androidTestImplementation("androidx.test.ext:junit:1.2.1")
+    androidTestImplementation("junit:junit:4.13.2")
 }
