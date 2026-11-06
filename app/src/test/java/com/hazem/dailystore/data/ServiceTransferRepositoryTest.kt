@@ -225,6 +225,8 @@ class ServiceTransferRepositoryTest {
         ).use{it.moveToFirst();it.getLong(0)}
         assertEquals(0L,immediateReceipts)
         assertEquals(9_000L,repo.listWallets().single{it.serviceKey==ServiceTransferRepository.SYRIATEL_SHARED}.balanceMinor)
+        assertEquals("لا يُعترف بربح الذمة قبل التحصيل",0L,
+            repo.dailySummary().single{it.serviceType==ServiceTransferRepository.SYRIATEL_BALANCE}.profitMinor)
         val receivables=ServiceTransferReceivableRepository(context)
         val replayedTransfer=repo.executeTransfer(actor,ServiceTransferRepository.SYRIATEL_BALANCE,1_000L,0L,wallet,operationId,
             paymentMode="CREDIT",customerId=customerId,legacyBalanceDelivered=true)
@@ -237,6 +239,10 @@ class ServiceTransferRepositoryTest {
         assertEquals(500L,first.paidMinor)
         assertEquals(700L,first.outstandingMinor)
         assertEquals(500L,accounts.balance(drawer.id))
+        val partialProfit=repo.dailySummary().single{it.serviceType==ServiceTransferRepository.SYRIATEL_BALANCE}
+        assertEquals("يُحتسب ربح الجزء المحصل فقط",83L,partialProfit.profitMinor)
+        assertEquals("خصم المحفظة لا يتكرر عند التحصيل الجزئي",9_000L,
+            repo.listWallets().single{it.serviceKey==ServiceTransferRepository.SYRIATEL_SHARED}.balanceMinor)
         val partialStatement=PartyStatementRepository(context).customer(customerId)
         assertEquals(700L,partialStatement.closingBalanceSypMinor)
         assertEquals(1_200L,partialStatement.entries.single{it.type=="SERVICE_TRANSFER_CREDIT"}.debitSypMinor)
@@ -257,6 +263,9 @@ class ServiceTransferRepositoryTest {
         val finalReplay=receivables.collect(actor,transfer.transferId,finalOperation,drawer.id,700L,"دفعة أخيرة")
         assertTrue(finalReplay.replayed)
         assertEquals(1_200L,accounts.balance(drawer.id))
+        val finalProfit=repo.dailySummary().single{it.serviceType==ServiceTransferRepository.SYRIATEL_BALANCE}
+        assertEquals("يكتمل الربح عند تحصيل كامل الذمة",200L,finalProfit.profitMinor)
+        assertEquals(9_000L,repo.listWallets().single{it.serviceKey==ServiceTransferRepository.SYRIATEL_SHARED}.balanceMinor)
         assertEquals(0L,PartyStatementRepository(context).customer(customerId).closingBalanceSypMinor)
         assertTrue(receivables.listOpenReceivables(customerId).isEmpty())
         val summary=repo.dailySummary().single{it.serviceType==ServiceTransferRepository.SYRIATEL_BALANCE}
