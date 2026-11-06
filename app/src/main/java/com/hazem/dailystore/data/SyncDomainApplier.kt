@@ -1258,7 +1258,7 @@ class SyncDomainApplier(context: Context) {
                 result.customerChargeMinor==payload.getLong("customer_charge_minor") &&
                 (schemaVersion<2 || (result.amountDebitedMinor==payload.getLong("amount_debited_minor") &&
                     result.deliveredMilliSyp==payload.getLong("delivered_milli_syp") &&
-                    result.profitMilliSyp==payload.getLong("profit_milli_syp"))) {
+                    result.profitMilliSyp==payload.getLong("profit_milli_syp")))) {
                 "حساب الربح أو مبلغ ذمة التحويل لا يطابق سياسة التحويل المعتمدة على الجهاز الأساسي"
             }
             ServiceTransferReceivableRepository(appContext).enqueueMirrorSnapshot(
