@@ -1246,6 +1246,10 @@ class SyncDomainApplier(context: Context) {
         require(role=="SECONDARY"&&!authority.isNullOrBlank()&&authority!=localId) {
             "مزامنة ذمم تحويل الرصيد متاحة على الجهاز الثانوي المرتبط فقط"
         }
+        require(db.rawQuery(
+            "SELECT 1 FROM sync_devices WHERE device_id=? AND device_role='PRIMARY' AND status='ACTIVE'",
+            arrayOf(authority)
+        ).use{it.moveToFirst()}) {"الجهاز الأساسي المعتمد غير نشط"}
         db.beginTransaction()
         try {
             val row=db.rawQuery(
