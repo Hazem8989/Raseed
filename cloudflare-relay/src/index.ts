@@ -94,6 +94,35 @@ function rootTrust(env: Env, storeId: string): RootTrust | null {
     return root;
   } catch { return null; }
 }
+async function readJsonLimited<T>(request: Request, maxBytes: number): Promise<T> {
+  const declaredLength = request.headers.get("Content-Length");
+  if (declaredLength !== null) {
+    if (!/^\\d+$/.test(declaredLength)) throw new Error("invalid content length");
+    if (Number(declaredLength) > maxBytes) throw new RangeError("request body too large");
+  }
+  const reader = request.body?.getReader();
+  if (!reader) throw new Error("missing request body");
+  const chunks: Uint8Array[] = [];
+  let total = 0;
+  while (true) {
+    const part = await reader.read();
+    if (part.done) break;
+    total += part.value.byteLength;
+    if (total > maxBytes) {
+      await reader.cancel();
+      throw new RangeError("request body too large");
+    }
+    chunks.push(part.value);
+  }
+  const bytes = new Uint8Array(total);
+  let offset = 0;
+  for (const chunk of chunks) {
+    bytes.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+  return JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(bytes)) as T;
+}
+
 async function verifyCertificate(env: Env, storeId: string, deviceId: string, cert: DeviceCertificate): Promise<boolean> {
   const root = rootTrust(env, storeId);
   if (!root || cert.version !== 1 || cert.store_id !== storeId || cert.issuer_device_id !== root.device_id || cert.device_id !== deviceId ||
@@ -143,7 +172,11 @@ export default {
       const [, storeId, deviceId] = register;
       if (!UUID.test(storeId) || !UUID.test(deviceId)) return new Response("Invalid identity", { status: 400 });
       let cert: DeviceCertificate;
-      try { cert = await request.json() as DeviceCertificate; } catch { return new Response("Invalid JSON", { status: 400 }); }
+      try { cert = await readJsonLimited<DeviceCertificate>(request, 8_192); }
+      catch (error) {
+        return new Response(error instanceof RangeError ? "Request body too large" : "Invalid JSON",
+          { status: error instanceof RangeError ? 413 : 400 });
+      }
       if (!await verifyCertificate(env, storeId, deviceId, cert)) return new Response("Certificate rejected", { status: 401 });
       const id = env.SYNC_ROOMS.idFromName(storeId);
       return env.SYNC_ROOMS.get(id).fetch(new Request(
@@ -156,7 +189,11 @@ export default {
       const [, storeId, deviceId] = revoke;
       if (!UUID.test(storeId) || !UUID.test(deviceId)) return new Response("Invalid identity", { status: 400 });
       let value: Revocation;
-      try { value = await request.json() as Revocation; } catch { return new Response("Invalid JSON", { status: 400 }); }
+      try { value = await readJsonLimited<Revocation>(request, 8_192); }
+      catch (error) {
+        return new Response(error instanceof RangeError ? "Request body too large" : "Invalid JSON",
+          { status: error instanceof RangeError ? 413 : 400 });
+      }
       if (value.store_id !== storeId || value.device_id !== deviceId ||
           !await verifyRevocation(env, value)) return new Response("Revocation rejected", { status: 401 });
       const id = env.SYNC_ROOMS.idFromName(storeId);
