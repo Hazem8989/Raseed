@@ -1223,7 +1223,7 @@ class TwoDeviceSyncIntegrationTest {
         setLocalDeviceId(primaryId);AppDatabase.installForTests(primaryDb)
         val customer=CustomerRepository(context).create(primaryAdminId,"زبون تحويل ثانوي "+UUID.randomUUID())
         val serviceRepo=ServiceTransferRepository(context)
-        serviceRepo.setOpeningBalance(primaryAdminId,ServiceTransferRepository.SHAM_CASH,5_000L,"رصيد اختبار أولي غير كافٍ")
+        serviceRepo.setOpeningBalance(primaryAdminId,ServiceTransferRepository.SYRIATEL_SHARED,5_000L,"رصيد اختبار أولي غير كافٍ")
         val referenceItems=primaryRepository.pendingOutboxForDevice(secondaryId)
         assertTrue("The service wallet account must be mirrored with its service identity",
             referenceItems.any { it.entityType=="CASH_ACCOUNT" &&
