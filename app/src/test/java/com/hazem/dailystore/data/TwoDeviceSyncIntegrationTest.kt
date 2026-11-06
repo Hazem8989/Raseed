@@ -67,6 +67,11 @@ class TwoDeviceSyncIntegrationTest {
         AppDatabase.installForTests(secondaryDb)
         StoreRepository(context).ensureBaseSetup()
         secondaryAdminId = createReadyAdmin()
+        // Simulate the real first-run path: local service accounts may be seeded
+        // before the operator selects SECONDARY. Pairing must discard only empty seeds.
+        setLocalDeviceId(secondaryId)
+        AppDatabase.installForTests(secondaryDb)
+        ServiceTransferRepository(context).ensureSystemAccounts()
         setLocalDeviceId(primaryId)
         AppDatabase.installForTests(primaryDb)
         primaryRepository.mapSecondaryActor(primaryAdminId, secondaryId, secondaryAdminId, primaryAdminId)
@@ -78,6 +83,10 @@ class TwoDeviceSyncIntegrationTest {
             "جهاز التكامل الثانوي", enrollment.storeTimeZoneId,
             enrollment.primaryPublicKeyBase64!!, enrollment.deviceCertificateJson!!
         )
+        assertEquals("Empty local service-wallet seeds must be removed before primary references arrive",
+            0, secondaryDb.readableDatabase.rawQuery(
+                "SELECT COUNT(*) FROM service_wallet_account_links", null
+            ).use { c -> assertTrue(c.moveToFirst()); c.getInt(0) })
 
         // Sequence 1 is a harmless authenticated transport probe. The secondary
         // must not originate expense, collection, return, or inventory commands.
