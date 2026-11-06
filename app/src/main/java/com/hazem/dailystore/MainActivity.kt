@@ -1214,7 +1214,7 @@ class MainActivity : Activity() {
         val secondaryDevice = SyncProtocolRepository(this).isConfiguredSecondary()
         val visibleEntries = entries.filter { entry ->
             if (secondaryDevice) {
-                entry.first == "نقطة البيع" || entry.first == "مزامنة الأجهزة"
+                entry.first == "نقطة البيع" || entry.first == "تحويل رصيد" || entry.first == "مزامنة الأجهزة"
             } else when (entry.first) {
                 "تسويات المخزون" -> hasPermission(PermissionPolicy.INVENTORY_ADJUST)
                 "مرتجعات المبيعات", "مرتجعات المشتريات" -> isManager() && hasPermission(PermissionPolicy.RETURNS_PROCESS)
