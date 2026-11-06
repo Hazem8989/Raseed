@@ -37,7 +37,24 @@ class DatabaseMigrationInstrumentedTest {
         var encryptedConnection: CipherSQLiteDatabase? = null
 
         try {
-            source.parentFile?.mkdirs()
+            val databaseDirectory = source.parentFile
+                ?: error("Application database directory is unavailable")
+            check(databaseDirectory.isDirectory || databaseDirectory.mkdirs()) {
+                "Unable to create application database directory: ${databaseDirectory.absolutePath}"
+            }
+            check(databaseDirectory.canWrite()) {
+                "Application database directory is not writable: ${databaseDirectory.absolutePath}"
+            }
+            check(!encrypted.exists()) {
+                "Unique encrypted migration destination unexpectedly already exists"
+            }
+            // SQLCipher's Android VFS may fail to create a brand-new ATTACH target
+            // even when its parent directory is writable. Pre-create the empty
+            // file so ATTACH opens an existing app-private file instead.
+            check(encrypted.createNewFile()) {
+                "Unable to pre-create encrypted migration destination: ${encrypted.absolutePath}"
+            }
+
             val plain = AndroidSQLiteDatabase.openOrCreateDatabase(source.absolutePath, null)
             try {
                 plain.execSQL("PRAGMA foreign_keys=ON")
