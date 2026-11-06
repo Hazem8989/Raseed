@@ -22,7 +22,8 @@ data class ServiceTransferRecord(
 data class ServiceDailySummary(
     val serviceType:String,val serviceName:String,val operationCount:Int,val deliveredMinor:Long,
     val customerReceiptsMinor:Long,val profitMinor:Long,val providerFeeMinor:Long,
-    val rechargeFeePaidMinor:Long,val rechargeReserveMinor:Long=deliveredMinor,val creditChargesMinor:Long=0L
+    val rechargeFeePaidMinor:Long,val rechargeReserveMinor:Long=deliveredMinor,val creditChargesMinor:Long=0L,
+    val deliveredMilliSyp:Long=deliveredMinor*1000L,val profitMilliSyp:Long=profitMinor*1000L
 )
 data class ServiceTransferResult(
     val transferId:String,val deliveredMinor:Long,val profitMinor:Long,val providerFeeMinor:Long,
@@ -87,16 +88,18 @@ class ServiceTransferRepository(context:Context) {
         require(date.matches(Regex("\\d{4}-\\d{2}-\\d{2}"))){"تاريخ الكشف غير صالح"}
         val out=mutableListOf<ServiceDailySummary>()
         database.readableDatabase.rawQuery(
-            """SELECT service_type,SUM(operation_count),SUM(delivered_minor),SUM(customer_receipts_minor),SUM(profit_minor),SUM(provider_fee_minor),SUM(credit_charges_minor)
+            """SELECT service_type,SUM(operation_count),SUM(delivered_minor),SUM(customer_receipts_minor),SUM(profit_minor),SUM(provider_fee_minor),SUM(credit_charges_minor),SUM(delivered_milli_syp),SUM(profit_milli_syp)
                FROM (
                  SELECT service_type,COUNT(*) operation_count,COALESCE(SUM(amount_delivered_minor),0) delivered_minor,
                         COALESCE(SUM(CASE WHEN payment_mode='CASH' THEN customer_charge_minor ELSE 0 END),0) customer_receipts_minor,
                         COALESCE(SUM(profit_minor),0) profit_minor,COALESCE(SUM(provider_fee_minor),0) provider_fee_minor,
-                        COALESCE(SUM(CASE WHEN payment_mode='CREDIT' THEN customer_charge_minor ELSE 0 END),0) credit_charges_minor
+                        COALESCE(SUM(CASE WHEN payment_mode='CREDIT' THEN customer_charge_minor ELSE 0 END),0) credit_charges_minor,
+                        COALESCE(SUM(amount_delivered_milli_syp),0) delivered_milli_syp,
+                        COALESCE(SUM(profit_milli_syp),0) profit_milli_syp
                  FROM service_transfers WHERE operating_date=? AND status='POSTED' GROUP BY service_type
                  UNION ALL
                  SELECT CASE service_key WHEN 'SYRIATEL_SHARED' THEN 'SYRIATEL_BALANCE' ELSE 'SHAM_CASH' END,
-                        0,0,0,0,0,0 FROM service_wallet_transactions
+                        0,0,0,0,0,0,0,0 FROM service_wallet_transactions
                  WHERE transaction_type='RECHARGE' AND operating_date=?
                  GROUP BY service_key
                ) GROUP BY service_type ORDER BY service_type""".trimIndent(),arrayOf(date,date)
@@ -114,7 +117,7 @@ class ServiceTransferRepository(context:Context) {
                     arrayOf(key,date)
                 ).use { it.moveToFirst();it.getLong(0) }
             } ?: 0L
-            out.add(ServiceDailySummary(type,serviceTypeName(type),c.getInt(1),delivered,c.getLong(3),c.getLong(4),c.getLong(5),rechargeFeePaid,delivered,c.getLong(6)))
+            out.add(ServiceDailySummary(type,serviceTypeName(type),c.getInt(1),delivered,c.getLong(3),c.getLong(4),c.getLong(5),rechargeFeePaid,delivered,c.getLong(6),c.getLong(7),c.getLong(8)))
         } }
         return out
     }
