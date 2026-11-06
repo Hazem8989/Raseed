@@ -59,7 +59,7 @@ class SyncDomainApplier(context: Context) {
             "POST_SALES_RETURN" -> applyReceivedSalesReturn(operationId)
             "POST_PURCHASE_RETURN" -> applyReceivedPurchaseReturn(operationId)
             "POST_INVENTORY_ADJUSTMENT" -> applyReceivedInventoryAdjustment(operationId)
-            "EXECUTE_SERVICE_TRANSFER" -> applyReceivedServiceTransfer(operationId)
+            "EXECUTE_SERVICE_TRANSFER_CREDIT" -> applyReceivedServiceTransfer(operationId)
             "UPSERT_SERVICE_TRANSFER_RECEIVABLE" -> applyReceivedServiceTransferReceivable(operationId)
             "COLLECT_SERVICE_TRANSFER_DEBT" -> applyReceivedServiceTransferDebtCollection(operationId)
             "SET_SUPPLIER_ROLLOVER" -> applyReceivedSupplierRollover(operationId)
@@ -1186,9 +1186,19 @@ class SyncDomainApplier(context: Context) {
                 arrayOf(operationId)
             ).use { c -> require(c.moveToFirst()) { "أمر تحويل الرصيد غير موجود أو الجهاز/المستخدم غير مفعل أو غير مربوط" }; Array(7) { i -> c.getString(i) } }
             if (row[4] == "APPLIED") { db.setTransactionSuccessful(); return@synchronized ApplyResult(operationId, true) }
-            require(row[4] == "RECEIVED" && row[1] == "SERVICE_TRANSFER") { "حالة أو نوع أمر تحويل الرصيد غير صالح" }
+            require(row[4] == "RECEIVED" && row[1] == "SERVICE_TRANSFER" &&
+                row[2] == "pending-service-transfer-$operationId") {
+                "حالة أو نوع أو مرجع أمر تحويل الرصيد غير صالح"
+            }
             val payload = JSONObject(row[3]!!)
-            require(payload.optString("business_operation") == "EXECUTE_SERVICE_TRANSFER") { "نوع العملية الواردة ليس تحويلاً للخدمات" }
+            require(payload.optString("business_operation") == "EXECUTE_SERVICE_TRANSFER_CREDIT" &&
+                payload.optString("payment_mode") == "CREDIT") {
+                "الجهاز الثانوي مخول بطلب تحويل رصيد آجل فقط"
+            }
+            val customerId = payload.optString("customer_id")
+            require(customerId.isNotBlank() && customerId != "null") {
+                "يجب تحديد زبون صالح للتحويل الآجل"
+            }
             val actor = row[5]!!
             PermissionPolicy.require(db, actor, PermissionPolicy.SERVICE_TRANSFERS_EXECUTE)
             val existing = db.rawQuery("SELECT operation_type,payload_hash,result_reference FROM operation_registry WHERE operation_id=?",arrayOf(operationId))
@@ -1209,10 +1219,25 @@ class SyncDomainApplier(context: Context) {
                    WHERE m.device_id=? AND m.remote_cash_account_id=? AND m.is_active=1""".trimIndent(),arrayOf(row[0],remoteAccount)
             ).use { c -> require(c.moveToFirst() && c.getInt(3)==1) { "حساب قبض الجهاز الثانوي غير مربوط أو موقوف" }
                 require(c.getString(1)==remoteType && c.getString(2)==remoteCurrency) { "نوع أو عملة حساب القبض المرتبط لا يطابق الحساب الأصلي" }; c.getString(0) }
+            val expectedServiceAccountId = db.rawQuery(
+                "SELECT account_id FROM service_wallet_account_links WHERE service_key=?",
+                arrayOf(expectedKey)
+            ).use { c ->
+                require(c.moveToFirst()) { "محفظة الخدمة غير مهيأة على الجهاز الأساسي" }
+                c.getString(0)
+            }
+            require(mappedAccount == expectedServiceAccountId) {
+                "حساب المحفظة الوارد لا يطابق محفظة الخدمة المعتمدة على الجهاز الأساسي"
+            }
             val occurredAt=payload.getString("occurred_at")
             val operatingDate=payload.getString("operating_date")
             require(occurredAt.matches(Regex("\\d{4}-\\d{2}-\\d{2}T.*")) && operatingDate.matches(Regex("\\d{4}-\\d{2}-\\d{2}"))) { "تاريخ أو وقت التحويل الأصلي غير صالح" }
             val serviceType=payload.getString("service_type")
+            require(serviceType in setOf(
+                ServiceTransferRepository.SYRIATEL_BALANCE,
+                ServiceTransferRepository.SYRIATEL_CASH,
+                ServiceTransferRepository.SHAM_CASH_TRANSFER
+            )) { "نوع خدمة التحويل الوارد غير مدعوم" }
             val expectedKey=if(serviceType==ServiceTransferRepository.SHAM_CASH_TRANSFER) ServiceTransferRepository.SHAM_CASH else ServiceTransferRepository.SYRIATEL_SHARED
             require(payload.getString("service_key")==expectedKey) { "محفظة الخدمة لا تطابق نوع التحويل" }
             val delivered=payload.getLong("delivered_minor")
@@ -1220,8 +1245,17 @@ class SyncDomainApplier(context: Context) {
             require(payload.getLong("profit_minor")>=0L && payload.getLong("customer_charge_minor")>0L) { "قيم ربح أو قبض التحويل غير صالحة" }
             val reference=if(payload.isNull("reference")) null else payload.getString("reference").take(200)
             val note=if(payload.isNull("note")) null else payload.getString("note").take(500)
-            val result=ServiceTransferRepository(appContext).executeTransfer(actor,serviceType,delivered,providerFee,mappedAccount,operationId,reference,note,occurredAt,operatingDate,true)
-            require(result.profitMinor==payload.getLong("profit_minor") && result.customerChargeMinor==payload.getLong("customer_charge_minor")) { "حساب الربح أو المبلغ المقبوض لا يطابق سياسة التحويل المعتمدة على الجهاز الأساسي" }
+            val result=ServiceTransferRepository(appContext).executeTransfer(
+                actor,serviceType,delivered,providerFee,mappedAccount,operationId,reference,note,
+                occurredAt,operatingDate,true,"CREDIT",customerId
+            )
+            require(result.profitMinor==payload.getLong("profit_minor") &&
+                result.customerChargeMinor==payload.getLong("customer_charge_minor")) {
+                "حساب الربح أو مبلغ ذمة التحويل لا يطابق سياسة التحويل المعتمدة على الجهاز الأساسي"
+            }
+            ServiceTransferReceivableRepository(appContext).enqueueMirrorSnapshot(
+                db,actor,result.transferId,operationId
+            )
             db.insertOrThrow("operation_registry",null,ContentValues().apply{
                 put("operation_id",operationId);put("operation_type","EXECUTE_SERVICE_TRANSFER");put("payload_hash",row[6]);put("status","COMPLETED")
                 put("result_reference",result.transferId);put("created_at",timestamp());put("completed_at",timestamp())
