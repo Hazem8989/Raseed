@@ -265,7 +265,10 @@ class ServiceTransferRepository(context:Context) {
                 } else require(account.first=="WALLET"){"حساب الاستلام يجب أن يكون درجاً نقدياً أو محفظة إلكترونية"}
             }
             // Preserve the historical cash-operation hash so pending pre-upgrade retries remain idempotent.
-            val payload=if(paymentMode=="CASH")
+            val payload=if(legacyBalanceDelivered) {
+                if(paymentMode=="CASH") hash("$serviceType|$deliveredMinor|$providerFeeMinor|$effectiveReceiptAccountId|$reference|$note")
+                else hash("$serviceType|$deliveredMinor|$providerFeeMinor|$effectiveReceiptAccountId|$paymentMode|${customerId.orEmpty()}|$reference|$note")
+            } else if(paymentMode=="CASH")
                 hash("$serviceType|$amountDebitedMinor|$deliveredMilliSyp|$profitMilliSyp|$providerFeeMinor|$effectiveReceiptAccountId|$reference|$note")
             else hash("$serviceType|$amountDebitedMinor|$deliveredMilliSyp|$profitMilliSyp|$providerFeeMinor|$effectiveReceiptAccountId|$paymentMode|${customerId.orEmpty()}|$reference|$note")
             val old=db.rawQuery("SELECT id,service_type,amount_delivered_minor,profit_minor,provider_fee_minor,customer_charge_minor,payload_hash,payment_mode,customer_id,amount_debited_minor,amount_delivered_milli_syp,profit_milli_syp FROM service_transfers WHERE operation_id=?",arrayOf(operationId)).use{
