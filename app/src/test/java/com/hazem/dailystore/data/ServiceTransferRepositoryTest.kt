@@ -77,6 +77,22 @@ class ServiceTransferRepositoryTest {
         assertEquals(20_000L, cash.rechargeReserveMinor)
     }
 
+    @Test fun exactSyriatelBalanceAmountsAreRoundedOnlyAtCustomerCharge() {
+        val drawer=accounts.create(actor,"دقة سيريتل "+UUID.randomUUID(),"CASH_BOX","SYP",0L)
+        accounts.setCurrentDayPrimaryDrawer("ADMIN",actor,drawer.id)
+        repo.setOpeningBalance(actor,ServiceTransferRepository.SYRIATEL_SHARED,100L)
+        val result=repo.executeTransfer(actor,ServiceTransferRepository.SYRIATEL_BALANCE,43L,0L,drawer.id,"precision-"+UUID.randomUUID())
+        assertEquals(43L,result.amountDebitedMinor)
+        assertEquals(41340L,result.deliveredMilliSyp)
+        assertEquals(8268L,result.profitMilliSyp)
+        assertEquals(50L,result.customerChargeMinor)
+        assertEquals(57L,repo.listWallets().single{it.serviceKey==ServiceTransferRepository.SYRIATEL_SHARED}.balanceMinor)
+        val saved=repo.listTransfers().first()
+        assertEquals(43L,saved.amountDebitedMinor)
+        assertEquals(41340L,saved.deliveredMilliSyp)
+        assertEquals(8268L,saved.profitMilliSyp)
+    }
+
     @Test fun syriatelCashUsesRoundedAutomaticCompanyFeeAndTenPercentOfDeliveredOnly() {
         val drawer=accounts.create(actor,"درج سيريتل كاش "+UUID.randomUUID(),"CASH_BOX","SYP",0L)
         accounts.setCurrentDayPrimaryDrawer("ADMIN",actor,drawer.id)
