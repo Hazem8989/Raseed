@@ -61,6 +61,27 @@ class AuthRepositoryTest {
         assertNull(auth.authenticate("admin", "LegacyPass2026"))
     }
 
+    @Test fun fiveFailedLoginsTemporarilyBlockEvenCorrectCredentials() {
+        auth.createInitialAdmin("admin", "مدير المتجر", "ManagerPass2026")
+        repeat(5) {
+            assertNull(auth.authenticate("admin", "WrongPassword2026"))
+        }
+        assertNull("Correct credentials must be blocked during the temporary lock",
+            auth.authenticate("admin", "ManagerPass2026"))
+        val usernameHash = java.security.MessageDigest.getInstance("SHA-256")
+            .digest("admin".toByteArray(Charsets.UTF_8))
+            .joinToString("") { "%02x".format(it) }
+        database.writableDatabase.execSQL(
+            "UPDATE auth_login_attempts SET locked_until_ms=0 WHERE username_hash=?",
+            arrayOf(usernameHash)
+        )
+        assertNotNull("A correct login must work after the lock expires",
+            auth.authenticate("admin", "ManagerPass2026"))
+        assertEquals(0, database.readableDatabase.rawQuery(
+            "SELECT COUNT(*) FROM auth_login_attempts WHERE username_hash=?", arrayOf(usernameHash)
+        ).use { it.moveToFirst(); it.getInt(0) })
+    }
+
     @Test fun initialAdminSetupCannotBeRepeatedAfterAnAccountExists() {
         createAdmin()
         try {
