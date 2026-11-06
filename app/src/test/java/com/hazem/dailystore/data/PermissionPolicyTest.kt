@@ -24,10 +24,7 @@ class PermissionPolicyTest {
         AppDatabase.resetForTests(context)
         database = AppDatabase.getInstance(context)
         auth = AuthRepository(context)
-        auth.ensureInitialAdmin()
-        val admin = auth.authenticate("admin", "1234")!!
-        auth.changePassword(admin.id, "1234", "TestAdmin123")
-        adminId = admin.id
+        adminId = auth.createInitialAdmin("admin", "مدير المتجر", "TestAdmin123")
         cashierId = auth.createUser(
             "ADMIN", adminId, "cashier-permissions", "Cashier permissions",
             "Cashier12345", "CASHIER"
