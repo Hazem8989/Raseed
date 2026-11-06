@@ -146,7 +146,7 @@ class PartyStatementRepository(context: Context) {
                 rows.add(PartyStatementEntry(c.getString(0),date,"SERVICE_TRANSFER_CREDIT",
                     if(c.isNull(5))c.getString(0) else c.getString(5),
                     "تحويل رصيد آجل • $serviceName",debitSypMinor=c.getLong(2),
-                    sortAt="$date|\${c.getString(4)}"))
+                    sortAt="$date|${c.getString(4)}"))
             }}
             db.rawQuery(
                 """SELECT p.payment_id,p.transfer_id,p.amount_minor,p.operating_date,p.created_at,
@@ -164,7 +164,7 @@ class PartyStatementRepository(context: Context) {
                 val date=c.getString(3)
                 rows.add(PartyStatementEntry(c.getString(0),date,"SERVICE_TRANSFER_COLLECTION",c.getString(6),
                     "تحصيل دين تحويل رصيد • $serviceName",creditSypMinor=c.getLong(2),
-                    sortAt="$date|\${c.getString(4)}"))
+                    sortAt="$date|${c.getString(4)}"))
             }}
         } else {
             db.rawQuery(
