@@ -3117,10 +3117,10 @@ class MainActivity : Activity() {
         daily.forEach { d ->
             val card=LinearLayout(this).apply{orientation=LinearLayout.VERTICAL;setPadding(dp(12),dp(10),dp(12),dp(10));background=cardBackground()}
             card.addView(label(d.serviceName+" • "+d.operationCount+" عملية",14f,green,true,Gravity.RIGHT))
-            card.addView(label("إجمالي ما أُرسل من رصيد الخدمة: "+formatSypAmount(d.deliveredMinor)+" ل.س",12f,textColor,false,Gravity.RIGHT))
+            card.addView(label("إجمالي ما أُرسل من رصيد الخدمة: "+BigDecimal.valueOf(d.deliveredMilliSyp,3).stripTrailingZeros().toPlainString()+" ل.س",12f,textColor,false,Gravity.RIGHT))
             card.addView(label("إجمالي ما قبضه المتجر من الزبائن نقداً أو إلكترونياً: "+formatSypAmount(d.customerReceiptsMinor)+" ل.س",12f,textColor,false,Gravity.RIGHT))
             if(d.creditChargesMinor>0L) card.addView(label("ديون تحويلات آجلة جديدة: "+formatSypAmount(d.creditChargesMinor)+" ل.س",12f,gold.toInt(),true,Gravity.RIGHT))
-            card.addView(label("ربح المتجر: "+formatSypAmount(d.profitMinor)+" ل.س • رسوم الشركة: "+formatSypAmount(d.providerFeeMinor)+" ل.س",12f,green,true,Gravity.RIGHT))
+            card.addView(label("ربح المتجر: "+BigDecimal.valueOf(d.profitMilliSyp,3).stripTrailingZeros().toPlainString()+" ل.س • رسوم الشركة: "+formatSypAmount(d.providerFeeMinor)+" ل.س",12f,green,true,Gravity.RIGHT))
             card.addView(label("رسوم التعبئة المدفوعة فعلياً اليوم: "+formatSypAmount(d.rechargeFeePaidMinor)+" ل.س • قيمة الرصيد اللازم تعويضه: "+formatSypAmount(d.rechargeReserveMinor)+" ل.س",12f,mutedColor,true,Gravity.RIGHT))
             content.addView(card,fieldParams(-2,dp(7)))
         }
