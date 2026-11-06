@@ -122,11 +122,25 @@ class DatabaseMigrationInstrumentedTest {
                     encrypted.absolutePath,
                     null,
                     AndroidSQLiteDatabase.OPEN_READONLY
-                ).use { it.rawQuery("SELECT 1", null).close() }
+                ).use { database ->
+                    // SELECT 1 is a constant expression and can succeed without
+                    // reading the database file or parsing its schema. Force the
+                    // SQLite engine to read sqlite_master so an encrypted header
+                    // must be rejected by the plaintext SQLite pager.
+                    database.rawQuery(
+                        "SELECT name FROM sqlite_master LIMIT 1",
+                        null
+                    ).use { cursor ->
+                        cursor.moveToFirst()
+                    }
+                }
             } catch (_: SQLiteException) {
                 plaintextRejected = true
             }
-            assertTrue("A standard SQLite connection must reject the encrypted file", plaintextRejected)
+            assertTrue(
+                "A standard SQLite connection must fail when reading the encrypted database schema",
+                plaintextRejected
+            )
 
             encryptedConnection = CipherSQLiteDatabase.openDatabase(
                 encrypted.absolutePath,
