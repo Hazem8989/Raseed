@@ -77,6 +77,33 @@ class ServiceTransferRepositoryTest {
         assertEquals(20_000L, cash.rechargeReserveMinor)
     }
 
+    @Test fun syriatelCashUsesRoundedAutomaticCompanyFeeAndTenPercentOfDeliveredOnly() {
+        val drawer=accounts.create(actor,"درج سيريتل كاش "+UUID.randomUUID(),"CASH_BOX","SYP",0L)
+        accounts.setCurrentDayPrimaryDrawer("ADMIN",actor,drawer.id)
+        repo.setOpeningBalance(actor,ServiceTransferRepository.SYRIATEL_SHARED,10_000L)
+
+        try {
+            repo.executeTransfer(actor,ServiceTransferRepository.SYRIATEL_CASH,100L,1L,drawer.id,
+                "svc-cash-wrong-fee-"+UUID.randomUUID())
+            throw AssertionError("Expected manual provider fee to be rejected")
+        } catch(expected:IllegalArgumentException) {
+            assertTrue(expected.message!!.contains("تلقائياً"))
+        }
+
+        val belowThreshold=repo.executeTransfer(actor,ServiceTransferRepository.SYRIATEL_CASH,100L,2L,drawer.id,
+            "svc-cash-below-"+UUID.randomUUID())
+        assertEquals(10L,belowThreshold.profitMinor)
+        assertEquals(2L,belowThreshold.providerFeeMinor)
+        assertEquals(112L,belowThreshold.customerChargeMinor)
+
+        val atThreshold=repo.executeTransfer(actor,ServiceTransferRepository.SYRIATEL_CASH,200L,2L,drawer.id,
+            "svc-cash-at-"+UUID.randomUUID())
+        assertEquals(20L,atThreshold.profitMinor)
+        assertEquals(2L,atThreshold.providerFeeMinor)
+        assertEquals(222L,atThreshold.customerChargeMinor)
+        assertEquals(334L,accounts.balance(drawer.id))
+    }
+
     @Test fun shamCashUsesIndependentFloatAndFivePercentProfit() {
         val drawer = accounts.create(actor, "درج شام " + UUID.randomUUID(), "CASH_BOX", "SYP", 0L)
         accounts.setCurrentDayPrimaryDrawer("ADMIN", actor, drawer.id)
