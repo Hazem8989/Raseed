@@ -38,7 +38,7 @@ class DatabaseMigrationInstrumentedTest {
 
         try {
             source.parentFile?.mkdirs()
-            val plain = AndroidSQLiteDatabase.openOrCreateDatabase(source, null)
+            val plain = AndroidSQLiteDatabase.openOrCreateDatabase(source.absolutePath, null)
             try {
                 plain.execSQL("PRAGMA foreign_keys=ON")
                 plain.execSQL("CREATE TABLE app_settings(setting_key TEXT PRIMARY KEY, setting_value TEXT NOT NULL)")
@@ -71,10 +71,11 @@ class DatabaseMigrationInstrumentedTest {
                 null,
                 CipherSQLiteDatabase.OPEN_READWRITE
             )
-            val hexKey = "x'" + key.joinToString("") { "%02x".format(it) } + "'"
+            val hexKey = key.joinToString("") { "%02x".format(it) }
+            val escapedEncryptedPath = encrypted.absolutePath.replace("'", "''")
+            // The x'...' expression must be parsed as SQL, not bound as text.
             sourceCipherConnection.execSQL(
-                "ATTACH DATABASE ? AS encrypted KEY ?",
-                arrayOf(encrypted.absolutePath, hexKey)
+                "ATTACH DATABASE '$escapedEncryptedPath' AS encrypted KEY \"x'$hexKey'\""
             )
             sourceCipherConnection.rawQuery("SELECT sqlcipher_export('encrypted')", null).use { cursor ->
                 assertTrue("sqlcipher_export must return a result row", cursor.moveToFirst())
@@ -150,6 +151,14 @@ class DatabaseMigrationInstrumentedTest {
             ).use { cursor ->
                 assertTrue(cursor.moveToFirst())
                 assertEquals(1, cursor.getInt(0))
+            }
+            encryptedConnection.execSQL("INSERT INTO sales_items VALUES('si2','i1','p1',2)")
+            encryptedConnection.rawQuery(
+                "SELECT sold_qty FROM products WHERE id='p1'",
+                null
+            ).use { cursor ->
+                assertTrue(cursor.moveToFirst())
+                assertEquals("Copied trigger must still execute", 5, cursor.getInt(0))
             }
         } finally {
             sourceCipherConnection?.close()
