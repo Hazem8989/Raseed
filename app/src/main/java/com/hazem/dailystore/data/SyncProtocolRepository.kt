@@ -316,37 +316,47 @@ class SyncProtocolRepository(private val context: Context, private val credentia
     private fun clearUncommittedLocalServiceWalletSeedsForSecondary(
         db: SQLiteDatabase, actorUserId: String, now: String
     ) {
-        val links = mutableListOf<Pair<String, String>>()
+        val links = mutableListOf<Triple<String, String, Long>>()
         db.rawQuery(
             """SELECT l.service_key,l.account_id,a.opening_balance_minor
                FROM service_wallet_account_links l
                JOIN cash_accounts a ON a.id=l.account_id""".trimIndent(), null
         ).use { c ->
             while (c.moveToNext()) {
-                val serviceKey = c.getString(0)
-                val accountId = c.getString(1)
-                val opening = c.getLong(2)
-                val hasCashHistory = db.rawQuery(
-                    "SELECT 1 FROM cash_transactions WHERE account_id=? LIMIT 1", arrayOf(accountId)
-                ).use { it.moveToFirst() }
-                val hasWalletHistory = db.rawQuery(
-                    "SELECT 1 FROM service_wallet_transactions WHERE service_key=? LIMIT 1", arrayOf(serviceKey)
-                ).use { it.moveToFirst() }
-                val hasTransferHistory = db.rawQuery(
-                    "SELECT 1 FROM service_transfers WHERE service_key=? LIMIT 1", arrayOf(serviceKey)
-                ).use { it.moveToFirst() }
-                val hasAccountTransfers = db.rawQuery(
-                    "SELECT 1 FROM cash_account_transfers WHERE source_account_id=? OR destination_account_id=? LIMIT 1",
-                    arrayOf(accountId, accountId)
-                ).use { it.moveToFirst() }
-                require(opening == 0L && !hasCashHistory && !hasWalletHistory &&
-                    !hasTransferHistory && !hasAccountTransfers) {
-                    "توجد أرصدة أو حركات محلية في محفظة خدمة على هذا الهاتف. لا يمكن ربطه كثانوي قبل مطابقة هذه البيانات وحفظها."
-                }
-                links.add(serviceKey to accountId)
+                links.add(Triple(c.getString(0), c.getString(1), c.getLong(2)))
             }
         }
-        links.forEach { (serviceKey, accountId) ->
+        links.forEach { (serviceKey, accountId, opening) ->
+            require(serviceKey in setOf("SYRIATEL_SHARED", "SHAM_CASH")) {
+                "توجد محفظة خدمة محلية غير معروفة؛ أوقف الربط وراجع إعداداتها أولاً"
+            }
+            val accountShapeValid = db.rawQuery(
+                "SELECT 1 FROM cash_accounts WHERE id=? AND account_type='WALLET' AND currency_code='SYP' AND is_active=1",
+                arrayOf(accountId)
+            ).use { it.moveToFirst() }
+            val hasCashHistory = db.rawQuery(
+                "SELECT 1 FROM cash_transactions WHERE account_id=? LIMIT 1", arrayOf(accountId)
+            ).use { it.moveToFirst() }
+            val hasWalletHistory = db.rawQuery(
+                "SELECT 1 FROM service_wallet_transactions WHERE service_key=? LIMIT 1", arrayOf(serviceKey)
+            ).use { it.moveToFirst() }
+            val hasTransferHistory = db.rawQuery(
+                "SELECT 1 FROM service_transfers WHERE service_key=? LIMIT 1", arrayOf(serviceKey)
+            ).use { it.moveToFirst() }
+            val hasAccountTransfers = db.rawQuery(
+                "SELECT 1 FROM cash_account_transfers WHERE source_account_id=? OR destination_account_id=? LIMIT 1",
+                arrayOf(accountId, accountId)
+            ).use { it.moveToFirst() }
+            val hasSystemRole = db.rawQuery(
+                "SELECT 1 FROM system_cash_account_roles WHERE account_id=? LIMIT 1", arrayOf(accountId)
+            ).use { it.moveToFirst() }
+            val hasDailySession = db.rawQuery(
+                "SELECT 1 FROM daily_cash_sessions WHERE primary_cash_account_id=? LIMIT 1", arrayOf(accountId)
+            ).use { it.moveToFirst() }
+            require(accountShapeValid && opening == 0L && !hasCashHistory && !hasWalletHistory &&
+                !hasTransferHistory && !hasAccountTransfers && !hasSystemRole && !hasDailySession) {
+                "توجد أرصدة أو حركات أو ارتباطات محلية في محفظة خدمة على هذا الهاتف. لا يمكن ربطه كثانوي قبل مطابقة هذه البيانات."
+            }
             db.delete("wallet_daily_openings", "account_id=?", arrayOf(accountId))
             db.delete("service_wallet_account_links", "service_key=?", arrayOf(serviceKey))
             db.delete("service_wallets", "service_key=?", arrayOf(serviceKey))
