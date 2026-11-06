@@ -754,15 +754,16 @@ class SyncProtocolRepository(private val context: Context, private val credentia
         }
         require(state(db, "authority_device_id").isNullOrBlank().not()) { "الجهاز الأساسي غير محدد" }
         require(businessOperation in setOf(
-            "POST_SALE_INVOICE", "COLLECT_CUSTOMER_PAYMENT", "SYNC_TRANSPORT_PROBE"
+            "POST_SALE_INVOICE", "COLLECT_CUSTOMER_PAYMENT",
+            "COLLECT_SERVICE_TRANSFER_DEBT", "SYNC_TRANSPORT_PROBE"
         )) {
-            "الجهاز الثانوي مخول بإرسال فواتير البيع وتحصيل ديون العملاء واختبارات المزامنة فقط"
+            "الجهاز الثانوي مخول بإرسال فواتير البيع وتحصيل ديون العملاء وتحويلات الرصيد الآجلة واختبارات المزامنة فقط"
         }
         PermissionPolicy.requireAssigned(
             db, actorUserId,
             when (businessOperation) {
                 "POST_SALE_INVOICE" -> PermissionPolicy.SALES_CHECKOUT
-                "COLLECT_CUSTOMER_PAYMENT" -> PermissionPolicy.CUSTOMERS_COLLECT
+                "COLLECT_CUSTOMER_PAYMENT", "COLLECT_SERVICE_TRANSFER_DEBT" -> PermissionPolicy.CUSTOMERS_COLLECT
                 else -> PermissionPolicy.SYNC_MANAGE
             }
         )
@@ -904,9 +905,9 @@ class SyncProtocolRepository(private val context: Context, private val credentia
     private fun requiredPermissionForBusinessOperation(operation: String): String =
         when (operation) {
             "POST_SALE_INVOICE" -> PermissionPolicy.SALES_CHECKOUT
-            "COLLECT_CUSTOMER_PAYMENT" -> PermissionPolicy.CUSTOMERS_COLLECT
+            "COLLECT_CUSTOMER_PAYMENT", "COLLECT_SERVICE_TRANSFER_DEBT" -> PermissionPolicy.CUSTOMERS_COLLECT
             else -> throw IllegalArgumentException(
-                "الجهاز الثانوي مخول بإرسال فواتير البيع وتحصيل ديون العملاء واختبارات المزامنة فقط"
+                "الجهاز الثانوي مخول بإرسال فواتير البيع وتحصيل ديون العملاء وتحويلات الرصيد الآجلة واختبارات المزامنة فقط"
             )
         }
 
@@ -968,9 +969,25 @@ class SyncProtocolRepository(private val context: Context, private val credentia
             val payload = JSONObject(envelope.payloadJson)
             val businessOperation = payload.optString("business_operation")
             require(businessOperation in setOf(
-                "POST_SALE_INVOICE", "COLLECT_CUSTOMER_PAYMENT", "SYNC_TRANSPORT_PROBE"
+                "POST_SALE_INVOICE", "COLLECT_CUSTOMER_PAYMENT",
+                "COLLECT_SERVICE_TRANSFER_DEBT", "SYNC_TRANSPORT_PROBE"
             )) {
-                "الجهاز الثانوي مخول بإرسال فواتير البيع وتحصيل ديون العملاء واختبارات المزامنة فقط"
+                "الجهاز الثانوي مخول بإرسال فواتير البيع وتحصيل ديون العملاء وتحويلات الرصيد الآجلة واختبارات المزامنة فقط"
+            }
+            if (businessOperation == "COLLECT_SERVICE_TRANSFER_DEBT") {
+                require(envelope.operationType == "CREATE" &&
+                    envelope.entityType == "SERVICE_TRANSFER_DEBT_PAYMENT" &&
+                    payload.optString("payment_id") == envelope.entityId &&
+                    payload.optString("transfer_id").isNotBlank() &&
+                    payload.optString("customer_id").isNotBlank() &&
+                    payload.optLong("amount_minor", 0L) > 0L &&
+                    payload.optString("cash_account_id").isNotBlank() &&
+                    payload.optString("cash_account_type") in setOf("CASH_BOX", "WALLET") &&
+                    payload.optString("cash_account_currency_code") == "SYP" &&
+                    payload.optString("operating_date").matches(Regex("\\d{4}-\\d{2}-\\d{2}")) &&
+                    payload.optString("occurred_at").matches(Regex("\\d{4}-\\d{2}-\\d{2}T.*"))) {
+                    "بيانات تحصيل دين تحويل الرصيد غير صالحة"
+                }
             }
             if (businessOperation == "SYNC_TRANSPORT_PROBE") {
                 // A transport probe is deliberately non-financial. It proves the
@@ -2017,7 +2034,7 @@ class SyncProtocolRepository(private val context: Context, private val credentia
                       e.payload_json,e.payload_sha256,e.created_at,q.retry_count
                FROM sync_operation_envelopes e JOIN sync_queue q ON q.operation_id=e.operation_id
                WHERE e.origin_device_id=?
-                 AND e.entity_type IN ('CATEGORY','UNIT','PRODUCT','PRODUCT_OPENING_STOCK','CUSTOMER','CASH_ACCOUNT','EXCHANGE_RATE','STORE_SETTINGS')
+                 AND e.entity_type IN ('CATEGORY','UNIT','PRODUCT','PRODUCT_OPENING_STOCK','CUSTOMER','CASH_ACCOUNT','EXCHANGE_RATE','STORE_SETTINGS','SERVICE_TRANSFER_RECEIVABLE')
                  AND NOT EXISTS (SELECT 1 FROM sync_acknowledgements a
                    WHERE a.operation_id=e.operation_id AND a.device_id=? AND a.status='APPLIED')
                ORDER BY e.sequence_number LIMIT ?""".trimIndent()
@@ -2294,7 +2311,7 @@ class SyncProtocolRepository(private val context: Context, private val credentia
     companion object {
         // Only reference data required by the sales-only secondary is replicated from primary.
         private val PRIMARY_TO_SECONDARY_REFERENCE_ENTITIES = setOf(
-            "CATEGORY", "UNIT", "PRODUCT", "PRODUCT_OPENING_STOCK", "CUSTOMER", "CASH_ACCOUNT", "EXCHANGE_RATE", "STORE_SETTINGS"
+            "CATEGORY", "UNIT", "PRODUCT", "PRODUCT_OPENING_STOCK", "CUSTOMER", "CASH_ACCOUNT", "EXCHANGE_RATE", "STORE_SETTINGS", "SERVICE_TRANSFER_RECEIVABLE"
         )
         private const val INVITATION_TTL_MS = 10 * 60 * 1000L
         private const val MAX_PAYLOAD_CHARS = 128 * 1024

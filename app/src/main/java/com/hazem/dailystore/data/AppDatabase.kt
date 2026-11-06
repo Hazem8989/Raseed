@@ -59,6 +59,7 @@ class AppDatabase internal constructor(context: Context, databaseName: String = 
             ensureSyncUnitMappingSchema(db)
             ensureSyncAckDeliverySchema(db)
             ensureServiceTransferReceivableSchema(db)
+            ensureServiceTransferReceivableSyncSchema(db)
             db.execSQL(
                 """INSERT INTO app_settings(setting_key, setting_value, updated_at)
                    VALUES('base_currency', 'USD', strftime('%Y-%m-%dT%H:%M:%fZ','now'))"""
@@ -601,9 +602,56 @@ class AppDatabase internal constructor(context: Context, databaseName: String = 
                 version = 31
             } finally { db.endTransaction() }
         }
+        if (version < 32) {
+            db.beginTransaction()
+            try {
+                ensureServiceTransferReceivableSyncSchema(db)
+                db.setTransactionSuccessful()
+                version = 32
+            } finally { db.endTransaction() }
+        }
         if (version != newVersion) {
             throw IllegalStateException("Missing database migration from version $version to $newVersion")
         }
+    }
+
+
+    /** Read-only receivable mirrors on secondary devices; no cash or ledger rows are created here. */
+    private fun ensureServiceTransferReceivableSyncSchema(db: SQLiteDatabase) {
+        db.execSQL("""
+            CREATE TABLE IF NOT EXISTS service_transfer_receivable_mirrors (
+                transfer_id TEXT PRIMARY KEY NOT NULL,
+                customer_id TEXT NOT NULL,
+                customer_name TEXT NOT NULL,
+                service_type TEXT NOT NULL CHECK(service_type IN ('SYRIATEL_BALANCE','SYRIATEL_CASH','SHAM_CASH_TRANSFER')),
+                delivered_minor INTEGER NOT NULL CHECK(delivered_minor > 0),
+                charge_minor INTEGER NOT NULL CHECK(charge_minor > 0),
+                paid_minor INTEGER NOT NULL DEFAULT 0 CHECK(paid_minor >= 0),
+                outstanding_minor INTEGER NOT NULL CHECK(outstanding_minor >= 0),
+                status TEXT NOT NULL CHECK(status IN ('OPEN','PARTIALLY_PAID','PAID','REVERSED')),
+                created_at TEXT NOT NULL,
+                operating_date TEXT NOT NULL,
+                reference TEXT,
+                note TEXT,
+                updated_at TEXT NOT NULL
+            )
+        """.trimIndent())
+        db.execSQL("""
+            CREATE TABLE IF NOT EXISTS service_transfer_receivable_payment_mirrors (
+                payment_id TEXT PRIMARY KEY NOT NULL,
+                transfer_id TEXT NOT NULL,
+                amount_minor INTEGER NOT NULL CHECK(amount_minor > 0),
+                operation_id TEXT NOT NULL UNIQUE,
+                cash_account_id TEXT NOT NULL,
+                operating_date TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                note TEXT,
+                FOREIGN KEY(transfer_id) REFERENCES service_transfer_receivable_mirrors(transfer_id)
+                    ON UPDATE RESTRICT ON DELETE RESTRICT
+            )
+        """.trimIndent())
+        db.execSQL("CREATE INDEX IF NOT EXISTS idx_service_transfer_receivable_mirrors_customer ON service_transfer_receivable_mirrors(customer_id,status)")
+        db.execSQL("CREATE INDEX IF NOT EXISTS idx_service_transfer_receivable_payment_mirrors_transfer ON service_transfer_receivable_payment_mirrors(transfer_id,operating_date,created_at)")
     }
 
     private fun ensureServiceTransferReceivableSchema(db: SQLiteDatabase) {
@@ -1186,7 +1234,7 @@ class AppDatabase internal constructor(context: Context, databaseName: String = 
 
     companion object {
         const val DATABASE_NAME = "the_daily_shop.db"
-        const val DATABASE_VERSION = 31
+        const val DATABASE_VERSION = 32
 
         @Volatile
         private var INSTANCE: AppDatabase? = null

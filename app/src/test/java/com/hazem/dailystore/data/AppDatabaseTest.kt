@@ -51,7 +51,8 @@ class AppDatabaseTest {
             "service_wallet_account_links", "system_cash_account_roles", "operation_registry", "sync_queue",
             "sync_conflicts", "audit_log", "inventory_cost_layers", "sales_item_cost_allocations", "inventory_adjustments",
             "sync_category_mappings", "sync_unit_mappings",
-            "service_transfer_receivables", "service_transfer_receivable_payments"
+            "service_transfer_receivables", "service_transfer_receivable_payments",
+            "service_transfer_receivable_mirrors", "service_transfer_receivable_payment_mirrors"
         )
 
         requiredTables.forEach { table ->
