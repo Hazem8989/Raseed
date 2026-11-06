@@ -1081,7 +1081,7 @@ class SyncDomainApplierTest {
         ).use { it.moveToFirst();it.getInt(0) })
     }
 
-    @Test fun rejectsIncomingServiceTransferWithoutCashMappingAndLeavesBothLedgersUntouched() {
+    @Test fun rejectsLegacyIncomingServiceTransferWithoutCashMappingAndLeavesBothLedgersUntouched() {
         val wallet = ServiceTransferRepository(context)
         wallet.setOpeningBalance(adminId, ServiceTransferRepository.SYRIATEL_SHARED, 20_000L)
         val beforeFloat = wallet.listWallets().single { it.serviceKey == ServiceTransferRepository.SYRIATEL_SHARED }.balanceMinor
@@ -1095,10 +1095,9 @@ class SyncDomainApplierTest {
             .put("operating_date", "2026-11-03")
         val operationId = receiveRaw("EXECUTE_SERVICE_TRANSFER", "unused", payload)
         var rejected = false
-        try {
-            SyncDomainApplier(context).applyReceivedOperation(operationId)
-        } catch (expected: IllegalArgumentException) {
-            rejected = expected.message?.contains("غير مربوط أو موقوف") == true
+        try { SyncDomainApplier(context).applyReceivedOperation(operationId) }
+        catch (expected: IllegalArgumentException) {
+            rejected = expected.message?.contains("غير مدعوم") == true
         }
         assertTrue(rejected)
         assertEquals("RECEIVED", inboxStatus(operationId))
@@ -1107,62 +1106,57 @@ class SyncDomainApplierTest {
             "SELECT COUNT(*) FROM service_transfers WHERE operation_id=?", arrayOf(operationId)
         ).use { it.moveToFirst(); it.getInt(0) })
     }
-
-    @Test fun rejectsIncomingServiceTransferWhenPrimaryFloatIsInsufficientWithoutPartialPosting() {
+    @Test fun rejectsLegacyIncomingServiceTransferWhenPrimaryFloatIsInsufficientWithoutPartialPosting() {
         val wallet = ServiceTransferRepository(context)
         wallet.setOpeningBalance(adminId, ServiceTransferRepository.SYRIATEL_SHARED, 500L)
-        val receipt = CashAccountRepository(context).create(adminId, "قبض تحويل رصيد غير كاف", "WALLET", "SYP", 0L)
-        protocol.mapSecondaryCashAccount(adminId, secondaryId, "remote-low-float-receipt", receipt.id)
-        val beforeReceipt = CashAccountRepository(context).balance(receipt.id)
+        val beforeFloat = wallet.listWallets().single { it.serviceKey == ServiceTransferRepository.SYRIATEL_SHARED }.balanceMinor
         val payload = JSONObject().put("business_operation", "EXECUTE_SERVICE_TRANSFER")
             .put("service_type", ServiceTransferRepository.SYRIATEL_BALANCE)
             .put("service_key", ServiceTransferRepository.SYRIATEL_SHARED)
             .put("delivered_minor", 2_000L).put("provider_fee_minor", 0L)
             .put("profit_minor", 400L).put("customer_charge_minor", 2_400L)
-            .put("cash_account_id", "remote-low-float-receipt").put("cash_account_type", "WALLET")
+            .put("cash_account_id", "unmapped-service-receipt").put("cash_account_type", "WALLET")
             .put("cash_account_currency_code", "SYP").put("occurred_at", "2026-11-03T14:15:00Z")
             .put("operating_date", "2026-11-03")
         val operationId = receiveRaw("EXECUTE_SERVICE_TRANSFER", "unused", payload)
         var rejected = false
-        try {
-            SyncDomainApplier(context).applyReceivedOperation(operationId)
-        } catch (expected: IllegalArgumentException) {
-            rejected = expected.message?.contains("غير كافٍ") == true
+        try { SyncDomainApplier(context).applyReceivedOperation(operationId) }
+        catch (expected: IllegalArgumentException) {
+            rejected = expected.message?.contains("غير مدعوم") == true
         }
         assertTrue(rejected)
         assertEquals("RECEIVED", inboxStatus(operationId))
-        assertEquals(beforeReceipt, CashAccountRepository(context).balance(receipt.id))
+        assertEquals(beforeFloat, wallet.listWallets().single { it.serviceKey == ServiceTransferRepository.SYRIATEL_SHARED }.balanceMinor)
         assertEquals(0, database.readableDatabase.rawQuery(
             "SELECT COUNT(*) FROM service_transfers WHERE operation_id=?", arrayOf(operationId)
         ).use { it.moveToFirst(); it.getInt(0) })
     }
-
-    @Test fun appliesIncomingServiceTransferOnceAndPreservesOriginalEventDateWithoutEcho() {
+    @Test fun rejectsLegacyIncomingServiceTransferAndPreservesLedgers() {
         val wallet = ServiceTransferRepository(context)
         wallet.setOpeningBalance(adminId, ServiceTransferRepository.SYRIATEL_SHARED, 20_000L)
         val receipt = CashAccountRepository(context).create(adminId, "محفظة قبض تحويل مزامنة", "WALLET", "SYP", 0L)
         protocol.mapSecondaryCashAccount(adminId, secondaryId, "remote-service-wallet", receipt.id)
-        val beforeOutbox = protocol.pendingOutbox().size
+        val beforeFloat = wallet.listWallets().single { it.serviceKey == ServiceTransferRepository.SYRIATEL_SHARED }.balanceMinor
         val payload = JSONObject().put("business_operation", "EXECUTE_SERVICE_TRANSFER")
             .put("service_type", ServiceTransferRepository.SYRIATEL_BALANCE).put("service_key", ServiceTransferRepository.SYRIATEL_SHARED)
             .put("delivered_minor", 2_000L).put("provider_fee_minor", 100L).put("profit_minor", 400L).put("customer_charge_minor", 2_500L)
             .put("cash_account_id", "remote-service-wallet").put("cash_account_type", "WALLET").put("cash_account_currency_code", "SYP")
             .put("reference", "اختبار").put("note", JSONObject.NULL).put("occurred_at", "2026-11-03T14:15:00Z").put("operating_date", "2026-11-03")
         val operationId = receiveRaw("EXECUTE_SERVICE_TRANSFER", "unused", payload)
-        val applier = SyncDomainApplier(context)
-        assertTrue(applier.applyReceivedOperation(operationId).applied)
-        assertEquals("APPLIED", inboxStatus(operationId))
-        assertEquals(18_000L, wallet.listWallets().single { it.serviceKey == ServiceTransferRepository.SYRIATEL_SHARED }.balanceMinor)
-        assertEquals(2_500L, CashAccountRepository(context).balance(receipt.id))
-        assertEquals("2026-11-03T14:15:00Z", database.readableDatabase.rawQuery("SELECT created_at FROM service_transfers WHERE operation_id=?",arrayOf(operationId)).use{c->assertTrue(c.moveToFirst());c.getString(0)})
-        assertEquals("2026-11-03", database.readableDatabase.rawQuery("SELECT operating_date FROM service_transfers WHERE operation_id=?",arrayOf(operationId)).use{c->assertTrue(c.moveToFirst());c.getString(0)})
-        assertEquals(beforeOutbox, protocol.pendingOutbox().size)
-        database.writableDatabase.execSQL("UPDATE sync_inbox SET status='RECEIVED',applied_at=NULL WHERE operation_id=?",arrayOf(operationId))
-        assertTrue(applier.applyReceivedOperation(operationId).applied)
-        assertEquals(1,database.readableDatabase.rawQuery("SELECT COUNT(*) FROM service_transfers WHERE operation_id=?",arrayOf(operationId)).use{it.moveToFirst();it.getInt(0)})
-        assertEquals(18_000L, wallet.listWallets().single { it.serviceKey == ServiceTransferRepository.SYRIATEL_SHARED }.balanceMinor)
+        var rejected = false
+        try { SyncDomainApplier(context).applyReceivedOperation(operationId) }
+        catch (expected: IllegalArgumentException) {
+            rejected = expected.message?.contains("غير مدعوم") == true
+        }
+        assertTrue(rejected)
+        assertEquals("RECEIVED", inboxStatus(operationId))
+        assertEquals(beforeFloat, wallet.listWallets().single { it.serviceKey == ServiceTransferRepository.SYRIATEL_SHARED }.balanceMinor)
+        assertEquals(0L, CashAccountRepository(context).balance(receipt.id))
+        assertEquals(0, database.readableDatabase.rawQuery(
+            "SELECT COUNT(*) FROM service_transfers WHERE operation_id=?", arrayOf(operationId)
+        ).use { it.moveToFirst(); it.getInt(0) })
+        assertEquals(0, protocol.pendingOutbox().size)
     }
-
     @Test fun appliesIncomingSupplierRolloverOnceWithMappedAccountAndOriginalBusinessDate() {
         val source = CashAccountRepository(context).create(adminId, "صندوق الموردين المزامن", "CASH_BOX", "SYP", 50_000L)
         protocol.mapSecondaryCashAccount(adminId, secondaryId, "remote-supplier-box", source.id)
