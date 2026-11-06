@@ -1083,7 +1083,7 @@ class SyncDomainApplierTest {
 
     @Test fun rejectsLegacyIncomingServiceTransferWithoutCashMappingAndLeavesBothLedgersUntouched() {
         val wallet = ServiceTransferRepository(context)
-        wallet.setOpeningBalance(adminId, ServiceTransferRepository.SYRIATEL_SHARED, 20_000L)
+        wallet.setOpeningBalance(adminId, ServiceTransferRepository.SYRIATEL_SHARED, 20000L)
         val beforeFloat = wallet.listWallets().single { it.serviceKey == ServiceTransferRepository.SYRIATEL_SHARED }.balanceMinor
         val payload = JSONObject().put("business_operation", "EXECUTE_SERVICE_TRANSFER")
             .put("service_type", ServiceTransferRepository.SYRIATEL_BALANCE)
@@ -1093,17 +1093,15 @@ class SyncDomainApplierTest {
             .put("cash_account_id", "unmapped-service-receipt").put("cash_account_type", "WALLET")
             .put("cash_account_currency_code", "SYP").put("occurred_at", "2026-11-03T14:15:00Z")
             .put("operating_date", "2026-11-03")
-        val operationId = receiveRaw("EXECUTE_SERVICE_TRANSFER", "unused", payload)
         var rejected = false
-        try { SyncDomainApplier(context).applyReceivedOperation(operationId) }
+        try { receiveRaw("EXECUTE_SERVICE_TRANSFER", "unused", payload) }
         catch (expected: IllegalArgumentException) {
-            rejected = expected.message?.contains("غير مدعوم") == true
+            rejected = expected.message?.contains("مخول") == true
         }
         assertTrue(rejected)
-        assertEquals("RECEIVED", inboxStatus(operationId))
         assertEquals(beforeFloat, wallet.listWallets().single { it.serviceKey == ServiceTransferRepository.SYRIATEL_SHARED }.balanceMinor)
         assertEquals(0, database.readableDatabase.rawQuery(
-            "SELECT COUNT(*) FROM service_transfers WHERE operation_id=?", arrayOf(operationId)
+            "SELECT COUNT(*) FROM service_transfers", null
         ).use { it.moveToFirst(); it.getInt(0) })
     }
     @Test fun rejectsLegacyIncomingServiceTransferWhenPrimaryFloatIsInsufficientWithoutPartialPosting() {
@@ -1118,17 +1116,15 @@ class SyncDomainApplierTest {
             .put("cash_account_id", "unmapped-service-receipt").put("cash_account_type", "WALLET")
             .put("cash_account_currency_code", "SYP").put("occurred_at", "2026-11-03T14:15:00Z")
             .put("operating_date", "2026-11-03")
-        val operationId = receiveRaw("EXECUTE_SERVICE_TRANSFER", "unused", payload)
         var rejected = false
-        try { SyncDomainApplier(context).applyReceivedOperation(operationId) }
+        try { receiveRaw("EXECUTE_SERVICE_TRANSFER", "unused", payload) }
         catch (expected: IllegalArgumentException) {
-            rejected = expected.message?.contains("غير مدعوم") == true
+            rejected = expected.message?.contains("مخول") == true
         }
         assertTrue(rejected)
-        assertEquals("RECEIVED", inboxStatus(operationId))
         assertEquals(beforeFloat, wallet.listWallets().single { it.serviceKey == ServiceTransferRepository.SYRIATEL_SHARED }.balanceMinor)
         assertEquals(0, database.readableDatabase.rawQuery(
-            "SELECT COUNT(*) FROM service_transfers WHERE operation_id=?", arrayOf(operationId)
+            "SELECT COUNT(*) FROM service_transfers", null
         ).use { it.moveToFirst(); it.getInt(0) })
     }
     @Test fun rejectsLegacyIncomingServiceTransferAndPreservesLedgers() {
@@ -1142,18 +1138,16 @@ class SyncDomainApplierTest {
             .put("delivered_minor", 2_000L).put("provider_fee_minor", 100L).put("profit_minor", 400L).put("customer_charge_minor", 2_500L)
             .put("cash_account_id", "remote-service-wallet").put("cash_account_type", "WALLET").put("cash_account_currency_code", "SYP")
             .put("reference", "اختبار").put("note", JSONObject.NULL).put("occurred_at", "2026-11-03T14:15:00Z").put("operating_date", "2026-11-03")
-        val operationId = receiveRaw("EXECUTE_SERVICE_TRANSFER", "unused", payload)
         var rejected = false
-        try { SyncDomainApplier(context).applyReceivedOperation(operationId) }
+        try { receiveRaw("EXECUTE_SERVICE_TRANSFER", "unused", payload) }
         catch (expected: IllegalArgumentException) {
-            rejected = expected.message?.contains("غير مدعوم") == true
+            rejected = expected.message?.contains("مخول") == true
         }
         assertTrue(rejected)
-        assertEquals("RECEIVED", inboxStatus(operationId))
         assertEquals(beforeFloat, wallet.listWallets().single { it.serviceKey == ServiceTransferRepository.SYRIATEL_SHARED }.balanceMinor)
         assertEquals(0L, CashAccountRepository(context).balance(receipt.id))
         assertEquals(0, database.readableDatabase.rawQuery(
-            "SELECT COUNT(*) FROM service_transfers WHERE operation_id=?", arrayOf(operationId)
+            "SELECT COUNT(*) FROM service_transfers", null
         ).use { it.moveToFirst(); it.getInt(0) })
         assertEquals(0, protocol.pendingOutbox().size)
     }
