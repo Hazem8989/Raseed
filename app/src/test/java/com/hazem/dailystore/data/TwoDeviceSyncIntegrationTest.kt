@@ -1034,6 +1034,16 @@ class TwoDeviceSyncIntegrationTest {
         assertEquals("PENDING",queueStatus(secondaryDb,collectionOperation))
         assertEquals(0,scalar(secondaryDb,"SELECT COUNT(*) FROM cash_transactions WHERE operation_id=?",collectionOperation))
         assertEquals(0,scalar(secondaryDb,"SELECT COUNT(*) FROM service_transfer_receivable_payments WHERE operation_id=?",collectionOperation))
+        assertEquals(0,scalar(primaryDb,
+            "SELECT COUNT(*) FROM cash_transactions WHERE source_id=? AND transaction_type='SERVICE_TRANSFER_DEBT_COLLECTION'",
+            transfer.transferId))
+        // The queued collection must survive a database close/reopen before delivery.
+        secondaryDb.close()
+        secondaryDb=AppDatabase(context,SECONDARY_DATABASE)
+        AppDatabase.installForTests(secondaryDb)
+        setLocalDeviceId(secondaryId)
+        secondaryRepository=SyncProtocolRepository(context,SyncCredentialVault(context){vaultKey})
+        assertEquals("PENDING",queueStatus(secondaryDb,collectionOperation))
         val collectionFrame=secondaryRepository.encryptedAuthenticatedOutbox(collectionOperation,primaryId)
 
         var collectionAck:String?=null
