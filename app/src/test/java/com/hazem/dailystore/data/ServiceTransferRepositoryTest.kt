@@ -65,14 +65,15 @@ class ServiceTransferRepositoryTest {
         val second = repo.executeTransfer(actor, ServiceTransferRepository.SYRIATEL_CASH,
             20_000L, 2L, drawer.id, "svc-cash-" + UUID.randomUUID())
         assertEquals(2_000L, second.profitMinor)
-        assertEquals(70_000L, repo.listWallets().single { it.serviceKey == ServiceTransferRepository.SYRIATEL_SHARED }.balanceMinor)
+        assertEquals(69_998L, repo.listWallets().single { it.serviceKey == ServiceTransferRepository.SYRIATEL_SHARED }.balanceMinor)
         val daily = repo.dailySummary()
         val normal = daily.single { it.serviceType == ServiceTransferRepository.SYRIATEL_BALANCE }
         val cash = daily.single { it.serviceType == ServiceTransferRepository.SYRIATEL_CASH }
         assertEquals(2_000L, normal.profitMinor)
         assertEquals(2_000L, cash.profitMinor)
         assertEquals(12_500L, normal.customerReceiptsMinor)
-        assertEquals(22_002L, cash.customerReceiptsMinor)
+        assertEquals(22_000L, cash.customerReceiptsMinor)
+        assertEquals(2L, cash.providerFeeMinor)
         assertEquals(10_000L, normal.rechargeReserveMinor)
         assertEquals(20_000L, cash.rechargeReserveMinor)
     }
@@ -110,14 +111,15 @@ class ServiceTransferRepositoryTest {
             "svc-cash-below-"+UUID.randomUUID())
         assertEquals(10L,belowThreshold.profitMinor)
         assertEquals(2L,belowThreshold.providerFeeMinor)
-        assertEquals(112L,belowThreshold.customerChargeMinor)
+        assertEquals(110L,belowThreshold.customerChargeMinor)
 
         val atThreshold=repo.executeTransfer(actor,ServiceTransferRepository.SYRIATEL_CASH,200L,2L,drawer.id,
             "svc-cash-at-"+UUID.randomUUID())
         assertEquals(20L,atThreshold.profitMinor)
         assertEquals(2L,atThreshold.providerFeeMinor)
-        assertEquals(222L,atThreshold.customerChargeMinor)
-        assertEquals(334L,accounts.balance(drawer.id))
+        assertEquals(220L,atThreshold.customerChargeMinor)
+        assertEquals(330L,accounts.balance(drawer.id))
+        assertEquals(9_696L,repo.listWallets().single{it.serviceKey==ServiceTransferRepository.SYRIATEL_SHARED}.balanceMinor)
     }
 
     @Test fun shamCashUsesIndependentFloatAndFivePercentProfit() {
