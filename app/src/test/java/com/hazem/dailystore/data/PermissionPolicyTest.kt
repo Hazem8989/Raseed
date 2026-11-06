@@ -73,7 +73,6 @@ class PermissionPolicyTest {
             PermissionPolicy.CUSTOMERS_MANAGE,
             PermissionPolicy.DAILY_CASH_MANAGE,
             PermissionPolicy.SERVICE_TRANSFERS_MANAGE,
-            PermissionPolicy.SERVICE_TRANSFERS_EXECUTE,
             PermissionPolicy.BACKUP_MANAGE,
             PermissionPolicy.INVENTORY_ADJUST,
             PermissionPolicy.RETURNS_PROCESS,
@@ -93,6 +92,16 @@ class PermissionPolicyTest {
                 assertTrue(error.message.orEmpty().contains("الجهاز الثانوي"))
             }
         }
+        try {
+            PermissionPolicy.require(database.readableDatabase, adminId, PermissionPolicy.SERVICE_TRANSFERS_EXECUTE)
+            fail("Secondary must not locally post service transfers")
+        } catch (error: IllegalArgumentException) {
+            assertTrue(error.message.orEmpty().contains("الجهاز ثانوي"))
+        }
+        // The assigned permission is needed only to queue a deferred credit transfer;
+        // the secondary never commits its wallet, cash, or receivable ledger locally.
+        PermissionPolicy.requireAssigned(database.readableDatabase, adminId, PermissionPolicy.SERVICE_TRANSFERS_EXECUTE)
+
         try {
             PermissionPolicy.require(database.readableDatabase, adminId, PermissionPolicy.SALES_CHECKOUT)
             fail("A secondary must not locally authorize the generic sales-posting permission")
