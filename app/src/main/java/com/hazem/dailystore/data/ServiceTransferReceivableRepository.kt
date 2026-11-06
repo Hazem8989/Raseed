@@ -218,7 +218,7 @@ class ServiceTransferReceivableRepository(context:Context) {
         val row=db.rawQuery(
             """SELECT t.customer_id,c.name,t.service_type,t.amount_delivered_minor,
                       t.customer_charge_minor,t.created_at,COALESCE(t.operating_date,substr(t.created_at,1,10)),
-                      t.reference,r.note,r.status,COALESCE(SUM(p.amount_minor),0)
+                      t.reference,r.note,r.status,COALESCE(SUM(p.amount_minor),0),t.amount_delivered_milli_syp
                FROM service_transfers t
                JOIN service_transfer_receivables r ON r.transfer_id=t.id
                JOIN customers c ON c.id=r.customer_id
@@ -234,7 +234,7 @@ class ServiceTransferReceivableRepository(context:Context) {
                 .put("business_operation","UPSERT_SERVICE_TRANSFER_RECEIVABLE")
                 .put("transfer_id",transferId).put("customer_id",c.getString(0))
                 .put("customer_name",c.getString(1)).put("service_type",c.getString(2))
-                .put("delivered_minor",c.getLong(3)).put("charge_minor",charge)
+                .put("delivered_minor",c.getLong(3)).put("delivered_milli_syp",c.getLong(11)).put("charge_minor",charge)
                 .put("paid_minor",paid).put("outstanding_minor",outstanding)
                 .put("status",if(reversed)"REVERSED" else if(paid>=charge)"PAID" else if(paid>0L)"PARTIALLY_PAID" else c.getString(9))
                 .put("created_at",c.getString(5)).put("operating_date",c.getString(6))
