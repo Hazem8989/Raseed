@@ -1040,7 +1040,8 @@ class SyncProtocolRepository(private val context: Context, private val credentia
             val businessOperation = payload.optString("business_operation")
             require(businessOperation in setOf(
                 "POST_SALE_INVOICE", "COLLECT_CUSTOMER_PAYMENT",
-                "COLLECT_SERVICE_TRANSFER_DEBT", "SYNC_TRANSPORT_PROBE"
+                "COLLECT_SERVICE_TRANSFER_DEBT", "EXECUTE_SERVICE_TRANSFER_CREDIT",
+                "SYNC_TRANSPORT_PROBE"
             )) {
                 "الجهاز الثانوي مخول بإرسال فواتير البيع وتحصيل ديون العملاء وتحويلات الرصيد الآجلة واختبارات المزامنة فقط"
             }
