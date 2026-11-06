@@ -1134,6 +1134,7 @@ class SyncDomainApplierTest {
             .put("delivered_minor", 2_000L).put("provider_fee_minor", 100L).put("profit_minor", 400L).put("customer_charge_minor", 2_500L)
             .put("cash_account_id", "remote-service-wallet").put("cash_account_type", "WALLET").put("cash_account_currency_code", "SYP")
             .put("reference", "اختبار").put("note", JSONObject.NULL).put("occurred_at", "2026-11-03T14:15:00Z").put("operating_date", "2026-11-03")
+        val pendingOutboxBefore = protocol.pendingOutbox().size
         assertLegacyServiceTransferRejected(payload)
         assertEquals(beforeFloat, wallet.listWallets().single { it.serviceKey == ServiceTransferRepository.SYRIATEL_SHARED }.balanceMinor)
         assertEquals(0L, CashAccountRepository(context).balance(receipt.id))
@@ -1143,7 +1144,7 @@ class SyncDomainApplierTest {
         assertEquals(transferCountBefore, database.readableDatabase.rawQuery(
             "SELECT COUNT(*) FROM service_transfers", null
         ).use { it.moveToFirst(); it.getInt(0) })
-        assertEquals(0, protocol.pendingOutbox().size)
+        assertEquals(pendingOutboxBefore, protocol.pendingOutbox().size)
     }
     @Test fun appliesIncomingSupplierRolloverOnceWithMappedAccountAndOriginalBusinessDate() {
         val source = CashAccountRepository(context).create(adminId, "صندوق الموردين المزامن", "CASH_BOX", "SYP", 50_000L)
