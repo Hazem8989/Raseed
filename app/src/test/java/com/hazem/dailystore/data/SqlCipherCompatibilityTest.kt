@@ -1,10 +1,10 @@
 package com.hazem.dailystore.data
 
 import android.content.Context
-import android.database.sqlite.SQLiteException
+import net.zetetic.database.DatabaseErrorHandler
 import net.zetetic.database.sqlcipher.SQLiteDatabase
 import net.zetetic.database.sqlcipher.SQLiteOpenHelper
-import org.junit.After
+import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertThrows
@@ -32,7 +32,7 @@ class SqlCipherCompatibilityTest {
     }
 
     @Test
-    fun encryptedDatabaseCanBeReopenedAndRejectsWrongKey() {
+    fun encryptedDatabaseCanBeReopenedAndRejectsWrongKeyWithoutDeletingSource() {
         val context = RuntimeEnvironment.getApplication() as Context
         val databaseName = "sqlcipher-compat-${UUID.randomUUID()}.db"
         val databaseFile = context.getDatabasePath(databaseName)
@@ -77,14 +77,17 @@ class SqlCipherCompatibilityTest {
                 reopened.close()
             }
 
+            val encryptedBytesBeforeWrongKey = databaseFile.readBytes()
             val wrongKey = CompatibilityDatabase(context, databaseName, "wrong-test-key")
             try {
-                assertThrows(SQLiteException::class.java) {
+                assertThrows(RuntimeException::class.java) {
                     wrongKey.readableDatabase
                 }
             } finally {
                 wrongKey.close()
             }
+            assertTrue("Wrong-key attempt must not delete the source database", databaseFile.exists())
+            assertArrayEquals(encryptedBytesBeforeWrongKey, databaseFile.readBytes())
         } finally {
             helper.close()
             context.deleteDatabase(databaseName)
@@ -104,7 +107,9 @@ class SqlCipherCompatibilityTest {
         null,
         1,
         0,
-        null,
+        DatabaseErrorHandler { _, exception ->
+            throw IllegalStateException("Database could not be opened safely", exception)
+        },
         null,
         false
     ) {
