@@ -104,7 +104,9 @@ class ServiceTransferRepository(context:Context) {
                  WHERE transaction_type='RECHARGE' AND operating_date=?
                  GROUP BY service_key
                  UNION ALL
-                 SELECT t.service_type,0,0,0,0,0,0,0,0,0
+                 -- Collections are real customer receipts on the collection date,
+                 -- but remain collections (not new transfers or sales).
+                 SELECT t.service_type,0,0,COALESCE(SUM(p.amount_minor),0),0,0,0,0,0,0
                  FROM service_transfer_receivable_payments p
                  JOIN service_transfers t ON t.id=p.transfer_id
                  WHERE p.operating_date=? AND t.status='POSTED'
