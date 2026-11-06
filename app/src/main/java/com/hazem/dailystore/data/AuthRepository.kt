@@ -3,6 +3,7 @@ package com.hazem.dailystore.data
 import android.content.ContentValues
 import android.content.Context
 import android.database.sqlite.SQLiteConstraintException
+import android.database.sqlite.SQLiteDatabase
 import android.util.Base64
 import java.security.MessageDigest
 import java.security.SecureRandom
@@ -102,23 +103,63 @@ class AuthRepository(context: Context) {
         }
     }
 
-    fun authenticate(username: String, password: String): AuthenticatedUser? {
+    fun authenticate(username: String, password: String): AuthenticatedUser? = synchronized(LOGIN_LOCK) {
         val cleanUsername = username.trim()
-        if (cleanUsername.isEmpty() || password.isEmpty()) return null
+        if (cleanUsername.isEmpty() || password.isEmpty()) return@synchronized null
         val db = database.writableDatabase
+        ensureLoginAttemptSchema(db)
+        val usernameKey = MessageDigest.getInstance("SHA-256")
+            .digest(cleanUsername.lowercase(Locale.ROOT).toByteArray(Charsets.UTF_8))
+            .joinToString("") { "%02x".format(it) }
+        val nowMillis = System.currentTimeMillis()
+        val attempt = db.rawQuery(
+            "SELECT failed_attempts,locked_until_ms FROM auth_login_attempts WHERE username_hash=?",
+            arrayOf(usernameKey)
+        ).use { c -> if (c.moveToFirst()) c.getInt(0) to c.getLong(1) else null }
+        if (attempt != null && attempt.second > nowMillis) return@synchronized null
+
         val user = db.rawQuery(
             "SELECT id,username,display_name,password_hash,password_salt,role_key,is_active,must_change_password FROM users WHERE username=? COLLATE NOCASE",
             arrayOf(cleanUsername)
         ).use { c ->
             if (!c.moveToFirst() || c.getInt(6) != 1) null
             else UserCredential(c.getString(0),c.getString(1),c.getString(2),c.getString(3),c.getString(4),c.getString(5),c.getInt(7) == 1)
-        } ?: return null
-        val candidate = derive(password, user.salt)
-        if (!MessageDigest.isEqual(candidate, Base64.decode(user.hash, Base64.NO_WRAP))) return null
+        }
+        // Perform the same expensive KDF for unknown/inactive usernames to reduce
+        // username-enumeration timing differences.
+        val candidate = derive(password, user?.salt ?: DUMMY_LOGIN_SALT)
+        val valid = user?.let {
+            runCatching { MessageDigest.isEqual(candidate, Base64.decode(it.hash, Base64.NO_WRAP)) }
+                .getOrDefault(false)
+        } ?: false
+        if (!valid || user == null) {
+            val priorFailures = if (attempt == null || attempt.second <= nowMillis) 0 else attempt.first
+            val failures = priorFailures + 1
+            val lockUntil = if (failures >= MAX_LOGIN_FAILURES) nowMillis + LOGIN_LOCK_MS else 0L
+            db.insertWithOnConflict("auth_login_attempts", null, ContentValues().apply {
+                put("username_hash", usernameKey)
+                put("failed_attempts", if (lockUntil > 0L) 0 else failures)
+                put("locked_until_ms", lockUntil)
+                put("updated_at", timestamp())
+            }, SQLiteDatabase.CONFLICT_REPLACE)
+            return@synchronized null
+        }
+        db.delete("auth_login_attempts", "username_hash=?", arrayOf(usernameKey))
         val now = timestamp()
         db.update("users", ContentValues().apply { put("last_login_at", now); put("updated_at", now) },
             "id=?", arrayOf(user.id))
-        return AuthenticatedUser(user.id,user.username,user.displayName,user.role,user.mustChangePassword)
+        AuthenticatedUser(user.id,user.username,user.displayName,user.role,user.mustChangePassword)
+    }
+
+    private fun ensureLoginAttemptSchema(db: SQLiteDatabase) {
+        db.execSQL(
+            """CREATE TABLE IF NOT EXISTS auth_login_attempts (
+                username_hash TEXT PRIMARY KEY NOT NULL,
+                failed_attempts INTEGER NOT NULL DEFAULT 0 CHECK(failed_attempts >= 0),
+                locked_until_ms INTEGER NOT NULL DEFAULT 0 CHECK(locked_until_ms >= 0),
+                updated_at TEXT NOT NULL
+            )""".trimIndent()
+        )
     }
 
     /** Restores a previously authenticated local session only for an active user. */
@@ -330,4 +371,11 @@ class AuthRepository(context: Context) {
 
     private fun timestamp(): String = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss.SSS'Z'", Locale.US)
         .apply { timeZone = TimeZone.getTimeZone("UTC") }.format(Date())
+
+    companion object {
+        private val LOGIN_LOCK = Any()
+        private const val MAX_LOGIN_FAILURES = 5
+        private const val LOGIN_LOCK_MS = 60_000L
+        private const val DUMMY_LOGIN_SALT = "AAECAwQFBgcICQoLDA0ODw=="
+    }
 }
