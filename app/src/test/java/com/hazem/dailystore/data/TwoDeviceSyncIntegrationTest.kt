@@ -947,6 +947,184 @@ class TwoDeviceSyncIntegrationTest {
             "SELECT COUNT(*) FROM cash_transactions WHERE operation_id=?", operationId))
     }
 
+
+    @Test fun serviceTransferReceivableSyncAndSecondaryCollectionsPostOnlyOnPrimary() {
+        // First drain the setup probe so the secondary-to-primary sequence remains contiguous.
+        var probeAck:String?=null
+        var probeError:String?=null
+        val primaryProbeProcessor=SyncRelayProcessor(
+            primaryRepository,SyncDomainApplier(context),
+            listener=object:SyncRelayProcessor.Listener{
+                override fun onProtocolError(operationId:String?,message:String){probeError=message}
+            },
+            sendFrame={id,recipient,frame->
+                assertEquals(operationId,id);assertEquals(secondaryId,recipient);probeAck=frame;true
+            }
+        )
+        setLocalDeviceId(primaryId);AppDatabase.installForTests(primaryDb)
+        primaryProbeProcessor.onEncryptedFrame(
+            secondaryId,operationId,secondaryRepository.encryptedAuthenticatedOutbox(operationId,primaryId)
+        )
+        assertEquals(null,probeError)
+        setLocalDeviceId(secondaryId);AppDatabase.installForTests(secondaryDb)
+        SyncRelayProcessor(secondaryRepository,SyncDomainApplier(context),sendFrame={_,_,_->true})
+            .onEncryptedFrame(primaryId,operationId,probeAck!!)
+        assertEquals("SYNCED",queueStatus(secondaryDb,operationId))
+
+        setLocalDeviceId(primaryId);AppDatabase.installForTests(primaryDb)
+        val customer=CustomerRepository(context).create(primaryAdminId,"زبون ذمة خدمة "+UUID.randomUUID())
+        val receiptWallet=CashAccountRepository(context).create(
+            primaryAdminId,"محفظة قبض ذمم الخدمة","WALLET","SYP",0L
+        )
+        primaryRepository.mapSecondaryCashAccount(primaryAdminId,secondaryId,receiptWallet.id,receiptWallet.id)
+        val serviceRepo=ServiceTransferRepository(context)
+        serviceRepo.setOpeningBalance(primaryAdminId,ServiceTransferRepository.SYRIATEL_SHARED,50_000L,"رصيد اختبار")
+        val transferOperation=UUID.randomUUID().toString()
+        val transfer=serviceRepo.executeTransfer(
+            primaryAdminId,ServiceTransferRepository.SYRIATEL_BALANCE,10_000L,0L,
+            serviceRepo.serviceAccountId(ServiceTransferRepository.SYRIATEL_SHARED),
+            transferOperation,paymentMode="CREDIT",customerId=customer.id
+        )
+        assertEquals(12_000L,transfer.customerChargeMinor)
+        assertEquals(0,scalar(primaryDb,
+            "SELECT COUNT(*) FROM cash_transactions WHERE operation_id=?",transferOperation))
+        val referenceItems=primaryRepository.pendingOutboxForDevice(secondaryId)
+        assertTrue(referenceItems.any{it.entityType=="CUSTOMER"&&it.entityId==customer.id})
+        assertTrue(referenceItems.any{it.entityType=="CASH_ACCOUNT"&&it.entityId==receiptWallet.id})
+        assertTrue(referenceItems.any{it.entityType=="SERVICE_TRANSFER_RECEIVABLE"&&it.entityId==transfer.transferId})
+
+        val referenceAcks=mutableMapOf<String,String>()
+        var referenceError:String?=null
+        setLocalDeviceId(secondaryId);AppDatabase.installForTests(secondaryDb)
+        val secondaryReferenceProcessor=SyncRelayProcessor(
+            secondaryRepository,SyncDomainApplier(context),
+            listener=object:SyncRelayProcessor.Listener{
+                override fun onProtocolError(operationId:String?,message:String){referenceError="$operationId: $message"}
+            },
+            sendFrame={id,recipient,frame->
+                assertEquals(primaryId,recipient);referenceAcks[id]=frame;true
+            }
+        )
+        for(item in referenceItems) {
+            setLocalDeviceId(primaryId);AppDatabase.installForTests(primaryDb)
+            val frame=primaryRepository.encryptedAuthenticatedOutbox(item.operationId,secondaryId)
+            setLocalDeviceId(secondaryId);AppDatabase.installForTests(secondaryDb)
+            secondaryReferenceProcessor.onEncryptedFrame(primaryId,item.operationId,frame)
+            assertEquals("فشل مزامنة ذمة تحويل الرصيد: $referenceError",null,referenceError)
+            assertEquals("APPLIED",inboxStatus(secondaryDb,item.operationId))
+            val ack=referenceAcks[item.operationId]?:throw AssertionError("لم يصدر ACK لبيانات الذمة")
+            setLocalDeviceId(primaryId);AppDatabase.installForTests(primaryDb)
+            SyncRelayProcessor(primaryRepository,SyncDomainApplier(context),sendFrame={_,_,_->true})
+                .onEncryptedFrame(secondaryId,item.operationId,ack)
+            assertEquals("SYNCED",queueStatus(primaryDb,item.operationId))
+        }
+
+        setLocalDeviceId(secondaryId);AppDatabase.installForTests(secondaryDb)
+        val secondaryDebt=ServiceTransferReceivableRepository(context).listOpenReceivables(customer.id).single()
+        assertEquals(transfer.transferId,secondaryDebt.transferId)
+        assertEquals(12_000L,secondaryDebt.outstandingMinor)
+        assertEquals(0,scalar(secondaryDb,
+            "SELECT COUNT(*) FROM cash_transactions WHERE source_type='SERVICE_TRANSFER_DEBT_COLLECTION'",transfer.transferId))
+
+        val collectionOperation=UUID.randomUUID().toString()
+        val queued=ServiceTransferReceivableRepository(context).collect(
+            secondaryAdminId,transfer.transferId,collectionOperation,receiptWallet.id,3_000L,"دفعة من الثانوي"
+        )
+        assertTrue(queued.pending)
+        assertEquals("PENDING",queueStatus(secondaryDb,collectionOperation))
+        assertEquals(0,scalar(secondaryDb,"SELECT COUNT(*) FROM cash_transactions WHERE operation_id=?",collectionOperation))
+        assertEquals(0,scalar(secondaryDb,"SELECT COUNT(*) FROM service_transfer_receivable_payments WHERE operation_id=?",collectionOperation))
+        val collectionFrame=secondaryRepository.encryptedAuthenticatedOutbox(collectionOperation,primaryId)
+
+        var collectionAck:String?=null
+        var collectionError:String?=null
+        setLocalDeviceId(primaryId);AppDatabase.installForTests(primaryDb)
+        val primaryCollectionProcessor=SyncRelayProcessor(
+            primaryRepository,SyncDomainApplier(context),
+            listener=object:SyncRelayProcessor.Listener{
+                override fun onProtocolError(operationId:String?,message:String){collectionError="$operationId: $message"}
+            },
+            sendFrame={id,recipient,frame->
+                assertEquals(collectionOperation,id);assertEquals(secondaryId,recipient);collectionAck=frame;true
+            }
+        )
+        primaryCollectionProcessor.onEncryptedFrame(secondaryId,collectionOperation,collectionFrame)
+        assertEquals("رفض الأساسي تحصيل دين تحويل الرصيد: $collectionError",null,collectionError)
+        assertEquals("APPLIED",inboxStatus(primaryDb,collectionOperation))
+        assertEquals(1,scalar(primaryDb,
+            "SELECT COUNT(*) FROM service_transfer_receivable_payments WHERE operation_id=?",collectionOperation))
+        assertEquals(1,scalar(primaryDb,
+            "SELECT COUNT(*) FROM cash_transactions WHERE operation_id=? AND transaction_type='SERVICE_TRANSFER_DEBT_COLLECTION'",
+            collectionOperation))
+        assertEquals(3_000L,primaryDb.readableDatabase.rawQuery(
+            "SELECT amount_minor FROM cash_transactions WHERE operation_id=?",arrayOf(collectionOperation)
+        ).use{c->assertTrue(c.moveToFirst());c.getLong(0)})
+        assertEquals(1,scalar(primaryDb,
+            "SELECT COUNT(*) FROM operation_registry WHERE operation_id=? AND status='COMPLETED'",collectionOperation))
+
+        setLocalDeviceId(secondaryId);AppDatabase.installForTests(secondaryDb)
+        SyncRelayProcessor(secondaryRepository,SyncDomainApplier(context),sendFrame={_,_,_->true})
+            .onEncryptedFrame(primaryId,collectionOperation,collectionAck!!)
+        assertEquals("SYNCED",queueStatus(secondaryDb,collectionOperation))
+
+        // The primary's authoritative receivable snapshot is a separate signed event.
+        setLocalDeviceId(primaryId);AppDatabase.installForTests(primaryDb)
+        val mirrorUpdate=primaryRepository.pendingOutboxForDevice(secondaryId)
+            .single{it.entityType=="SERVICE_TRANSFER_RECEIVABLE"&&it.entityId==transfer.transferId}
+        val mirrorFrame=primaryRepository.encryptedAuthenticatedOutbox(mirrorUpdate.operationId,secondaryId)
+        var mirrorAck:String?=null
+        var mirrorError:String?=null
+        setLocalDeviceId(secondaryId);AppDatabase.installForTests(secondaryDb)
+        val mirrorProcessor=SyncRelayProcessor(
+            secondaryRepository,SyncDomainApplier(context),
+            listener=object:SyncRelayProcessor.Listener{
+                override fun onProtocolError(operationId:String?,message:String){mirrorError="$operationId: $message"}
+            },
+            sendFrame={id,recipient,frame->
+                assertEquals(mirrorUpdate.operationId,id);assertEquals(primaryId,recipient);mirrorAck=frame;true
+            }
+        )
+        mirrorProcessor.onEncryptedFrame(primaryId,mirrorUpdate.operationId,mirrorFrame)
+        assertEquals("فشل تحديث الرصيد على الثانوي: $mirrorError",null,mirrorError)
+        val updatedDebt=ServiceTransferReceivableRepository(context).listOpenReceivables(customer.id).single()
+        assertEquals(3_000L,updatedDebt.paidMinor)
+        assertEquals(9_000L,updatedDebt.outstandingMinor)
+        assertEquals(3_000L,PartyStatementRepository(context).customer(customer.id).entries
+            .single{it.type=="SERVICE_TRANSFER_COLLECTION"}.creditSypMinor)
+
+        setLocalDeviceId(primaryId);AppDatabase.installForTests(primaryDb)
+        SyncRelayProcessor(primaryRepository,SyncDomainApplier(context),sendFrame={_,_,_->true})
+            .onEncryptedFrame(secondaryId,mirrorUpdate.operationId,mirrorAck!!)
+        assertEquals("SYNCED",queueStatus(primaryDb,mirrorUpdate.operationId))
+
+        // Re-delivering the original collection cannot create another cash or debt movement.
+        var duplicateAck:String?=null
+        primaryCollectionProcessor.onEncryptedFrame(secondaryId,collectionOperation,collectionFrame)
+        // The ACK is generated through the processor callback only when a frame is sent.
+        // A second processor captures the duplicate application ACK.
+        val duplicateProcessor=SyncRelayProcessor(primaryRepository,SyncDomainApplier(context),
+            sendFrame={id,recipient,frame->duplicateAck=frame;assertEquals(collectionOperation,id);assertEquals(secondaryId,recipient);true})
+        duplicateProcessor.onEncryptedFrame(secondaryId,collectionOperation,collectionFrame)
+        assertEquals(1,scalar(primaryDb,
+            "SELECT COUNT(*) FROM cash_transactions WHERE operation_id=? AND transaction_type='SERVICE_TRANSFER_DEBT_COLLECTION'",
+            collectionOperation))
+        assertEquals(1,scalar(primaryDb,
+            "SELECT COUNT(*) FROM service_transfer_receivable_payments WHERE operation_id=?",collectionOperation))
+        assertEquals(1,scalar(primaryDb,
+            "SELECT COUNT(*) FROM operation_registry WHERE operation_id=?",collectionOperation))
+
+        setLocalDeviceId(secondaryId);AppDatabase.installForTests(secondaryDb)
+        SyncRelayProcessor(secondaryRepository,SyncDomainApplier(context),sendFrame={_,_,_->true})
+            .onEncryptedFrame(primaryId,collectionOperation,duplicateAck!!)
+        var excessiveRejected=false
+        try {
+            ServiceTransferReceivableRepository(context).collect(
+                secondaryAdminId,transfer.transferId,UUID.randomUUID().toString(),receiptWallet.id,9_001L,"زيادة غير مسموحة"
+            )
+        } catch(_:IllegalArgumentException){excessiveRejected=true}
+        assertTrue("يجب رفض التحصيل الذي يتجاوز الرصيد المتبقي على الثانوي",excessiveRejected)
+    }
+
     @Test fun secondaryOutboxWaitsDuringNetworkOutageAndCompletesAfterReconnect() {
         // Simulate a network outage by withholding delivery to the primary.
         // The durable command must remain pending and be deliverable after reconnect.
