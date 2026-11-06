@@ -39,16 +39,18 @@ jobs:
           yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --licenses
           "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" \
             "platform-tools" \
-            "platforms;android-35" \
-            "system-images;android-35;google_apis;x86_64"
+            "platforms;android-34" \
+            "system-images;android-34;google_apis;x86_64"
 
       - name: Run SQLCipher instrumentation test on emulator
         uses: reactivecircus/android-emulator-runner@v2
         with:
-          api-level: 35
+          api-level: 34
           target: google_apis
           arch: x86_64
           profile: pixel_2
+          emulator-options: -no-window -gpu swiftshader_indirect -no-snapshot -noaudio -no-boot-anim -camera-back none -camera-front none
+          emulator-boot-timeout: 900
           disable-animations: true
           script: ./gradlew :app:connectedDebugAndroidTest --stacktrace
 
