@@ -15,7 +15,9 @@ data class ServiceTransferRecord(
     val id:String,val serviceType:String,val serviceName:String,val deliveredMinor:Long,val profitMinor:Long,
     val providerFeeMinor:Long,val customerChargeMinor:Long,val receiptAccountName:String,val receiptChannel:String,
     val createdAt:String,val status:String,val paymentMode:String="CASH",val customerName:String?=null,
-    val paidMinor:Long=0L,val outstandingMinor:Long=0L
+    val paidMinor:Long=0L,val outstandingMinor:Long=0L,
+    val amountDebitedMinor:Long=deliveredMinor,val deliveredMilliSyp:Long=deliveredMinor*1000L,
+    val profitMilliSyp:Long=profitMinor*1000L
 )
 data class ServiceDailySummary(
     val serviceType:String,val serviceName:String,val operationCount:Int,val deliveredMinor:Long,
@@ -201,7 +203,7 @@ class ServiceTransferRepository(context:Context) {
     fun executeTransfer(actor:String,serviceType:String,deliveredMinor:Long,providerFeeMinor:Long,receiptAccountId:String,
                         operationId:String,reference:String?=null,note:String?=null,
                         occurredAt:String?=null,operatingDate:String?=null,syncOrigin:Boolean=false,
-                        paymentMode:String="CASH",customerId:String?=null):ServiceTransferResult {
+                        paymentMode:String="CASH",customerId:String?=null,legacyBalanceDelivered:Boolean=false):ServiceTransferResult {
         require(deliveredMinor>0L&&providerFeeMinor>=0L&&operationId.isNotBlank()){"تحقق من مبلغ التحويل ورسوم الشركة"}
         require(paymentMode in setOf("CASH","CREDIT")){"طريقة دفع تحويل الرصيد غير صالحة"}
         if(paymentMode=="CREDIT") require(!customerId.isNullOrBlank()){"اختر الزبون لتسجيل التحويل الآجل"}
@@ -213,8 +215,15 @@ class ServiceTransferRepository(context:Context) {
         }
         val serviceKey=if(serviceType==SHAM_CASH_TRANSFER)SHAM_CASH else SYRIATEL_SHARED
         val profitRate=when(serviceType){SYRIATEL_BALANCE->20L;SYRIATEL_CASH->10L;else->5L}
-        val profit=percent(deliveredMinor,profitRate)
-        val charge=Math.addExact(Math.addExact(deliveredMinor,profit),providerFeeMinor)
+        // For Syriatel Balance, input is the amount deducted from the trader wallet.
+        // Keep delivered amount and profit exact in milli-SYP; round only the customer charge.
+        val amountDebitedMinor=deliveredMinor
+        val deliveredMilliSyp=if(serviceType==SYRIATEL_BALANCE && !legacyBalanceDelivered) roundRatioMilli(amountDebitedMinor,41340L,43L) else Math.multiplyExact(deliveredMinor,1000L)
+        val profitMilliSyp=roundRatioMilli(deliveredMilliSyp,profitRate,100L)
+        val deliveredDisplayMinor=roundMilliToWhole(deliveredMilliSyp)
+        val profit=roundMilliToWhole(profitMilliSyp)
+        val charge=roundMilliToWhole(Math.addExact(Math.addExact(deliveredMilliSyp,profitMilliSyp),Math.multiplyExact(providerFeeMinor,1000L)))
+        val walletDebitMinor=if(serviceType==SYRIATEL_BALANCE) amountDebitedMinor else deliveredMinor
         val db=database.writableDatabase;db.beginTransaction()
         try {
             val localRole=db.rawQuery("SELECT state_value FROM sync_protocol_state WHERE state_key='local_device_role'",null).use{if(it.moveToFirst())it.getString(0)else null}
@@ -247,15 +256,15 @@ class ServiceTransferRepository(context:Context) {
             }
             // Preserve the historical cash-operation hash so pending pre-upgrade retries remain idempotent.
             val payload=if(paymentMode=="CASH")
-                hash("$serviceType|$deliveredMinor|$providerFeeMinor|$effectiveReceiptAccountId|$reference|$note")
-            else hash("$serviceType|$deliveredMinor|$providerFeeMinor|$effectiveReceiptAccountId|$paymentMode|${customerId.orEmpty()}|$reference|$note")
-            val old=db.rawQuery("SELECT id,service_type,amount_delivered_minor,profit_minor,provider_fee_minor,customer_charge_minor,payload_hash,payment_mode,customer_id FROM service_transfers WHERE operation_id=?",arrayOf(operationId)).use{
-                if(it.moveToFirst()) arrayOf(it.getString(0),it.getString(1),it.getLong(2).toString(),it.getLong(3).toString(),it.getLong(4).toString(),it.getLong(5).toString(),it.getString(6),it.getString(7),if(it.isNull(8)) "" else it.getString(8)) else null
+                hash("$serviceType|$amountDebitedMinor|$deliveredMilliSyp|$profitMilliSyp|$providerFeeMinor|$effectiveReceiptAccountId|$reference|$note")
+            else hash("$serviceType|$amountDebitedMinor|$deliveredMilliSyp|$profitMilliSyp|$providerFeeMinor|$effectiveReceiptAccountId|$paymentMode|${customerId.orEmpty()}|$reference|$note")
+            val old=db.rawQuery("SELECT id,service_type,amount_delivered_minor,profit_minor,provider_fee_minor,customer_charge_minor,payload_hash,payment_mode,customer_id,amount_debited_minor,amount_delivered_milli_syp,profit_milli_syp FROM service_transfers WHERE operation_id=?",arrayOf(operationId)).use{
+                if(it.moveToFirst()) arrayOf(it.getString(0),it.getString(1),it.getLong(2).toString(),it.getLong(3).toString(),it.getLong(4).toString(),it.getLong(5).toString(),it.getString(6),it.getString(7),if(it.isNull(8)) "" else it.getString(8),it.getLong(9).toString(),it.getLong(10).toString(),it.getLong(11).toString()) else null
             }
             if(old!=null) {
-                require(old[1]==serviceType&&old[2]==deliveredMinor.toString()&&old[3]==profit.toString()&&old[4]==providerFeeMinor.toString()&&old[5]==charge.toString()&&old[6]==payload&&old[7]==paymentMode&&old[8]==customerId.orEmpty()){"معرّف التحويل مستخدم لبيانات مختلفة"}
+                require(old[1]==serviceType&&old[2]==deliveredDisplayMinor.toString()&&old[3]==profit.toString()&&old[4]==providerFeeMinor.toString()&&old[5]==charge.toString()&&old[6]==payload&&old[7]==paymentMode&&old[8]==customerId.orEmpty()&&old[9]==amountDebitedMinor.toString()&&old[10]==deliveredMilliSyp.toString()&&old[11]==profitMilliSyp.toString()){"معرّف التحويل مستخدم لبيانات مختلفة"}
                 db.setTransactionSuccessful()
-                return ServiceTransferResult(old[0]!!,deliveredMinor,profit,providerFeeMinor,charge,true)
+                return ServiceTransferResult(old[0]!!,deliveredDisplayMinor,profit,providerFeeMinor,charge,true)
             }
             if(paymentMode=="CREDIT") {
                 require(db.rawQuery("SELECT 1 FROM customers WHERE id=? AND is_active=1",arrayOf(customerId)).use{it.moveToFirst()}) {
@@ -269,8 +278,10 @@ class ServiceTransferRepository(context:Context) {
                 val pendingId="pending-service-transfer-$operationId"
                 val command=org.json.JSONObject().put("business_operation","EXECUTE_SERVICE_TRANSFER_CREDIT")
                     .put("service_type",serviceType).put("service_key",serviceKey)
-                    .put("delivered_minor",deliveredMinor).put("provider_fee_minor",providerFeeMinor)
-                    .put("profit_minor",profit).put("customer_charge_minor",charge)
+                    .put("schema_version",2).put("amount_debited_minor",amountDebitedMinor)
+                    .put("delivered_minor",deliveredDisplayMinor).put("delivered_milli_syp",deliveredMilliSyp)
+                    .put("profit_minor",profit).put("profit_milli_syp",profitMilliSyp)
+                    .put("provider_fee_minor",providerFeeMinor).put("customer_charge_minor",charge)
                     .put("cash_account_id",effectiveReceiptAccountId).put("cash_account_type",account.first)
                     .put("cash_account_currency_code",account.second)
                     .put("payment_mode",paymentMode).put("customer_id",customerId ?: org.json.JSONObject.NULL)
@@ -280,15 +291,16 @@ class ServiceTransferRepository(context:Context) {
                     db,actor,operationId,"EXECUTE_SERVICE_TRANSFER_CREDIT","SERVICE_TRANSFER",pendingId,command.toString()
                 )
                 db.setTransactionSuccessful()
-                return ServiceTransferResult(pendingId,deliveredMinor,profit,providerFeeMinor,charge,false)
+                return ServiceTransferResult(pendingId,deliveredDisplayMinor,profit,providerFeeMinor,charge,false)
             }
             require(localRole==null || localRole=="PRIMARY"){"دور الجهاز غير صالح لتنفيذ تحويل الرصيد"}
             ensureSystemAccounts(db)
-            require(walletBalance(db,serviceKey)>=deliveredMinor){"رصيد ${serviceName(serviceKey)} غير كافٍ. المتاح: ${walletBalance(db,serviceKey)} ل.س"}
+            require(walletBalance(db,serviceKey)>=walletDebitMinor){"رصيد ${serviceName(serviceKey)} غير كافٍ. المتاح: ${walletBalance(db,serviceKey)} ل.س"}
             val id=UUID.randomUUID().toString();val now=eventAt
             val v=ContentValues().apply {
                 put("id",id);put("operation_id",operationId);put("service_type",serviceType);put("service_key",serviceKey)
-                put("amount_delivered_minor",deliveredMinor);put("profit_minor",profit);put("provider_fee_minor",providerFeeMinor)
+                put("amount_delivered_minor",deliveredDisplayMinor);put("profit_minor",profit);put("provider_fee_minor",providerFeeMinor)
+                put("amount_debited_minor",walletDebitMinor);put("amount_delivered_milli_syp",deliveredMilliSyp);put("profit_milli_syp",profitMilliSyp)
                 put("customer_charge_minor",charge);put("receipt_account_id",effectiveReceiptAccountId)
                 put("receipt_channel",if(account.first=="WALLET")"ELECTRONIC" else "CASH")
                 put("payment_mode",paymentMode);if(customerId.isNullOrBlank())putNull("customer_id")else put("customer_id",customerId)
@@ -304,7 +316,7 @@ class ServiceTransferRepository(context:Context) {
                 if(!syncOrigin) ServiceTransferReceivableRepository(appContext)
                     .enqueueMirrorSnapshot(db,actor,id,operationId)
             }
-            insertWalletMovement(db,serviceKey,"OUT",deliveredMinor,"TRANSFER_OUT",id,operationId,0L,note?:serviceTypeName(serviceType),actor,now,null,eventDate)
+            insertWalletMovement(db,serviceKey,"OUT",walletDebitMinor,"TRANSFER_OUT",id,operationId,0L,note?:serviceTypeName(serviceType),actor,now,null,eventDate)
             if(paymentMode=="CASH") insertCashMovement(db,effectiveReceiptAccountId,"IN",charge,"SERVICE_TRANSFER_RECEIPT","SERVICE_TRANSFER",id,operationId+":RECEIPT",actor,
                 "مقبوض تحويل رصيد • ${serviceTypeName(serviceType)} • ربح $profit ل.س • رسوم الشركة $providerFeeMinor ل.س",now,eventDate)
             if(!syncOrigin) {
@@ -324,7 +336,7 @@ class ServiceTransferRepository(context:Context) {
             audit(db,actor,"SERVICE_TRANSFER_POSTED",id,null,
                 "{\"service_type\":\"$serviceType\",\"delivered_minor\":$deliveredMinor,\"profit_minor\":$profit,\"provider_fee_minor\":$providerFeeMinor,\"customer_charge_minor\":$charge,\"receipt_account_id\":\"${esc(receiptAccountId)}\"}",now)
             db.setTransactionSuccessful()
-            return ServiceTransferResult(id,deliveredMinor,profit,providerFeeMinor,charge,false)
+            return ServiceTransferResult(id,deliveredDisplayMinor,profit,providerFeeMinor,charge,false)
         } finally {db.endTransaction()}
     }
 
@@ -335,9 +347,9 @@ class ServiceTransferRepository(context:Context) {
         try {
             requireManager(db,actor)
             ensureSystemAccounts(db)
-            val row=db.rawQuery("SELECT service_key,amount_delivered_minor,customer_charge_minor,receipt_account_id,status,payment_mode FROM service_transfers WHERE id=?",arrayOf(transferId)).use{
+            val row=db.rawQuery("SELECT service_key,amount_delivered_minor,customer_charge_minor,receipt_account_id,status,payment_mode,amount_debited_minor FROM service_transfers WHERE id=?",arrayOf(transferId)).use{
                 require(it.moveToFirst()){"عملية التحويل غير موجودة"}
-                arrayOf(it.getString(0),it.getLong(1).toString(),it.getLong(2).toString(),it.getString(3),it.getString(4),it.getString(5))
+                arrayOf(it.getString(0),it.getLong(1).toString(),it.getLong(2).toString(),it.getString(3),it.getString(4),it.getString(5),it.getLong(6).toString())
             }
             val isCredit=row[5]=="CREDIT"
             if(isCredit) {
@@ -353,7 +365,7 @@ class ServiceTransferRepository(context:Context) {
                     c.getString(3),c.getString(4),if(c.isNull(5)) null else c.getString(5))
             }
             if(prior!=null) {
-                require(prior[0]==row[0] && prior[1]=="IN" && prior[2]==row[1] &&
+                require(prior[0]==row[0] && prior[1]=="IN" && prior[2]==row[6] &&
                     prior[3]=="TRANSFER_REVERSAL" && prior[4]==transferId && prior[5]==reason) {
                     "معرّف العكس مستخدم مسبقاً لعملية أو بيانات مختلفة"
                 }
@@ -372,7 +384,7 @@ class ServiceTransferRepository(context:Context) {
             require(row[4]=="POSTED"){"عملية التحويل معكوسة مسبقاً أو غير قابلة للعكس"}
             if(!isCredit) require(cashBalance(db,receipt)>=charge){"لا يمكن عكس العملية: الرصيد المتبقي في حساب القبض أقل من المبلغ المقبوض"}
             val now=stamp()
-            insertWalletMovement(db,row[0]!!,"IN",row[1]!!.toLong(),"TRANSFER_REVERSAL",transferId,operationId,0L,reason,actor,now)
+            insertWalletMovement(db,row[0]!!,"IN",row[6]!!.toLong(),"TRANSFER_REVERSAL",transferId,operationId,0L,reason,actor,now)
             if(!isCredit) insertCashMovement(db,receipt,"OUT",charge,"SERVICE_TRANSFER_REVERSAL","SERVICE_TRANSFER_REVERSAL",transferId,operationId+":RECEIPT",actor,"عكس تحويل رصيد: $reason",now)
             else db.update("service_transfer_receivables",ContentValues().apply{put("status","REVERSED")},"transfer_id=? AND status='OPEN'",arrayOf(transferId))
             val update=ContentValues().apply{put("status","REVERSED");put("reversed_at",now);put("reversed_by",actor);put("reversal_reason",reason)}
@@ -518,6 +530,13 @@ class ServiceTransferRepository(context:Context) {
     private fun serviceName(key:String)=if(key==SYRIATEL_SHARED)"رصيد سيرياتيل المشترك" else "رصيد شام كاش"
     private fun serviceTypeName(type:String)=when(type){SYRIATEL_BALANCE->"سيرياتيل العادي";SYRIATEL_CASH->"سيرياتيل كاش";else->"شام كاش"}
     private fun percent(amount:Long,rate:Long):Long=Math.addExact(Math.multiplyExact(amount,rate),50L)/100L
+    private fun roundRatioMilli(value:Long,numerator:Long,denominator:Long):Long {
+        require(value>=0L&&numerator>=0L&&denominator>0L)
+        val product=java.math.BigInteger.valueOf(value).multiply(java.math.BigInteger.valueOf(numerator))
+        val divisor=java.math.BigInteger.valueOf(denominator)
+        return product.add(divisor.divide(java.math.BigInteger.valueOf(2L))).divide(divisor).longValueExact()
+    }
+    private fun roundMilliToWhole(value:Long):Long { require(value>=0L); return Math.addExact(value,500L)/1000L }
     private fun hash(value:String)=MessageDigest.getInstance("SHA-256").digest(value.toByteArray(Charsets.UTF_8)).joinToString(""){"%02x".format(it)}
     private fun esc(value:String)=value.replace("\\","\\\\").replace("\"","\\\"").replace("\n","\\n").replace("\r","\\r")
     private fun today()=StoreTime.today(database.readableDatabase)
