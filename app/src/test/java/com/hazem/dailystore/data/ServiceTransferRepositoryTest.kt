@@ -225,7 +225,7 @@ class ServiceTransferRepositoryTest {
         assertEquals(9_000L,repo.listWallets().single{it.serviceKey==ServiceTransferRepository.SYRIATEL_SHARED}.balanceMinor)
         val receivables=ServiceTransferReceivableRepository(context)
         val replayedTransfer=repo.executeTransfer(actor,ServiceTransferRepository.SYRIATEL_BALANCE,1_000L,0L,wallet,operationId,
-            paymentMode="CREDIT",customerId=customerId)
+            paymentMode="CREDIT",customerId=customerId,legacyBalanceDelivered=true)
         assertTrue(replayedTransfer.replayed)
         assertEquals(9_000L,repo.listWallets().single{it.serviceKey==ServiceTransferRepository.SYRIATEL_SHARED}.balanceMinor)
         val debt=receivables.listOpenReceivables(customerId).single()
