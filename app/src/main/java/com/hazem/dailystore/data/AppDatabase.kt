@@ -623,7 +623,7 @@ class AppDatabase internal constructor(context: Context, databaseName: String = 
                 transfer_id TEXT PRIMARY KEY NOT NULL,
                 customer_id TEXT NOT NULL,
                 customer_name TEXT NOT NULL,
-                service_type TEXT NOT NULL CHECK(service_type IN ('SYRIATEL_BALANCE','SYRIATEL_CASH','SHAM_CASH_TRANSFER')),
+                service_type TEXT NOT NULL CHECK(service_type IN ('SYRIATEL_BALANCE','SYRIATEL_CASH','SHAM_CASH')),
                 delivered_minor INTEGER NOT NULL CHECK(delivered_minor > 0),
                 charge_minor INTEGER NOT NULL CHECK(charge_minor > 0),
                 paid_minor INTEGER NOT NULL DEFAULT 0 CHECK(paid_minor >= 0),
