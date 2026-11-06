@@ -115,9 +115,12 @@ async function verifyCertificate(env: Env, storeId: string, deviceId: string, ce
 }
 async function verifyRevocation(env: Env, value: Revocation): Promise<boolean> {
   const root = rootTrust(env, value.store_id);
+  // A root-signed revocation may be uploaded after a long offline period.
+  // Its signature and certificate serial provide authenticity/idempotency;
+  // only timestamps implausibly in the future are rejected.
   if (!root || value.version !== 1 || !UUID.test(value.device_id) ||
       !UUID.test(value.serial) || !Number.isSafeInteger(value.revoked_at) ||
-      Math.abs(Date.now() - value.revoked_at) > 5 * 60_000) return false;
+      value.revoked_at <= 0 || value.revoked_at > Date.now() + 60_000) return false;
   return verifySignature(root.public_key, revokePayload(value), value.signature);
 }
 
