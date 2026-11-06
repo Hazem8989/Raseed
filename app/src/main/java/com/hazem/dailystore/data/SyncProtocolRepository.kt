@@ -1892,7 +1892,8 @@ class SyncProtocolRepository(private val context: Context, private val credentia
                 }
                 require(role != "PRIMARY" || local[4] in setOf(
                     "CATEGORY", "UNIT", "PRODUCT", "PRODUCT_OPENING_STOCK",
-                    "CUSTOMER", "CASH_ACCOUNT", "EXCHANGE_RATE", "STORE_SETTINGS"
+                    "CUSTOMER", "CASH_ACCOUNT", "EXCHANGE_RATE", "STORE_SETTINGS",
+                    "SERVICE_TRANSFER_RECEIVABLE"
                 )) {
                     "لا يجوز قبول إقرار من جهاز ثانوي لعملية إدارية أو مالية غير موزعة عليه"
                 }
