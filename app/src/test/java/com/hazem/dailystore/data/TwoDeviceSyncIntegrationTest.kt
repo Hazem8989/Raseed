@@ -952,6 +952,8 @@ class TwoDeviceSyncIntegrationTest {
         // First drain the setup probe so the secondary-to-primary sequence remains contiguous.
         var probeAck:String?=null
         var probeError:String?=null
+        val probeFrame=secondaryRepository.encryptedAuthenticatedOutbox(operationId,primaryId)
+        setLocalDeviceId(primaryId);AppDatabase.installForTests(primaryDb)
         val primaryProbeProcessor=SyncRelayProcessor(
             primaryRepository,SyncDomainApplier(context),
             listener=object:SyncRelayProcessor.Listener{
@@ -961,8 +963,6 @@ class TwoDeviceSyncIntegrationTest {
                 assertEquals(operationId,id);assertEquals(secondaryId,recipient);probeAck=frame;true
             }
         )
-        val probeFrame=secondaryRepository.encryptedAuthenticatedOutbox(operationId,primaryId)
-        setLocalDeviceId(primaryId);AppDatabase.installForTests(primaryDb)
         primaryProbeProcessor.onEncryptedFrame(secondaryId,operationId,probeFrame)
         assertEquals(null,probeError)
         setLocalDeviceId(secondaryId);AppDatabase.installForTests(secondaryDb)
