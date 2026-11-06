@@ -367,6 +367,9 @@ class CustomerPaymentRepository(context: Context) {
     }
 
     private fun applyRevaluations(customerId: String) {
+        // Revaluation is an authoritative accounting/audit write. A secondary may
+        // calculate the current display value, but only the primary records it.
+        if (SyncProtocolRepository(context).isConfiguredSecondary()) return
         val db = database.writableDatabase
         db.beginTransaction()
         try {
