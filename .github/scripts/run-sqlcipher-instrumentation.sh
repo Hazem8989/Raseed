@@ -3,7 +3,7 @@ set -euo pipefail
 
 REPORT_DIR="app/build/reports/sqlcipher-instrumentation"
 mkdir -p "$REPORT_DIR"
-trap 'adb logcat -d -t 4000 > "$REPORT_DIR/logcat.txt" 2>/dev/null || true' EXIT
+trap 'adb logcat -d -t 6000 > "$REPORT_DIR/logcat.txt" 2>/dev/null || true' EXIT
 
 /tmp/gradle-8.9/bin/gradle --no-daemon \
   :app:assembleDebug \
@@ -22,18 +22,38 @@ test "$(adb shell getprop sys.boot_completed | tr -d '\r')" = "1"
 adb install --no-streaming -r -t app/build/outputs/apk/debug/app-debug.apk
 adb install --no-streaming -r -t app/build/outputs/apk/androidTest/debug/app-debug-androidTest.apk
 
-set +e
-adb shell am instrument -w -r \
-  com.hazem.dailystore.test/androidx.test.runner.AndroidJUnitRunner \
-  2>&1 | tee "$REPORT_DIR/instrumentation.txt"
-instrumentation_status=${PIPESTATUS[0]}
-set -e
+run_instrumentation_class() {
+  local test_class="$1"
+  local report_file="$2"
+  echo "Running isolated instrumentation class: $test_class"
 
-if [ "$instrumentation_status" -ne 0 ]; then
-  echo "Instrumentation command failed with exit code $instrumentation_status"
-  exit "$instrumentation_status"
-fi
-if ! grep -Eq 'OK \([1-9][0-9]* tests?\)' "$REPORT_DIR/instrumentation.txt"; then
-  echo "Instrumentation did not report a passing test count."
-  exit 1
-fi
+  set +e
+  adb shell am instrument -w -r -e class "$test_class" \
+    com.hazem.dailystore.test/androidx.test.runner.AndroidJUnitRunner \
+    2>&1 | tee "$REPORT_DIR/$report_file"
+  local instrumentation_status=${PIPESTATUS[0]}
+  set -e
+
+  if [ "$instrumentation_status" -ne 0 ]; then
+    echo "Instrumentation class $test_class failed with exit code $instrumentation_status"
+    return "$instrumentation_status"
+  fi
+  if ! grep -Eq 'OK \([1-9][0-9]* tests?\)' "$REPORT_DIR/$report_file"; then
+    echo "Instrumentation class $test_class did not report a passing test count."
+    return 1
+  fi
+}
+
+# Run each suite in its own instrumentation process. This limits accumulated
+# test-process state and makes a failure attributable to one class.
+run_instrumentation_class \
+  "com.hazem.dailystore.data.DatabaseKeyVaultInstrumentedTest" \
+  "database-key-vault.txt"
+run_instrumentation_class \
+  "com.hazem.dailystore.data.DatabaseMigrationInstrumentedTest" \
+  "database-migration.txt"
+run_instrumentation_class \
+  "com.hazem.dailystore.data.SqlCipherCompatibilityInstrumentedTest" \
+  "sqlcipher-compatibility.txt"
+
+echo "All SQLCipher Android instrumentation classes passed."
