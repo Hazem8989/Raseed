@@ -1248,7 +1248,7 @@ class TwoDeviceSyncIntegrationTest {
 
         setLocalDeviceId(secondaryId);AppDatabase.installForTests(secondaryDb)
         val mirroredServiceAccount=ServiceTransferRepository(context)
-            .serviceAccountId(ServiceTransferRepository.SYRIATEL_SHARED)
+            .serviceAccountId(ServiceTransferRepository.SHAM_CASH)
         assertTrue("The secondary must receive the service-wallet link, not seed it locally",
             scalar(secondaryDb,"SELECT COUNT(*) FROM service_wallet_account_links WHERE service_key=? AND account_id=?",
                 ServiceTransferRepository.SHAM_CASH,mirroredServiceAccount)==1)
