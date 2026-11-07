@@ -60,14 +60,14 @@ internal class SqlCipherRestoreJournal(journalFile: File) {
             require(magic.contentEquals(MAGIC)) { "Invalid SQLCipher restore journal" }
             require(input.readInt() == VERSION) { "Unsupported SQLCipher restore journal version" }
             val phaseOrdinal = input.readInt()
-            require(phaseOrdinal in Phase.entries.indices) { "Invalid SQLCipher restore phase" }
+            require(phaseOrdinal in Phase.values().indices) { "Invalid SQLCipher restore phase" }
             val staging = input.readUTF()
             val destination = input.readUTF()
             require(input.read() == -1) { "Unexpected trailing restore-journal data" }
             validateName(staging)
             validateName(destination)
             require(staging != destination) { "Restore journal paths must be distinct" }
-            return Record(Phase.entries[phaseOrdinal], staging, destination)
+            return Record(Phase.values()[phaseOrdinal], staging, destination)
         } catch (error: Exception) {
             throw IllegalStateException(
                 "سجل الاستعادة تالف؛ أوقف الاستعادة واحتفظ بملفات قاعدة البيانات دون حذفها",
