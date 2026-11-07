@@ -35,9 +35,9 @@ class SqlCipherSameDeviceRestoreInstrumentedTest {
             val vault = DatabaseKeyVault(context, metadataName, alias)
             var liveValue = -1L
             try {
+                vault.importDatabaseKey(oldKey, databaseExists = false)
                 createDatabase(live, oldKey, 111L)
                 createDatabase(staged, newKey, 222L)
-                vault.importDatabaseKey(oldKey, databaseExists = true)
 
                 val coordinator = SqlCipherSameDeviceRestoreCoordinator(
                     context,
@@ -58,6 +58,10 @@ class SqlCipherSameDeviceRestoreInstrumentedTest {
                     // A fresh coordinator instance simulates a process restart.
                 }
 
+                val journalRecord = SqlCipherSameDeviceRestoreJournal(
+                    File(context.noBackupFilesDir, journalName)
+                ).read() ?: error("Expected durable recovery journal")
+                val snapshotFile = File(context.noBackupFilesDir, journalRecord.keySnapshotName)
                 val recovered = SqlCipherSameDeviceRestoreCoordinator(context, journalName)
                     .recover(vault)
                 val shouldCommitNew = stopAt == SqlCipherSameDeviceRestoreCoordinator.Checkpoint.NEW_DATABASE_RENAMED ||
@@ -75,6 +79,7 @@ class SqlCipherSameDeviceRestoreInstrumentedTest {
                 assertEquals(if (shouldCommitNew) 222L else 111L, liveValue)
                 assertFalse(File(live.path + ".sqlcipher-rollback").exists())
                 assertFalse(File(context.noBackupFilesDir, journalName).exists())
+                assertFalse(snapshotFile.exists())
                 assertFalse(staged.exists())
             } finally {
                 oldKey.fill(0)
@@ -89,9 +94,6 @@ class SqlCipherSameDeviceRestoreInstrumentedTest {
                 File(context.noBackupFilesDir, "$metadataName.bak").delete()
                 File(context.noBackupFilesDir, journalName).delete()
                 File(context.noBackupFilesDir, "$journalName.bak").delete()
-                context.noBackupFilesDir.listFiles()
-                    ?.filter { it.name.startsWith("tds-same-device-key-") && it.name.endsWith(".bin") }
-                    ?.forEach { it.delete() }
                 runCatching {
                     val store = KeyStore.getInstance("AndroidKeyStore").apply { load(null) }
                     if (store.containsAlias(alias)) store.deleteEntry(alias)
@@ -113,9 +115,9 @@ class SqlCipherSameDeviceRestoreInstrumentedTest {
         val newKey = ByteArray(32).also(SecureRandom()::nextBytes)
         val vault = DatabaseKeyVault(context, metadataName, alias)
         try {
+            vault.importDatabaseKey(oldKey, databaseExists = false)
             createDatabase(live, oldKey, 333L)
             staged.writeText("not a SQLCipher database")
-            vault.importDatabaseKey(oldKey, databaseExists = true)
             try {
                 SqlCipherSameDeviceRestoreCoordinator(context).commit(
                     staged, live, newKey, vault, closeLiveDatabase = {}
