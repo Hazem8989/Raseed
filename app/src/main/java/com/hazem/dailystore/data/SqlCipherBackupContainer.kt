@@ -99,4 +99,37 @@ internal object SqlCipherBackupContainer {
             throw IllegalArgumentException("Backup container is invalid or cannot be recovered", error)
         }
     }
+    
+    /**
+     * Recovers only the password-wrapped database key after process death.
+     * It validates the container length and EOF without rewriting the staged DB.
+     */
+    fun recoverDatabaseKey(source: InputStream, password: CharArray): ByteArray {
+        var recoveredKey: ByteArray? = null
+        try {
+            val input = DataInputStream(source)
+            val foundMagic = ByteArray(magic.size).also(input::readFully)
+            require(foundMagic.contentEquals(magic)) { "Unknown backup container" }
+            require(input.readInt() == VERSION) { "Unsupported backup container version" }
+            require(input.readInt() == ENVELOPE_BYTES) { "Invalid key-envelope length" }
+            val databaseLength = input.readLong()
+            require(databaseLength in 1..MAX_DATABASE_BYTES) { "Invalid database payload length" }
+            val envelope = ByteArray(ENVELOPE_BYTES).also(input::readFully)
+            recoveredKey = BackupKeyEnvelope.unwrap(envelope, password)
+
+            val buffer = ByteArray(DEFAULT_BUFFER_SIZE)
+            var remaining = databaseLength
+            while (remaining > 0L) {
+                val count = input.read(buffer, 0, minOf(buffer.size.toLong(), remaining).toInt())
+                if (count < 0) throw EOFException("Truncated SQLCipher database payload")
+                remaining -= count.toLong()
+            }
+            require(input.read() == -1) { "Unexpected trailing data in backup container" }
+            return recoveredKey.also { recoveredKey = null }
+        } catch (error: Exception) {
+            recoveredKey?.fill(0)
+            throw IllegalArgumentException("Backup key cannot be recovered from this container", error)
+        }
+    }
+
 }
