@@ -565,6 +565,64 @@ class SqlCipherBackupRestoreInstrumentedTest {
         }
     }
 
+    @Test
+    fun sameDeviceKeyReplacementRequiresExpectedKeyAndCanRestoreWrappedRollbackSnapshot() {
+        val context = InstrumentationRegistry.getInstrumentation().targetContext as Context
+        val suffix = UUID.randomUUID().toString().replace("-", "")
+        val metadata = "same-device-key-$suffix.bin"
+        val alias = "tds_same_device_$suffix"
+        val vault = DatabaseKeyVault(context, metadata, alias)
+        val original = ByteArray(32).also(java.security.SecureRandom()::nextBytes)
+        val replacement = ByteArray(32).also(java.security.SecureRandom()::nextBytes)
+        val wrongExpected = ByteArray(32).also(java.security.SecureRandom()::nextBytes)
+        try {
+            val created = vault.getOrCreateDatabaseKey(databaseExists = false)
+            try {
+                assertArrayEquals(original, created)
+            } finally {
+                created.fill(0)
+            }
+            val wrappedSnapshot = vault.snapshotWrappedKeyMetadata()
+            assertFalse(wrappedSnapshot.contentEquals(original))
+            try {
+                vault.replaceDatabaseKeyForRestore(replacement, wrongExpected)
+                throw AssertionError("Key replacement accepted an unexpected current key")
+            } catch (_: DatabaseKeyVault.DatabaseKeyException) { }
+            val stillOriginal = vault.getOrCreateDatabaseKey(databaseExists = true)
+            try {
+                assertArrayEquals(original, stillOriginal)
+            } finally {
+                stillOriginal.fill(0)
+            }
+
+            vault.replaceDatabaseKeyForRestore(replacement, original)
+            val nowReplacement = vault.getOrCreateDatabaseKey(databaseExists = true)
+            try {
+                assertArrayEquals(replacement, nowReplacement)
+            } finally {
+                nowReplacement.fill(0)
+            }
+
+            vault.restoreWrappedKeyMetadata(wrappedSnapshot)
+            val rolledBack = vault.getOrCreateDatabaseKey(databaseExists = true)
+            try {
+                assertArrayEquals(original, rolledBack)
+            } finally {
+                rolledBack.fill(0)
+            }
+        } finally {
+            original.fill(0)
+            replacement.fill(0)
+            wrongExpected.fill(0)
+            File(context.noBackupFilesDir, metadata).delete()
+            File(context.noBackupFilesDir, "$metadata.bak").delete()
+            runCatching {
+                val store = KeyStore.getInstance("AndroidKeyStore").apply { load(null) }
+                if (store.containsAlias(alias)) store.deleteEntry(alias)
+            }
+        }
+    }
+
     private fun openEncrypted(file: File, rawKey: ByteArray): SQLiteDatabase {
         // Context.getDatabasePath() returns the intended path but does not create
         // the databases/ parent directory. SQLCipher openDatabase() does not create
