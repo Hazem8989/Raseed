@@ -86,7 +86,16 @@ class DatabaseKeyVault(
             throw DatabaseKeyException("لا يمكن استيراد مفتاح إلى جهاز يحتوي على قاعدة بيانات موجودة")
         }
         if (hasMetadata()) {
-            throw DatabaseKeyException("يوجد مفتاح قاعدة بيانات محلي بالفعل؛ رُفض استبداله")
+            // A restore may be retried after a process interruption between key
+            // import and the atomic database-file rename. Accept only the exact
+            // same key; never replace a different or unreadable local key.
+            val existingKey = decryptExistingKey()
+            try {
+                if (java.security.MessageDigest.isEqual(existingKey, databaseKey)) return
+                throw DatabaseKeyException("يوجد مفتاح قاعدة بيانات محلي مختلف؛ رُفض استبداله")
+            } finally {
+                existingKey.fill(0)
+            }
         }
 
         // An orphaned alias can remain after an interrupted first-time setup.
