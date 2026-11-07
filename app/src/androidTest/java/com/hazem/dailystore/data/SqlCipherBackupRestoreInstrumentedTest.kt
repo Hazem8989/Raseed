@@ -582,7 +582,7 @@ class SqlCipherBackupRestoreInstrumentedTest {
             try {
                 vault.replaceDatabaseKeyForRestore(replacement, wrongExpected)
                 throw AssertionError("Key replacement accepted an unexpected current key")
-            } catch (_: DatabaseKeyVault.DatabaseKeyException) { }
+            } catch (_: IllegalStateException) { }
             val stillOriginal = vault.getOrCreateDatabaseKey(databaseExists = true)
             try {
                 assertArrayEquals(original, stillOriginal)
