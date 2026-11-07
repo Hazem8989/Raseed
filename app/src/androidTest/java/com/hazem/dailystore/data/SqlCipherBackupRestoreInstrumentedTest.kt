@@ -514,7 +514,7 @@ class SqlCipherBackupRestoreInstrumentedTest {
                 coordinator.recover(staging.parentFile!!, vault))
             assertFalse(staging.exists())
             assertTrue(destination.isFile)
-            assertNull(journal.read())
+            assertTrue(journal.read() == null)
             val imported = vault.getOrCreateDatabaseKey(databaseExists = true)
             try {
                 db = openEncrypted(destination, imported)
