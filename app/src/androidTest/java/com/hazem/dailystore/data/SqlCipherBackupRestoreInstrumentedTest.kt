@@ -164,7 +164,6 @@ class SqlCipherBackupRestoreInstrumentedTest {
             sourceKey?.fill(0)
             recoveredKey?.fill(0)
             password.fill('\u0000')
-            wrongPassword.fill('\u0000')
             listOf(source, staged, restored).forEach { file ->
                 file.delete()
                 File(file.path + "-wal").delete()
