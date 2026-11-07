@@ -37,6 +37,65 @@ class DatabaseKeyVaultInstrumentedTest {
     }
 
     @Test
+    fun importsRecoveredKeyAndWrapsItWithThisDevicesKeystoreKey() {
+        val fixture = Fixture()
+        val recoveredKey = ByteArray(32) { (it * 13 + 2).toByte() }
+        try {
+            fixture.vault.importDatabaseKey(recoveredKey, databaseExists = false)
+            val loaded = fixture.vault.getOrCreateDatabaseKey(databaseExists = true)
+            try {
+                assertArrayEquals(recoveredKey, loaded)
+                assertTrue(fixture.metadata.exists())
+                assertTrue(hasKeystoreAlias(fixture.alias))
+            } finally {
+                loaded.fill(0)
+            }
+        } finally {
+            recoveredKey.fill(0)
+            fixture.cleanUp()
+        }
+    }
+
+    @Test
+    fun refusesToImportWhenDatabaseAlreadyExists() {
+        val fixture = Fixture()
+        try {
+            assertThrows(DatabaseKeyVault.DatabaseKeyException::class.java) {
+                fixture.vault.importDatabaseKey(ByteArray(32), databaseExists = true)
+            }
+            assertFalse(fixture.metadata.exists())
+            assertFalse(hasKeystoreAlias(fixture.alias))
+        } finally {
+            fixture.cleanUp()
+        }
+    }
+
+    @Test
+    fun refusesToReplaceAnExistingLocalKey() {
+        val fixture = Fixture()
+        try {
+            val original = fixture.vault.getOrCreateDatabaseKey(databaseExists = false)
+            val replacement = ByteArray(32) { 0x5a }
+            try {
+                assertThrows(DatabaseKeyVault.DatabaseKeyException::class.java) {
+                    fixture.vault.importDatabaseKey(replacement, databaseExists = false)
+                }
+                val loaded = fixture.vault.getOrCreateDatabaseKey(databaseExists = true)
+                try {
+                    assertArrayEquals(original, loaded)
+                } finally {
+                    loaded.fill(0)
+                }
+            } finally {
+                original.fill(0)
+                replacement.fill(0)
+            }
+        } finally {
+            fixture.cleanUp()
+        }
+    }
+
+    @Test
     fun refusesToCreateReplacementKeyWhenDatabaseExistsButMetadataIsMissing() {
         val fixture = Fixture()
         try {
