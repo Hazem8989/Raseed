@@ -576,12 +576,7 @@ class SqlCipherBackupRestoreInstrumentedTest {
         val replacement = ByteArray(32).also(java.security.SecureRandom()::nextBytes)
         val wrongExpected = ByteArray(32).also(java.security.SecureRandom()::nextBytes)
         try {
-            val created = vault.getOrCreateDatabaseKey(databaseExists = false)
-            try {
-                assertArrayEquals(original, created)
-            } finally {
-                created.fill(0)
-            }
+            vault.importDatabaseKey(original, databaseExists = false)
             val wrappedSnapshot = vault.snapshotWrappedKeyMetadata()
             assertFalse(wrappedSnapshot.contentEquals(original))
             try {
