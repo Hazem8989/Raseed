@@ -5,6 +5,7 @@ REPORT_DIR="app/build/reports/sqlcipher-instrumentation"
 mkdir -p "$REPORT_DIR"
 trap 'adb logcat -d -t 6000 > "$REPORT_DIR/logcat.txt" 2>/dev/null || true' EXIT
 
+SUITE="${1:-all}"
 /tmp/gradle-8.9/bin/gradle --no-daemon \
   :app:assembleDebug \
   :app:assembleDebugAndroidTest \
@@ -22,44 +23,50 @@ test "$(adb shell getprop sys.boot_completed | tr -d '\r')" = "1"
 adb install --no-streaming -r -t app/build/outputs/apk/debug/app-debug.apk
 adb install --no-streaming -r -t app/build/outputs/apk/androidTest/debug/app-debug-androidTest.apk
 
-run_instrumentation_class() {
-  local test_class="$1"
+run_instrumentation() {
+  local selector="$1"
   local report_file="$2"
-  echo "Running isolated instrumentation class: $test_class"
-
+  echo "Running isolated instrumentation selector: $selector"
   set +e
-  adb shell am instrument -w -r -e class "$test_class" \
+  adb shell am instrument -w -r -e class "$selector" \
     com.hazem.dailystore.test/androidx.test.runner.AndroidJUnitRunner \
     2>&1 | tee "$REPORT_DIR/$report_file"
   local instrumentation_status=${PIPESTATUS[0]}
   set -e
-
   if [ "$instrumentation_status" -ne 0 ]; then
-    echo "Instrumentation class $test_class failed with exit code $instrumentation_status"
+    echo "Instrumentation selector $selector failed with exit code $instrumentation_status"
     return "$instrumentation_status"
   fi
   if ! grep -Eq 'OK \([1-9][0-9]* tests?\)' "$REPORT_DIR/$report_file"; then
-    echo "Instrumentation class $test_class did not report a passing test count."
+    echo "Instrumentation selector $selector did not report a passing test count."
     return 1
   fi
 }
 
-# Run each suite in its own instrumentation process. This limits accumulated
-# test-process state and makes a failure attributable to one class.
-run_instrumentation_class \
-  "com.hazem.dailystore.data.DatabaseKeyVaultInstrumentedTest" \
-  "database-key-vault.txt"
-run_instrumentation_class \
-  "com.hazem.dailystore.data.DatabaseMigrationInstrumentedTest" \
-  "database-migration.txt"
-run_instrumentation_class \
-  "com.hazem.dailystore.data.SqlCipherDatabaseMigratorInstrumentedTest" \
-  "sqlcipher-database-migrator.txt"
-run_instrumentation_class \
-  "com.hazem.dailystore.data.SqlCipherCompatibilityInstrumentedTest" \
-  "sqlcipher-compatibility.txt"
-run_instrumentation_class \
-  "com.hazem.dailystore.data.SqlCipherBackupRestoreInstrumentedTest" \
-  "sqlcipher-backup-restore.txt"
+case "$SUITE" in
+  core)
+    run_instrumentation "com.hazem.dailystore.data.DatabaseKeyVaultInstrumentedTest" "database-key-vault.txt"
+    run_instrumentation "com.hazem.dailystore.data.DatabaseMigrationInstrumentedTest" "database-migration.txt"
+    run_instrumentation "com.hazem.dailystore.data.SqlCipherDatabaseMigratorInstrumentedTest" "sqlcipher-database-migrator.txt"
+    run_instrumentation "com.hazem.dailystore.data.SqlCipherCompatibilityInstrumentedTest" "sqlcipher-compatibility.txt"
+    ;;
+  coordinator)
+    run_instrumentation "com.hazem.dailystore.data.SqlCipherBackupRestoreInstrumentedTest#restoreCoordinatorWaitsForMissingKeyAndResumesAfterKeyImport" "restore-coordinator.txt"
+    ;;
+  end_to_end)
+    run_instrumentation "com.hazem.dailystore.data.SqlCipherBackupRestoreInstrumentedTest#encryptedDatabaseBackupRestoresOnFreshDeviceVaultWithAllDataIntact" "restore-end-to-end.txt"
+    ;;
+  pipeline)
+    run_instrumentation "com.hazem.dailystore.data.SqlCipherBackupRestoreInstrumentedTest#pipelineRoundTripsAndRejectsWrongPasswordAndTamperedPayload" "backup-pipeline.txt"
+    run_instrumentation "com.hazem.dailystore.data.SqlCipherBackupRestoreInstrumentedTest#pipelineRejectsNonEmptyDestinationAndKeyVaultRejectsDifferentKeyButAllowsRetry" "backup-rejection-safety.txt"
+    run_instrumentation "com.hazem.dailystore.data.SqlCipherBackupRestoreInstrumentedTest#restoreJournalPersistsMonotonicPhasesWithoutStoringSecrets" "restore-journal-phases.txt"
+    run_instrumentation "com.hazem.dailystore.data.SqlCipherBackupRestoreInstrumentedTest#restoreJournalRejectsSkippedOrReversedPhasesAndDifferentPaths" "restore-journal-order.txt"
+    run_instrumentation "com.hazem.dailystore.data.SqlCipherBackupRestoreInstrumentedTest#restoreJournalCorruptionFailsClosedAndPreservesDatabaseFiles" "restore-journal-corruption.txt"
+    ;;
+  *)
+    echo "Unknown SQLCipher test suite: $SUITE" >&2
+    exit 2
+    ;;
+esac
 
-echo "All SQLCipher Android instrumentation classes passed."
+echo "SQLCipher Android instrumentation suite '$SUITE' passed."
