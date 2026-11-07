@@ -55,6 +55,41 @@ internal class SqlCipherRestoreCoordinator(
         journal.clear()
     }
 
+
+    /**
+     * Resumes a restore when the process died before the recovered key reached
+     * the device vault. The user must reselect the same password-protected backup.
+     * The encrypted staged DB is preserved and validated before it is committed.
+     */
+    fun resumeFromBackup(
+        source: java.io.InputStream,
+        password: CharArray,
+        databaseDirectory: File,
+        keyVault: DatabaseKeyVault
+    ): RecoveryResult {
+        val record = journal.read() ?: return RecoveryResult.NOTHING_TO_RECOVER
+        val destination = resolveChild(databaseDirectory, record.destinationName)
+        val recoveredKey = SqlCipherBackupContainer.recoverDatabaseKey(source, password)
+        try {
+            if (destination.exists()) {
+                val localKey = keyVault.getImportedDatabaseKeyForRestoreRecovery()
+                    ?: throw IllegalStateException("قاعدة الاستعادة موجودة لكن مفتاحها المحلي مفقود؛ أوقف العملية")
+                try {
+                    check(java.security.MessageDigest.isEqual(localKey, recoveredKey)) {
+                        "مفتاح النسخة لا يطابق المفتاح المحلي؛ رُفض الاستبدال"
+                    }
+                } finally {
+                    localKey.fill(0)
+                }
+            } else {
+                keyVault.importDatabaseKey(recoveredKey, databaseExists = false)
+            }
+            return recover(databaseDirectory, keyVault)
+        } finally {
+            recoveredKey.fill(0)
+        }
+    }
+
     /**
      * Reconciles only files named by the journal. If the key was not imported
      * before interruption, returns WAITING_FOR_KEY and preserves every file.
