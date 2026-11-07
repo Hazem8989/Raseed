@@ -76,8 +76,9 @@ class DatabaseKeyVault(
      * Imports a recovered SQLCipher key onto a new device by wrapping it with
      * this device's non-exportable Android Keystore key.
      *
-     * This is intentionally allowed only before a live database or key metadata
-     * exists. It never overwrites an existing database key or database.
+     * This is allowed only before a live database exists. If key metadata is
+     * already present, only an exact same-key retry is accepted; a different or
+     * unreadable key is never replaced.
      */
     @Synchronized
     fun importDatabaseKey(databaseKey: ByteArray, databaseExists: Boolean) {
