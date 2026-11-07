@@ -115,6 +115,16 @@ class DatabaseKeyVault(
         }
     }
 
+    /**
+     * Loads an already-imported key for interrupted restore recovery without
+     * creating or replacing any key. Null means no local key metadata exists.
+     */
+    @Synchronized
+    internal fun getImportedDatabaseKeyForRestoreRecovery(): ByteArray? {
+        if (!hasMetadata()) return null
+        return decryptExistingKey()
+    }
+
     private fun hasMetadata(): Boolean {
         val backup = File(metadataFile.path + ".bak")
         return metadataFile.exists() || backup.exists()
