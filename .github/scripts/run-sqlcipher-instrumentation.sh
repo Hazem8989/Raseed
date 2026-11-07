@@ -55,5 +55,8 @@ run_instrumentation_class \
 run_instrumentation_class \
   "com.hazem.dailystore.data.SqlCipherCompatibilityInstrumentedTest" \
   "sqlcipher-compatibility.txt"
+run_instrumentation_class \
+  "com.hazem.dailystore.data.SqlCipherBackupRestoreInstrumentedTest" \
+  "sqlcipher-backup-restore.txt"
 
 echo "All SQLCipher Android instrumentation classes passed."
