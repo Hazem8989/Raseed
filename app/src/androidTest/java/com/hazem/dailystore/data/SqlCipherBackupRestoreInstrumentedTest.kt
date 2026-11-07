@@ -496,6 +496,17 @@ class SqlCipherBackupRestoreInstrumentedTest {
         val vault = DatabaseKeyVault(context, metadata, alias)
         var db: SQLiteDatabase? = null
         try {
+            // SQLCipher openDatabase() requires the target file to exist on this
+            // Android runtime. getDatabasePath() resolves the path but does not
+            // create the file; create it explicitly before opening the staged DB.
+            val databaseDirectory = staging.parentFile
+                ?: error("Application database directory is unavailable")
+            check(databaseDirectory.isDirectory || databaseDirectory.mkdirs()) {
+                "Unable to create application database directory"
+            }
+            check(staging.createNewFile()) {
+                "Unable to pre-create SQLCipher staging database: ${staging.absolutePath}"
+            }
             db = openEncrypted(staging, key)
             db.execSQL("CREATE TABLE restore_probe(id TEXT PRIMARY KEY, amount INTEGER NOT NULL)")
             db.execSQL("INSERT INTO restore_probe VALUES('probe-1', 8800)")
