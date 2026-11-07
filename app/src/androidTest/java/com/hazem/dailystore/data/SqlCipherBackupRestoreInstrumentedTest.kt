@@ -481,6 +481,71 @@ class SqlCipherBackupRestoreInstrumentedTest {
         }
     }
 
+
+    @Test
+    fun restoreCoordinatorWaitsForMissingKeyAndResumesAfterKeyImport() {
+        val context = InstrumentationRegistry.getInstrumentation().targetContext as Context
+        val suffix = UUID.randomUUID().toString().replace("-", "")
+        val staging = context.getDatabasePath("coordinator-stage-$suffix.db")
+        val destination = context.getDatabasePath("coordinator-destination-$suffix.db")
+        val journalFile = File(context.noBackupFilesDir, "coordinator-journal-$suffix.bin")
+        val metadata = "coordinator-key-$suffix.bin"
+        val alias = "tds_coordinator_$suffix"
+        val key = ByteArray(32).also(java.security.SecureRandom()::nextBytes)
+        val vault = DatabaseKeyVault(context, metadata, alias)
+        var db: SQLiteDatabase? = null
+        try {
+            db = openEncrypted(staging, key)
+            db.execSQL("CREATE TABLE restore_probe(id TEXT PRIMARY KEY, amount INTEGER NOT NULL)")
+            db.execSQL("INSERT INTO restore_probe VALUES('probe-1', 8800)")
+            db.close()
+            db = null
+            val journal = SqlCipherRestoreJournal(journalFile)
+            journal.begin(staging, destination)
+            val coordinator = SqlCipherRestoreCoordinator(journal)
+
+            assertEquals(SqlCipherRestoreCoordinator.RecoveryResult.WAITING_FOR_KEY,
+                coordinator.recover(staging.parentFile!!, vault))
+            assertTrue(staging.isFile)
+            assertFalse(destination.exists())
+
+            vault.importDatabaseKey(key, databaseExists = false)
+            assertEquals(SqlCipherRestoreCoordinator.RecoveryResult.RESTORE_COMPLETED,
+                coordinator.recover(staging.parentFile!!, vault))
+            assertFalse(staging.exists())
+            assertTrue(destination.isFile)
+            assertNull(journal.read())
+            val imported = vault.getOrCreateDatabaseKey(databaseExists = true)
+            try {
+                db = openEncrypted(destination, imported)
+                db.rawQuery("SELECT amount FROM restore_probe", null).use { cursor ->
+                    assertTrue(cursor.moveToFirst())
+                    assertEquals(8800, cursor.getLong(0))
+                }
+                assertIntegrity(db)
+            } finally {
+                imported.fill(0)
+            }
+        } finally {
+            db?.close()
+            key.fill(0)
+            listOf(staging, destination).forEach { file ->
+                file.delete()
+                File(file.path + "-wal").delete()
+                File(file.path + "-shm").delete()
+                File(file.path + "-journal").delete()
+            }
+            journalFile.delete()
+            File(journalFile.path + ".bak").delete()
+            File(context.noBackupFilesDir, metadata).delete()
+            File(context.noBackupFilesDir, "$metadata.bak").delete()
+            runCatching {
+                val store = KeyStore.getInstance("AndroidKeyStore").apply { load(null) }
+                if (store.containsAlias(alias)) store.deleteEntry(alias)
+            }
+        }
+    }
+
     private fun openEncrypted(file: File, rawKey: ByteArray): SQLiteDatabase {
         // Context.getDatabasePath() returns the intended path but does not create
         // the databases/ parent directory. SQLCipher openDatabase() does not create
