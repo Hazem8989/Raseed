@@ -209,6 +209,18 @@ class SqlCipherBackupRestoreInstrumentedTest {
             db.close()
             db = null
 
+            // A non-empty WAL means the caller did not complete the checkpoint/close phase.
+            val pendingWal = File(source.path + "-wal")
+            pendingWal.writeBytes(byteArrayOf(0x01))
+            try {
+                pipeline.createBackup(source, key, password, ByteArrayOutputStream())
+                throw AssertionError("Backup accepted a non-empty WAL sidecar")
+            } catch (_: IllegalArgumentException) {
+                assertTrue(source.isFile)
+            } finally {
+                pendingWal.delete()
+            }
+
             val backup = ByteArrayOutputStream()
             pipeline.createBackup(source, key, password, backup)
             val backupBytes = backup.toByteArray()
