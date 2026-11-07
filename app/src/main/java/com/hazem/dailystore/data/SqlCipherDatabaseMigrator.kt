@@ -2,6 +2,8 @@ package com.hazem.dailystore.data
 
 import net.zetetic.database.sqlcipher.SQLiteDatabase
 import java.io.File
+import java.nio.ByteBuffer
+import java.security.MessageDigest
 
 /**
  * Isolated, non-destructive export primitive for the one-time plaintext-to-SQLCipher
@@ -63,7 +65,7 @@ internal object SqlCipherDatabaseMigrator {
                 destination, databaseKey.toHex().toByteArray(Charsets.US_ASCII)
             )
             check(sourceSnapshot == encryptedSnapshot) {
-                "تختلف بنية الجداول أو أعداد السجلات بعد التصدير؛ رُفض اعتماد الملف"
+                "يختلف محتوى قاعدة البيانات أو مخططها بعد التصدير؛ رُفض اعتماد الملف"
             }
         } catch (error: Exception) {
             destination.delete()
@@ -109,13 +111,23 @@ internal object SqlCipherDatabaseMigrator {
         }
     }
 
+    private data class TableContentDigest(
+        val rowCount: Long,
+        val sha256: String
+    )
 
     private data class DatabaseSnapshot(
         val version: Int,
         val schema: List<List<String?>>,
-        val rowCounts: Map<String, Long>
+        val tableDigests: Map<String, TableContentDigest>
     )
 
+    /**
+     * Hashes typed SQLite values, not their display strings. Row hashes are sorted so
+     * equivalent tables compare equal even if SQLite returns rows in a different order.
+     * sqlite_sequence is included separately because it is an internal table and is
+     * omitted from the normal sqlite_master schema listing.
+     */
     private fun snapshot(database: SQLiteDatabase): DatabaseSnapshot {
         val schema = mutableListOf<List<String?>>()
         val tables = mutableListOf<String>()
@@ -133,15 +145,62 @@ internal object SqlCipherDatabaseMigrator {
                 if (row[0] == "table") tables += requireNotNull(row[1])
             }
         }
-        val counts = linkedMapOf<String, Long>()
-        tables.forEach { table ->
+        val hasSequence = database.rawQuery(
+            "SELECT 1 FROM sqlite_master WHERE type='table' AND name='sqlite_sequence' LIMIT 1",
+            null
+        ).use { it.moveToFirst() }
+        if (hasSequence) tables += "sqlite_sequence"
+
+        val digests = linkedMapOf<String, TableContentDigest>()
+        tables.sorted().forEach { table ->
             val escaped = table.replace("\"", "\"\"")
-            database.rawQuery("SELECT COUNT(*) FROM \"$escaped\"", null).use { cursor ->
-                check(cursor.moveToFirst())
-                counts[table] = cursor.getLong(0)
+            val rowHashes = mutableListOf<String>()
+            database.rawQuery("SELECT * FROM \"$escaped\"", null).use { cursor ->
+                while (cursor.moveToNext()) {
+                    val rowDigest = MessageDigest.getInstance("SHA-256")
+                    for (column in 0 until cursor.columnCount) {
+                        when (cursor.getType(column)) {
+                            android.database.Cursor.FIELD_TYPE_NULL -> rowDigest.update(0)
+                            android.database.Cursor.FIELD_TYPE_INTEGER -> {
+                                rowDigest.update(1)
+                                updateLong(rowDigest, cursor.getLong(column))
+                            }
+                            android.database.Cursor.FIELD_TYPE_FLOAT -> {
+                                rowDigest.update(2)
+                                updateLong(rowDigest, java.lang.Double.doubleToLongBits(cursor.getDouble(column)))
+                            }
+                            android.database.Cursor.FIELD_TYPE_STRING -> {
+                                rowDigest.update(3)
+                                updateBytes(rowDigest, cursor.getString(column).toByteArray(Charsets.UTF_8))
+                            }
+                            android.database.Cursor.FIELD_TYPE_BLOB -> {
+                                rowDigest.update(4)
+                                updateBytes(rowDigest, cursor.getBlob(column))
+                            }
+                            else -> error("نوع بيانات SQLite غير مدعوم في مقارنة الترحيل")
+                        }
+                    }
+                    rowHashes += rowDigest.digest().toHex()
+                }
             }
+            rowHashes.sort()
+            val tableDigest = MessageDigest.getInstance("SHA-256")
+            updateLong(tableDigest, rowHashes.size.toLong())
+            rowHashes.forEach { rowHash ->
+                updateBytes(tableDigest, rowHash.toByteArray(Charsets.US_ASCII))
+            }
+            digests[table] = TableContentDigest(rowHashes.size.toLong(), tableDigest.digest().toHex())
         }
-        return DatabaseSnapshot(database.version, schema, counts)
+        return DatabaseSnapshot(database.version, schema, digests)
+    }
+
+    private fun updateLong(digest: MessageDigest, value: Long) {
+        digest.update(ByteBuffer.allocate(Long.SIZE_BYTES).putLong(value).array())
+    }
+
+    private fun updateBytes(digest: MessageDigest, value: ByteArray) {
+        digest.update(ByteBuffer.allocate(Int.SIZE_BYTES).putInt(value.size).array())
+        digest.update(value)
     }
 
     private fun openSnapshot(file: File, passphrase: ByteArray): DatabaseSnapshot {
