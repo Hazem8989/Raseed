@@ -72,6 +72,39 @@ class DatabaseKeyVault(
         }
     }
 
+    /**
+     * Imports a recovered SQLCipher key onto a new device by wrapping it with
+     * this device's non-exportable Android Keystore key.
+     *
+     * This is intentionally allowed only before a live database or key metadata
+     * exists. It never overwrites an existing database key or database.
+     */
+    @Synchronized
+    fun importDatabaseKey(databaseKey: ByteArray, databaseExists: Boolean) {
+        require(databaseKey.size == DATABASE_KEY_BYTES) { "SQLCipher key must be 256 bits" }
+        if (databaseExists) {
+            throw DatabaseKeyException("لا يمكن استيراد مفتاح إلى جهاز يحتوي على قاعدة بيانات موجودة")
+        }
+        if (hasMetadata()) {
+            throw DatabaseKeyException("يوجد مفتاح قاعدة بيانات محلي بالفعل؛ رُفض استبداله")
+        }
+
+        // An orphaned alias can remain after an interrupted first-time setup.
+        // With no database and no metadata, it is safe to replace that alias.
+        deleteWrappingKeyIfPresent()
+        try {
+            val wrappingKey = createWrappingKey()
+            val cipher = Cipher.getInstance(TRANSFORMATION)
+            cipher.init(Cipher.ENCRYPT_MODE, wrappingKey)
+            val header = metadataHeader()
+            cipher.updateAAD(header)
+            val encryptedKey = cipher.doFinal(databaseKey)
+            writeMetadata(header, cipher.iv, encryptedKey)
+        } catch (error: Exception) {
+            throw DatabaseKeyException("تعذر استيراد مفتاح قاعدة البيانات إلى هذا الجهاز", error)
+        }
+    }
+
     private fun hasMetadata(): Boolean {
         val backup = File(metadataFile.path + ".bak")
         return metadataFile.exists() || backup.exists()
