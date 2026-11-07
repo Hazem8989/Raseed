@@ -21,7 +21,9 @@ jobs:
   sqlcipher-instrumentation:
     name: Verify SQLCipher - ${{ matrix.suite }}
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    # The complete pipeline suite previously passed close to the 45-minute ceiling.
+    # Leave headroom for emulator and Gradle cold-start variance.
+    timeout-minutes: 60
     strategy:
       fail-fast: false
       matrix:
