@@ -83,6 +83,11 @@ internal class SqlCipherBackupRestorePipeline {
         require(!destinationDatabase.exists()) {
             "جهاز الاستعادة يحتوي على قاعدة بيانات؛ رُفض الاستبدال"
         }
+        require(
+            !File(destinationDatabase.path + "-wal").exists() &&
+                !File(destinationDatabase.path + "-shm").exists() &&
+                !File(destinationDatabase.path + "-journal").exists()
+        ) { "توجد ملفات جانبية لقاعدة سابقة؛ رُفضت الاستعادة الآمنة" }
         val stagingParent = stagingFile.canonicalFile.parentFile
         val destinationParent = destinationDatabase.canonicalFile.parentFile
         require(stagingParent == destinationParent) {
