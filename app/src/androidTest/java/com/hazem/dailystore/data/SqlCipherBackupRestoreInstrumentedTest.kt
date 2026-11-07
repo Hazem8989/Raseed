@@ -57,6 +57,22 @@ class SqlCipherBackupRestoreInstrumentedTest {
 
         try {
             check(!source.exists() && !staged.exists() && !restored.exists())
+
+            // getDatabasePath() only resolves the path; it does not create the
+            // app-private databases directory or the database file. Create both
+            // explicitly before SQLCipher opens the brand-new source database.
+            val databaseDirectory = source.parentFile
+                ?: error("Application database directory is unavailable")
+            check(databaseDirectory.isDirectory || databaseDirectory.mkdirs()) {
+                "Unable to create application database directory: ${databaseDirectory.absolutePath}"
+            }
+            check(databaseDirectory.canWrite()) {
+                "Application database directory is not writable: ${databaseDirectory.absolutePath}"
+            }
+            check(source.createNewFile()) {
+                "Unable to pre-create SQLCipher source database: ${source.absolutePath}"
+            }
+
             sourceKey = sourceVault.getOrCreateDatabaseKey(databaseExists = false)
             sourceDb = openEncrypted(source, sourceKey)
             sourceDb.execSQL("PRAGMA foreign_keys=ON")
