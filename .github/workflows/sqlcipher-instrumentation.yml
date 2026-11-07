@@ -19,9 +19,17 @@ concurrency:
 
 jobs:
   sqlcipher-instrumentation:
-    name: Verify SQLCipher on Android runtime
+    name: Verify SQLCipher - ${{ matrix.suite }}
     runs-on: ubuntu-latest
     timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        suite:
+          - core
+          - coordinator
+          - end_to_end
+          - pipeline
     steps:
       - name: Check out source
         uses: actions/checkout@v4
@@ -49,7 +57,7 @@ jobs:
             "platforms;android-34" \
             "system-images;android-34;default;x86_64"
 
-      - name: Run SQLCipher instrumentation test on lightweight AOSP emulator
+      - name: Run isolated SQLCipher suite on lightweight AOSP emulator
         uses: reactivecircus/android-emulator-runner@v2
         with:
           api-level: 34
@@ -59,13 +67,13 @@ jobs:
           emulator-options: -no-window -gpu swiftshader_indirect -no-snapshot -noaudio -no-boot-anim -camera-back none -camera-front none -memory 3072 -cores 2
           emulator-boot-timeout: 900
           disable-animations: true
-          script: bash .github/scripts/run-sqlcipher-instrumentation.sh
+          script: bash .github/scripts/run-sqlcipher-instrumentation.sh "${{ matrix.suite }}"
 
       - name: Upload instrumentation test reports
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: sqlcipher-instrumentation-reports
+          name: sqlcipher-instrumentation-${{ matrix.suite }}-reports
           path: |
             app/build/reports/androidTests/connected/
             app/build/reports/sqlcipher-instrumentation/
