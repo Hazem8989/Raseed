@@ -52,8 +52,8 @@ run_instrumentation_class \
 run_instrumentation_class \
   "com.hazem.dailystore.data.DatabaseMigrationInstrumentedTest" \
   "database-migration.txt"
-run_instrumentation_class \\
-  "com.hazem.dailystore.data.SqlCipherDatabaseMigratorInstrumentedTest" \\
+run_instrumentation_class \
+  "com.hazem.dailystore.data.SqlCipherDatabaseMigratorInstrumentedTest" \
   "sqlcipher-database-migrator.txt"
 run_instrumentation_class \
   "com.hazem.dailystore.data.SqlCipherCompatibilityInstrumentedTest" \
