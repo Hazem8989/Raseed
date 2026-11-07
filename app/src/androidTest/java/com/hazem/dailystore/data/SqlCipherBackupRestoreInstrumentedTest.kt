@@ -365,6 +365,122 @@ class SqlCipherBackupRestoreInstrumentedTest {
         }
     }
 
+
+    @Test
+    fun restoreJournalPersistsMonotonicPhasesWithoutStoringSecrets() {
+        val context = InstrumentationRegistry.getInstrumentation().targetContext as Context
+        val suffix = UUID.randomUUID().toString().replace("-", "")
+        val journalFile = File(context.noBackupFilesDir, "restore-journal-$suffix.bin")
+        val staging = File(context.cacheDir, "restore-stage-$suffix.db")
+        val destination = File(context.cacheDir, "restore-destination-$suffix.db")
+        val passwordMarker = "must-never-appear-password-$suffix"
+        val secretKeyMarker = "must-never-appear-key-$suffix"
+        try {
+            SqlCipherRestoreJournal(journalFile).begin(staging, destination)
+            assertEquals(
+                SqlCipherRestoreJournal.Phase.STAGED,
+                SqlCipherRestoreJournal(journalFile).read()?.phase
+            )
+            val journal = SqlCipherRestoreJournal(journalFile)
+            journal.advance(
+                SqlCipherRestoreJournal.Phase.STAGED,
+                SqlCipherRestoreJournal.Phase.KEY_IMPORTED
+            )
+            assertEquals(
+                SqlCipherRestoreJournal.Phase.KEY_IMPORTED,
+                SqlCipherRestoreJournal(journalFile).read()?.phase
+            )
+            journal.advance(
+                SqlCipherRestoreJournal.Phase.KEY_IMPORTED,
+                SqlCipherRestoreJournal.Phase.DATABASE_COMMITTED
+            )
+            val record = SqlCipherRestoreJournal(journalFile).read()
+            assertEquals(SqlCipherRestoreJournal.Phase.DATABASE_COMMITTED, record?.phase)
+            assertEquals(staging.name, record?.stagingName)
+            assertEquals(destination.name, record?.destinationName)
+            val journalBytes = journalFile.readBytes().toString(Charsets.ISO_8859_1)
+            assertTrue(!journalBytes.contains(passwordMarker))
+            assertTrue(!journalBytes.contains(secretKeyMarker))
+            journal.clear()
+            assertTrue(SqlCipherRestoreJournal(journalFile).read() == null)
+        } finally {
+            journalFile.delete()
+            File(journalFile.path + ".bak").delete()
+            File(journalFile.path + ".new").delete()
+            staging.delete()
+            destination.delete()
+        }
+    }
+
+    @Test
+    fun restoreJournalRejectsSkippedOrReversedPhasesAndDifferentPaths() {
+        val context = InstrumentationRegistry.getInstrumentation().targetContext as Context
+        val suffix = UUID.randomUUID().toString().replace("-", "")
+        val journalFile = File(context.noBackupFilesDir, "restore-journal-order-$suffix.bin")
+        val staging = File(context.cacheDir, "restore-stage-order-$suffix.db")
+        val destination = File(context.cacheDir, "restore-destination-order-$suffix.db")
+        try {
+            val journal = SqlCipherRestoreJournal(journalFile)
+            journal.begin(staging, destination)
+            try {
+                journal.advance(
+                    SqlCipherRestoreJournal.Phase.STAGED,
+                    SqlCipherRestoreJournal.Phase.DATABASE_COMMITTED
+                )
+                throw AssertionError("Journal accepted a skipped phase")
+            } catch (_: IllegalArgumentException) { }
+            try {
+                journal.advance(
+                    SqlCipherRestoreJournal.Phase.KEY_IMPORTED,
+                    SqlCipherRestoreJournal.Phase.DATABASE_COMMITTED
+                )
+                throw AssertionError("Journal accepted an unexpected current phase")
+            } catch (_: IllegalStateException) { }
+            try {
+                journal.begin(staging, File(context.filesDir, "outside-$suffix.db"))
+                throw AssertionError("Journal accepted paths in different directories")
+            } catch (_: IllegalArgumentException) { }
+            assertEquals(
+                SqlCipherRestoreJournal.Phase.STAGED,
+                journal.read()?.phase
+            )
+        } finally {
+            journalFile.delete()
+            File(journalFile.path + ".bak").delete()
+            File(journalFile.path + ".new").delete()
+            staging.delete()
+            destination.delete()
+        }
+    }
+
+    @Test
+    fun restoreJournalCorruptionFailsClosedAndPreservesDatabaseFiles() {
+        val context = InstrumentationRegistry.getInstrumentation().targetContext as Context
+        val suffix = UUID.randomUUID().toString().replace("-", "")
+        val journalFile = File(context.noBackupFilesDir, "restore-journal-corrupt-$suffix.bin")
+        val staging = File(context.cacheDir, "restore-stage-corrupt-$suffix.db")
+        val destination = File(context.cacheDir, "restore-destination-corrupt-$suffix.db")
+        try {
+            staging.writeText("staged-encrypted-payload")
+            destination.writeText("existing-database")
+            SqlCipherRestoreJournal(journalFile).begin(staging, destination)
+            journalFile.writeBytes(byteArrayOf(0x01, 0x02, 0x03))
+            try {
+                SqlCipherRestoreJournal(journalFile).read()
+                throw AssertionError("Corrupted journal was accepted")
+            } catch (_: IllegalStateException) {
+                assertEquals("staged-encrypted-payload", staging.readText())
+                assertEquals("existing-database", destination.readText())
+            }
+        } finally {
+            journalFile.delete()
+            File(journalFile.path + ".bak").delete()
+            File(journalFile.path + ".new").delete()
+            staging.delete()
+            destination.delete()
+        }
+    }
+
     private fun openEncrypted(file: File, rawKey: ByteArray): SQLiteDatabase {
         // Context.getDatabasePath() returns the intended path but does not create
         // the databases/ parent directory. SQLCipher openDatabase() does not create
