@@ -166,6 +166,13 @@ class SqlCipherBackupRestoreInstrumentedTest {
     }
 
     private fun openEncrypted(file: File, rawKey: ByteArray): SQLiteDatabase {
+        // Context.getDatabasePath() returns the intended path but does not create
+        // the databases/ parent directory. SQLCipher openDatabase() does not create
+        // missing parent directories, so create and verify it before opening.
+        val parent = file.parentFile
+        check(parent != null && (parent.isDirectory || parent.mkdirs())) {
+            "Could not create SQLCipher database directory: ${parent?.absolutePath}"
+        }
         val passphrase = rawKey.joinToString("") { "%02x".format(it) }
             .toByteArray(Charsets.US_ASCII)
         return SQLiteDatabase.openDatabase(
