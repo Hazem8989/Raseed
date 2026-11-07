@@ -181,6 +181,156 @@ class SqlCipherBackupRestoreInstrumentedTest {
         }
     }
 
+
+    @Test
+    fun pipelineRoundTripsAndRejectsWrongPasswordAndTamperedPayload() {
+        val context = InstrumentationRegistry.getInstrumentation().targetContext as Context
+        val suffix = UUID.randomUUID().toString().replace("-", "")
+        val source = context.getDatabasePath("pipeline-source-$suffix.db")
+        val staged = context.getDatabasePath("pipeline-stage-$suffix.db")
+        val restored = context.getDatabasePath("pipeline-restored-$suffix.db")
+        val metadata = "pipeline-key-$suffix.bin"
+        val alias = "tds_pipeline_$suffix"
+        val key = ByteArray(32).also(java.security.SecureRandom()::nextBytes)
+        val password = "Pipeline-Backup-2026".toCharArray()
+        val pipeline = SqlCipherBackupRestorePipeline()
+        var db: SQLiteDatabase? = null
+        var recovered: ByteArray? = null
+        try {
+            val parent = source.parentFile ?: error("Database directory unavailable")
+            check(parent.isDirectory || parent.mkdirs())
+            check(source.createNewFile())
+            db = openEncrypted(source, key)
+            db.execSQL("CREATE TABLE ledger(id TEXT PRIMARY KEY, amount_minor INTEGER NOT NULL)")
+            db.execSQL("INSERT INTO ledger VALUES('cash-1', 12500)")
+            db.version = 33
+            db.close()
+            db = null
+
+            val backup = ByteArrayOutputStream()
+            pipeline.createBackup(source, key, password, backup)
+            val backupBytes = backup.toByteArray()
+            assertTrue(backupBytes.size > source.length())
+
+            // A wrong password must fail before a staged database is accepted.
+            try {
+                pipeline.stageRestore(
+                    ByteArrayInputStream(backupBytes),
+                    "Wrong-Pipeline-Password".toCharArray(),
+                    staged
+                )
+                throw AssertionError("Wrong password was accepted")
+            } catch (_: IllegalArgumentException) {
+                assertFalse(staged.exists())
+            }
+
+            // Authenticated SQLCipher payload corruption must also be rejected.
+            val damaged = backupBytes.copyOf()
+            damaged[damaged.lastIndex] = (damaged.last().toInt() xor 0x01).toByte()
+            try {
+                pipeline.stageRestore(
+                    ByteArrayInputStream(damaged),
+                    password,
+                    staged
+                )
+                throw AssertionError("Tampered SQLCipher payload was accepted")
+            } catch (_: IllegalArgumentException) {
+                assertFalse(staged.exists())
+            }
+
+            recovered = pipeline.stageRestore(
+                ByteArrayInputStream(backupBytes),
+                password,
+                staged
+            )
+            assertArrayEquals(key, recovered)
+            val vault = DatabaseKeyVault(context, metadata, alias)
+            pipeline.commitRestoreToEmptyDevice(staged, restored, recovered, vault)
+
+            val imported = vault.getOrCreateDatabaseKey(databaseExists = true)
+            try {
+                assertArrayEquals(key, imported)
+                db = openEncrypted(restored, imported)
+                assertEquals(33, db.version)
+                db.rawQuery("SELECT amount_minor FROM ledger WHERE id='cash-1'", null).use { cursor ->
+                    assertTrue(cursor.moveToFirst())
+                    assertEquals(12500, cursor.getLong(0))
+                }
+            } finally {
+                imported.fill(0)
+            }
+        } finally {
+            db?.close()
+            key.fill(0)
+            recovered?.fill(0)
+            password.fill('\u0000')
+            listOf(source, staged, restored).forEach { file ->
+                file.delete()
+                File(file.path + "-wal").delete()
+                File(file.path + "-shm").delete()
+                File(file.path + "-journal").delete()
+            }
+            File(context.noBackupFilesDir, metadata).delete()
+            File(context.noBackupFilesDir, "$metadata.bak").delete()
+            runCatching {
+                val store = KeyStore.getInstance("AndroidKeyStore").apply { load(null) }
+                if (store.containsAlias(alias)) store.deleteEntry(alias)
+            }
+        }
+    }
+
+    @Test
+    fun pipelineRejectsNonEmptyDestinationAndKeyVaultRejectsDifferentKeyButAllowsRetry() {
+        val context = InstrumentationRegistry.getInstrumentation().targetContext as Context
+        val suffix = UUID.randomUUID().toString().replace("-", "")
+        val metadata = "pipeline-idempotent-$suffix.bin"
+        val alias = "tds_pipeline_idempotent_$suffix"
+        val key = ByteArray(32).also(java.security.SecureRandom()::nextBytes)
+        val differentKey = ByteArray(32).also(java.security.SecureRandom()::nextBytes)
+        val vault = DatabaseKeyVault(context, metadata, alias)
+        val occupied = context.getDatabasePath("pipeline-occupied-$suffix.db")
+        val staged = context.getDatabasePath("pipeline-unused-stage-$suffix.db")
+        try {
+            val parent = occupied.parentFile ?: error("Database directory unavailable")
+            check(parent.isDirectory || parent.mkdirs())
+            occupied.writeText("existing-user-data")
+            vault.importDatabaseKey(key, databaseExists = false)
+            // Idempotent retry after an interrupted file rename is allowed.
+            vault.importDatabaseKey(key, databaseExists = false)
+            try {
+                vault.importDatabaseKey(differentKey, databaseExists = false)
+                throw AssertionError("A different key replaced the existing local key")
+            } catch (_: DatabaseKeyVault.DatabaseKeyException) {
+                assertTrue(occupied.readText() == "existing-user-data")
+            }
+            try {
+                SqlCipherBackupRestorePipeline().commitRestoreToEmptyDevice(
+                    staged, occupied, key, vault
+                )
+                throw AssertionError("Restore overwrote an existing destination")
+            } catch (_: IllegalArgumentException) {
+                assertTrue(occupied.readText() == "existing-user-data")
+            }
+            val stored = vault.getOrCreateDatabaseKey(databaseExists = false)
+            try {
+                assertArrayEquals(key, stored)
+            } finally {
+                stored.fill(0)
+            }
+        } finally {
+            key.fill(0)
+            differentKey.fill(0)
+            occupied.delete()
+            staged.delete()
+            File(context.noBackupFilesDir, metadata).delete()
+            File(context.noBackupFilesDir, "$metadata.bak").delete()
+            runCatching {
+                val store = KeyStore.getInstance("AndroidKeyStore").apply { load(null) }
+                if (store.containsAlias(alias)) store.deleteEntry(alias)
+            }
+        }
+    }
+
     private fun openEncrypted(file: File, rawKey: ByteArray): SQLiteDatabase {
         // Context.getDatabasePath() returns the intended path but does not create
         // the databases/ parent directory. SQLCipher openDatabase() does not create
