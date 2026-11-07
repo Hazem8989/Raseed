@@ -492,6 +492,7 @@ class SqlCipherBackupRestoreInstrumentedTest {
         val metadata = "coordinator-key-$suffix.bin"
         val alias = "tds_coordinator_$suffix"
         val key = ByteArray(32).also(java.security.SecureRandom()::nextBytes)
+        val password = "Coordinator-Resume-Password".toCharArray()
         val vault = DatabaseKeyVault(context, metadata, alias)
         var db: SQLiteDatabase? = null
         try {
@@ -500,6 +501,8 @@ class SqlCipherBackupRestoreInstrumentedTest {
             db.execSQL("INSERT INTO restore_probe VALUES('probe-1', 8800)")
             db.close()
             db = null
+            val backup = ByteArrayOutputStream()
+            SqlCipherBackupContainer.write(staging, key, password, backup)
             val journal = SqlCipherRestoreJournal(journalFile)
             journal.begin(staging, destination)
             val coordinator = SqlCipherRestoreCoordinator(journal)
@@ -509,9 +512,13 @@ class SqlCipherBackupRestoreInstrumentedTest {
             assertTrue(staging.isFile)
             assertFalse(destination.exists())
 
-            vault.importDatabaseKey(key, databaseExists = false)
             assertEquals(SqlCipherRestoreCoordinator.RecoveryResult.RESTORE_COMPLETED,
-                coordinator.recover(staging.parentFile!!, vault))
+                coordinator.resumeFromBackup(
+                    ByteArrayInputStream(backup.toByteArray()),
+                    password,
+                    staging.parentFile!!,
+                    vault
+                ))
             assertFalse(staging.exists())
             assertTrue(destination.isFile)
             assertTrue(journal.read() == null)
@@ -529,6 +536,7 @@ class SqlCipherBackupRestoreInstrumentedTest {
         } finally {
             db?.close()
             key.fill(0)
+            password.fill('\\u0000')
             listOf(staging, destination).forEach { file ->
                 file.delete()
                 File(file.path + "-wal").delete()
