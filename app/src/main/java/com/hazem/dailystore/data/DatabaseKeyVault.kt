@@ -125,6 +125,87 @@ class DatabaseKeyVault(
         return decryptExistingKey()
     }
 
+    /**
+     * Returns the existing device-wrapped key record for a same-device restore
+     * rollback journal. The returned bytes contain only AES-GCM ciphertext,
+     * never the raw SQLCipher key. The caller must persist them in noBackupFilesDir.
+     */
+    @Synchronized
+    internal fun snapshotWrappedKeyMetadata(): ByteArray {
+        check(hasMetadata()) { "لا توجد بيانات مفتاح محلي لحفظها" }
+        val verifiedKey = decryptExistingKey()
+        verifiedKey.fill(0)
+        return atomicMetadata.openRead().use { it.readBytes() }.also {
+            require(it.size == HEADER_BYTES + IV_BYTES + DATABASE_KEY_BYTES + GCM_TAG_BYTES)
+        }
+    }
+
+    /**
+     * Replaces the wrapped database key only when the currently installed key
+     * matches the expected key. The Android Keystore wrapping alias is retained,
+     * allowing a journaled same-device restore to roll back without key export.
+     */
+    @Synchronized
+    internal fun replaceDatabaseKeyForRestore(
+        replacementKey: ByteArray,
+        expectedCurrentKey: ByteArray
+    ) {
+        require(replacementKey.size == DATABASE_KEY_BYTES && expectedCurrentKey.size == DATABASE_KEY_BYTES)
+        val current = decryptExistingKey()
+        try {
+            check(java.security.MessageDigest.isEqual(current, expectedCurrentKey)) {
+                "تغير مفتاح قاعدة البيانات المحلية؛ أُوقفت الاستعادة"
+            }
+        } finally {
+            current.fill(0)
+        }
+        val wrappingKey = loadExistingWrappingKey()
+        val header = metadataHeader()
+        val cipher = Cipher.getInstance(TRANSFORMATION)
+        cipher.init(Cipher.ENCRYPT_MODE, wrappingKey)
+        cipher.updateAAD(header)
+        val encrypted = cipher.doFinal(replacementKey)
+        writeMetadata(header, cipher.iv, encrypted)
+        encrypted.fill(0)
+        val verified = decryptExistingKey()
+        try {
+            check(java.security.MessageDigest.isEqual(verified, replacementKey)) {
+                "فشل التحقق من مفتاح قاعدة البيانات بعد الاستبدال"
+            }
+        } finally {
+            verified.fill(0)
+        }
+    }
+
+    /** Restores a previously captured wrapped-key record without changing the Keystore alias. */
+    @Synchronized
+    internal fun restoreWrappedKeyMetadata(snapshot: ByteArray) {
+        val expectedSize = HEADER_BYTES + IV_BYTES + DATABASE_KEY_BYTES + GCM_TAG_BYTES
+        require(snapshot.size == expectedSize) { "Invalid wrapped-key rollback snapshot" }
+        val header = snapshot.copyOfRange(0, HEADER_BYTES)
+        require(header.contentEquals(metadataHeader())) { "Unsupported wrapped-key rollback snapshot" }
+        val iv = snapshot.copyOfRange(HEADER_BYTES, HEADER_BYTES + IV_BYTES)
+        val encrypted = snapshot.copyOfRange(HEADER_BYTES + IV_BYTES, snapshot.size)
+        val cipher = Cipher.getInstance(TRANSFORMATION)
+        cipher.init(Cipher.DECRYPT_MODE, loadExistingWrappingKey(), GCMParameterSpec(GCM_TAG_BITS, iv))
+        cipher.updateAAD(header)
+        val recovered = cipher.doFinal(encrypted)
+        try {
+            require(recovered.size == DATABASE_KEY_BYTES) { "Invalid key in rollback snapshot" }
+            writeMetadata(header, iv, encrypted)
+            val verified = decryptExistingKey()
+            try {
+                check(java.security.MessageDigest.isEqual(verified, recovered)) {
+                    "Wrapped-key rollback verification failed"
+                }
+            } finally {
+                verified.fill(0)
+            }
+        } finally {
+            recovered.fill(0)
+        }
+    }
+
     private fun hasMetadata(): Boolean {
         val backup = File(metadataFile.path + ".bak")
         return metadataFile.exists() || backup.exists()
