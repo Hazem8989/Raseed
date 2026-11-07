@@ -30,12 +30,16 @@ internal object SqlCipherDatabaseMigrator {
         val escapedPath = destination.absolutePath.replace("'", "''")
         val escapedPassphrase = String(passphrase, Charsets.US_ASCII).replace("'", "''")
         var sourceDb: SQLiteDatabase? = null
+        var sourceSnapshot: DatabaseSnapshot? = null
+        var sourceVersion = 0
         try {
             System.loadLibrary("sqlcipher")
             // SQLCipher can read a plaintext SQLite source when no passphrase is supplied.
             sourceDb = SQLiteDatabase.openDatabase(
                 source.absolutePath, null, SQLiteDatabase.OPEN_READWRITE
             )
+            sourceVersion = sourceDb.version
+            sourceSnapshot = snapshot(sourceDb)
             sourceDb.execSQL("ATTACH DATABASE '$escapedPath' AS encrypted KEY '$escapedPassphrase'")
             try {
                 sourceDb.rawQuery("SELECT sqlcipher_export('encrypted')", null).use { cursor ->
@@ -54,7 +58,13 @@ internal object SqlCipherDatabaseMigrator {
         }
 
         try {
-            validateEncryptedDatabase(destination, databaseKey, sourceVersion = null)
+            validateEncryptedDatabase(destination, databaseKey, sourceVersion = sourceVersion)
+            val encryptedSnapshot = openSnapshot(
+                destination, databaseKey.toHex().toByteArray(Charsets.US_ASCII)
+            )
+            check(sourceSnapshot == encryptedSnapshot) {
+                "تختلف بنية الجداول أو أعداد السجلات بعد التصدير؛ رُفض اعتماد الملف"
+            }
         } catch (error: Exception) {
             destination.delete()
             throw error
@@ -93,6 +103,55 @@ internal object SqlCipherDatabaseMigrator {
             database.rawQuery("PRAGMA foreign_key_check", null).use { cursor ->
                 check(!cursor.moveToFirst()) { "توجد علاقات غير سليمة في قاعدة SQLCipher" }
             }
+        } finally {
+            database?.close()
+            passphrase.fill(0)
+        }
+    }
+
+
+    private data class DatabaseSnapshot(
+        val version: Int,
+        val schema: List<List<String?>>,
+        val rowCounts: Map<String, Long>
+    )
+
+    private fun snapshot(database: SQLiteDatabase): DatabaseSnapshot {
+        val schema = mutableListOf<List<String?>>()
+        val tables = mutableListOf<String>()
+        database.rawQuery(
+            "SELECT type,name,tbl_name,sql FROM sqlite_master " +
+                "WHERE name NOT LIKE 'sqlite_%' AND type IN ('table','index','trigger','view') " +
+                "ORDER BY type,name",
+            null
+        ).use { cursor ->
+            while (cursor.moveToNext()) {
+                val row = (0..3).map { index ->
+                    if (cursor.isNull(index)) null else cursor.getString(index)
+                }
+                schema += row
+                if (row[0] == "table") tables += requireNotNull(row[1])
+            }
+        }
+        val counts = linkedMapOf<String, Long>()
+        tables.forEach { table ->
+            val escaped = table.replace("\"", "\"\"")
+            database.rawQuery("SELECT COUNT(*) FROM \"$escaped\"", null).use { cursor ->
+                check(cursor.moveToFirst())
+                counts[table] = cursor.getLong(0)
+            }
+        }
+        return DatabaseSnapshot(database.version, schema, counts)
+    }
+
+    private fun openSnapshot(file: File, passphrase: ByteArray): DatabaseSnapshot {
+        var database: SQLiteDatabase? = null
+        try {
+            database = SQLiteDatabase.openDatabase(
+                file.absolutePath, passphrase, null,
+                SQLiteDatabase.OPEN_READONLY, null, null
+            )
+            return snapshot(database)
         } finally {
             database?.close()
             passphrase.fill(0)
