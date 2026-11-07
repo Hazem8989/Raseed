@@ -536,7 +536,7 @@ class SqlCipherBackupRestoreInstrumentedTest {
         } finally {
             db?.close()
             key.fill(0)
-            password.fill('\\u0000')
+            password.fill(Char.MIN_VALUE)
             listOf(staging, destination).forEach { file ->
                 file.delete()
                 File(file.path + "-wal").delete()
