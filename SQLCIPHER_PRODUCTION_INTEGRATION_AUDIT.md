@@ -2,7 +2,7 @@
 
 Date: 2026-11-07
 Branch: `the-daily-shop-development`
-Latest implementation at audit: `4abb04fb26bcfeb9bba297f3f1d02c4e4c965d89`
+Latest implementation at audit: `a1b3ddfbaca2bf37ef32da8b9f0416698a9ff99a` (subsequent backup-pipeline commits are recorded in Git history)
 
 ## Decision
 
@@ -43,7 +43,9 @@ The sync repositories contain extensive transactional access. All these call sit
 - `DatabaseKeyVault.kt`: generates a random 256-bit key and wraps it with an Android Keystore AES-GCM key. It fails closed if a database exists but its key metadata is missing.
 - `BackupKeyEnvelope.kt`: password-protects the SQLCipher key using a versioned authenticated envelope and bounded PBKDF2 parameters.
 - `SqlCipherBackupContainer.kt`: stores the encrypted SQLCipher payload plus the wrapped key envelope; never serializes the raw key.
-- `DatabaseKeyVault.importDatabaseKey(...)`: allows importing a recovered key only when the destination has neither a database nor existing key metadata.
+- `SqlCipherBackupRestorePipeline.kt` (new): validates a closed/checkpointed SQLCipher file before backup; stages and validates restored ciphertext with SQLCipher; restricts commit to an empty destination; enforces same-directory atomic rename; and leaves the staged file available if the key-import/rename sequence needs retry.
+- `DatabaseKeyVault.importDatabaseKey(...)`: imports only on an empty destination; an interrupted retry is accepted only when the existing local key matches byte-for-byte, and a different or unreadable key fails closed.
+- `SqlCipherBackupRestoreInstrumentedTest.kt`: now also covers pipeline round-trip, wrong password, payload tampering, truncation, trailing bytes, non-empty WAL refusal, non-empty destination refusal, and idempotent/same-key versus different-key import.
 - `SqlCipherBackupRestoreInstrumentedTest.kt`: previously passed a fresh-vault restore test, including integrity, foreign-key, data, trigger, and write checks.
 - `SqlCipherDatabaseMigrator.kt` (new): non-destructive export primitive. It leaves the source file untouched, exports through SQLCipher `sqlcipher_export`, validates integrity/foreign keys/version, and compares schema objects and per-table row counts between source and encrypted output.
 - `SqlCipherDatabaseMigratorInstrumentedTest.kt` (new): verifies source preservation, schema/data/trigger migration, and encrypted write access. Current CI is pending.
@@ -51,7 +53,7 @@ The sync repositories contain extensive transactional access. All these call sit
 ## Remaining work — required order
 
 1. Finish CI for the non-destructive export primitive and fix any issues before proceeding.
-2. Add production-grade backup creation/restore using `SqlCipherBackupContainer`, with SQLCipher-only staged validation, key import rules, rollback, interruption recovery, and backward compatibility for existing plaintext/legacy backups.
+2. Complete production-grade backup creation/restore integration around `SqlCipherBackupRestorePipeline`: connect permission checks, maintenance/connection closure, durable restore journal and interruption recovery, same-device replacement with rollback, and explicit format dispatch preserving legacy plaintext/password-protected backups. The current pipeline is deliberately isolated and only commits to an empty destination; it is not yet wired into `BackupRestoreManager` or `AppDatabase`.
 3. Complete and test the migration coordinator: explicit maintenance mode; stop sales/purchases/collections and sync writes; checkpoint WAL; close every connection; create and verify a password-protected rollback backup; export to a temporary encrypted file; compare schema, row counts, financial totals, balances, inventory/FIFO and sync state; reopen and test; atomically swap; retain original until post-migration acceptance.
 4. Convert `AppDatabase` to SQLCipher only behind the completed migration gate, preserving every schema creation and version-33 upgrade step.
 5. Convert every direct production consumer listed above, including `MainActivity`, sync applier/protocol, exception types, conflict constants, and test database factories.
@@ -63,4 +65,4 @@ The sync repositories contain extensive transactional access. All these call sit
 
 Do not wire `DatabaseKeyVault` into production open, replace/rename/delete the plaintext source, or publish an APK claiming encrypted live storage until all gates pass. A missing/corrupt key must fail closed; it must never create an empty replacement database. Never send raw database keys through the sync relay, logs, or Git.
 
-**Status: isolated key vault and cross-device backup primitives tested; non-destructive database export primitive added and awaiting CI; production helper conversion, full consumer conversion, and production backup/restore integration remain blocked.**
+**Status: isolated key vault, cross-device backup container, non-destructive database export, and an isolated SQLCipher backup/restore pipeline have been added. Pipeline instrumentation coverage is in progress; production helper conversion, same-device transactional restore, legacy-format dispatch, full consumer conversion, and production backup/restore integration remain blocked.**
