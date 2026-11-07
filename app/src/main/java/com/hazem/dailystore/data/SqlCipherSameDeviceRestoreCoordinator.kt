@@ -17,9 +17,20 @@ import java.util.UUID
 internal class SqlCipherSameDeviceRestoreCoordinator(
     context: Context,
     journalFileName: String = DEFAULT_JOURNAL_NAME,
-    private val afterPhase: (SqlCipherSameDeviceRestoreJournal.Phase) -> Unit = {}
+    private val afterCheckpoint: (Checkpoint) -> Unit = {}
 ) {
     enum class RecoveryResult { NOTHING_TO_RECOVER, RESTORE_COMPLETED, RESTORE_ROLLED_BACK }
+    enum class Checkpoint {
+        JOURNAL_PREPARED,
+        OLD_DATABASE_RENAMED,
+        OLD_DATABASE_BACKUP_RECORDED,
+        KEY_REPLACED,
+        KEY_REPLACEMENT_RECORDED,
+        NEW_DATABASE_RENAMED,
+        NEW_DATABASE_SWAP_RECORDED,
+        NEW_DATABASE_VERIFIED,
+        VERIFICATION_RECORDED
+    }
 
     private val appContext = context.applicationContext
     private val journalFile = File(appContext.noBackupFilesDir, journalFileName)
@@ -64,37 +75,41 @@ internal class SqlCipherSameDeviceRestoreCoordinator(
 
             writeAtomic(keySnapshotAtomic, keyVault.snapshotWrappedKeyMetadata())
             journal.begin(stagingDatabase, liveDatabase, rollback, keySnapshot)
-            afterPhase(SqlCipherSameDeviceRestoreJournal.Phase.PREPARED)
+            afterCheckpoint(Checkpoint.JOURNAL_PREPARED)
 
             check(liveDatabase.renameTo(rollback)) { "تعذر حفظ قاعدة البيانات الحالية للتراجع" }
+            afterCheckpoint(Checkpoint.OLD_DATABASE_RENAMED)
             journal.advance(
                 SqlCipherSameDeviceRestoreJournal.Phase.PREPARED,
                 SqlCipherSameDeviceRestoreJournal.Phase.OLD_DATABASE_BACKED_UP
             )
-            afterPhase(SqlCipherSameDeviceRestoreJournal.Phase.OLD_DATABASE_BACKED_UP)
+            afterCheckpoint(Checkpoint.OLD_DATABASE_BACKUP_RECORDED)
 
             keyVault.replaceDatabaseKeyForRestore(replacementKey, oldKey)
+            afterCheckpoint(Checkpoint.KEY_REPLACED)
             journal.advance(
                 SqlCipherSameDeviceRestoreJournal.Phase.OLD_DATABASE_BACKED_UP,
                 SqlCipherSameDeviceRestoreJournal.Phase.KEY_REPLACED
             )
-            afterPhase(SqlCipherSameDeviceRestoreJournal.Phase.KEY_REPLACED)
+            afterCheckpoint(Checkpoint.KEY_REPLACEMENT_RECORDED)
 
             check(stagingDatabase.renameTo(liveDatabase)) {
                 "تم تبديل المفتاح لكن تعذر وضع القاعدة الجديدة؛ يمكن استكمال التراجع بأمان"
             }
+            afterCheckpoint(Checkpoint.NEW_DATABASE_RENAMED)
             journal.advance(
                 SqlCipherSameDeviceRestoreJournal.Phase.KEY_REPLACED,
                 SqlCipherSameDeviceRestoreJournal.Phase.DATABASE_SWAPPED
             )
-            afterPhase(SqlCipherSameDeviceRestoreJournal.Phase.DATABASE_SWAPPED)
+            afterCheckpoint(Checkpoint.NEW_DATABASE_SWAP_RECORDED)
 
             SqlCipherDatabaseMigrator.validateEncryptedDatabase(liveDatabase, replacementKey)
+            afterCheckpoint(Checkpoint.NEW_DATABASE_VERIFIED)
             journal.advance(
                 SqlCipherSameDeviceRestoreJournal.Phase.DATABASE_SWAPPED,
                 SqlCipherSameDeviceRestoreJournal.Phase.VERIFIED
             )
-            afterPhase(SqlCipherSameDeviceRestoreJournal.Phase.VERIFIED)
+            afterCheckpoint(Checkpoint.VERIFICATION_RECORDED)
 
             finalizeCommittedRestore(liveDatabase, rollback, keySnapshotAtomic, keySnapshot)
         } finally {
