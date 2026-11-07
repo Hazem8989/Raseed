@@ -164,6 +164,7 @@ class SqlCipherBackupRestoreInstrumentedTest {
             sourceKey?.fill(0)
             recoveredKey?.fill(0)
             password.fill('\u0000')
+            wrongPassword.fill('\u0000')
             listOf(source, staged, restored).forEach { file ->
                 file.delete()
                 File(file.path + "-wal").delete()
@@ -193,6 +194,7 @@ class SqlCipherBackupRestoreInstrumentedTest {
         val alias = "tds_pipeline_$suffix"
         val key = ByteArray(32).also(java.security.SecureRandom()::nextBytes)
         val password = "Pipeline-Backup-2026".toCharArray()
+        val wrongPassword = "Wrong-Pipeline-Password".toCharArray()
         val pipeline = SqlCipherBackupRestorePipeline()
         var db: SQLiteDatabase? = null
         var recovered: ByteArray? = null
@@ -216,7 +218,7 @@ class SqlCipherBackupRestoreInstrumentedTest {
             try {
                 pipeline.stageRestore(
                     ByteArrayInputStream(backupBytes),
-                    "Wrong-Pipeline-Password".toCharArray(),
+                    wrongPassword,
                     staged
                 )
                 throw AssertionError("Wrong password was accepted")
@@ -234,6 +236,26 @@ class SqlCipherBackupRestoreInstrumentedTest {
                     staged
                 )
                 throw AssertionError("Tampered SQLCipher payload was accepted")
+            } catch (_: IllegalArgumentException) {
+                assertFalse(staged.exists())
+            }
+            try {
+                pipeline.stageRestore(
+                    ByteArrayInputStream(backupBytes.copyOf(backupBytes.size - 1)),
+                    password,
+                    staged
+                )
+                throw AssertionError("Truncated backup was accepted")
+            } catch (_: IllegalArgumentException) {
+                assertFalse(staged.exists())
+            }
+            try {
+                pipeline.stageRestore(
+                    ByteArrayInputStream(backupBytes + byteArrayOf(0x01)),
+                    password,
+                    staged
+                )
+                throw AssertionError("Backup with trailing bytes was accepted")
             } catch (_: IllegalArgumentException) {
                 assertFalse(staged.exists())
             }
@@ -294,6 +316,7 @@ class SqlCipherBackupRestoreInstrumentedTest {
             val parent = occupied.parentFile ?: error("Database directory unavailable")
             check(parent.isDirectory || parent.mkdirs())
             occupied.writeText("existing-user-data")
+            staged.writeBytes(byteArrayOf(0x01))
             vault.importDatabaseKey(key, databaseExists = false)
             // Idempotent retry after an interrupted file rename is allowed.
             vault.importDatabaseKey(key, databaseExists = false)
