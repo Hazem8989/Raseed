@@ -83,6 +83,7 @@ run_instrumentation() {
     return 1
   fi
 }
+
 case "$SUITE" in
   core)
     run_instrumentation "com.hazem.dailystore.data.DatabaseKeyVaultInstrumentedTest" "database-key-vault.txt"
