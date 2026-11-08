@@ -212,7 +212,8 @@ class SqlCipherBackupRestoreInstrumentedTest {
             val pendingWal = File(source.path + "-wal")
             pendingWal.writeBytes(byteArrayOf(0x01))
             try {
-                pipeline.createBackup(source, key, password, ByteArrayOutputStream())
+                android.util.Log.i("SqlCipherPipelineTest", "checkpoint: reject non-empty WAL")
+            pipeline.createBackup(source, key, password, ByteArrayOutputStream())
                 throw AssertionError("Backup accepted a non-empty WAL sidecar")
             } catch (_: IllegalArgumentException) {
                 assertTrue(source.isFile)
@@ -220,11 +221,13 @@ class SqlCipherBackupRestoreInstrumentedTest {
                 pendingWal.delete()
             }
 
+            android.util.Log.i("SqlCipherPipelineTest", "checkpoint: create encrypted backup")
             val backup = ByteArrayOutputStream()
             pipeline.createBackup(source, key, password, backup)
             val backupBytes = backup.toByteArray()
             assertTrue(backupBytes.size > source.length())
 
+            android.util.Log.i("SqlCipherPipelineTest", "checkpoint: backup created; testing wrong password")
             // A wrong password must fail before a staged database is accepted.
             try {
                 pipeline.stageRestore(
@@ -237,6 +240,7 @@ class SqlCipherBackupRestoreInstrumentedTest {
                 assertFalse(staged.exists())
             }
 
+            android.util.Log.i("SqlCipherPipelineTest", "checkpoint: wrong password rejected; testing tampering")
             // Authenticated SQLCipher payload corruption must also be rejected.
             val damaged = backupBytes.copyOf()
             damaged[damaged.lastIndex] = (damaged.last().toInt() xor 0x01).toByte()
@@ -250,6 +254,7 @@ class SqlCipherBackupRestoreInstrumentedTest {
             } catch (_: IllegalArgumentException) {
                 assertFalse(staged.exists())
             }
+            android.util.Log.i("SqlCipherPipelineTest", "checkpoint: tampered payload rejected; testing truncation")
             try {
                 pipeline.stageRestore(
                     ByteArrayInputStream(backupBytes.copyOf(backupBytes.size - 1)),
@@ -260,6 +265,7 @@ class SqlCipherBackupRestoreInstrumentedTest {
             } catch (_: IllegalArgumentException) {
                 assertFalse(staged.exists())
             }
+            android.util.Log.i("SqlCipherPipelineTest", "checkpoint: truncated payload rejected; testing trailing bytes")
             try {
                 pipeline.stageRestore(
                     ByteArrayInputStream(backupBytes + byteArrayOf(0x01)),
@@ -271,15 +277,18 @@ class SqlCipherBackupRestoreInstrumentedTest {
                 assertFalse(staged.exists())
             }
 
+            android.util.Log.i("SqlCipherPipelineTest", "checkpoint: malformed payloads rejected; testing valid restore")
             recovered = pipeline.stageRestore(
                 ByteArrayInputStream(backupBytes),
                 password,
                 staged
             )
+            android.util.Log.i("SqlCipherPipelineTest", "checkpoint: valid backup staged; committing restore")
             assertArrayEquals(key, recovered)
             val vault = DatabaseKeyVault(context, metadata, alias)
             pipeline.commitRestoreToEmptyDevice(staged, restored, recovered, vault)
 
+            android.util.Log.i("SqlCipherPipelineTest", "checkpoint: restore committed; verifying restored database")
             val imported = vault.getOrCreateDatabaseKey(databaseExists = true)
             try {
                 assertArrayEquals(key, imported)

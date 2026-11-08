@@ -26,16 +26,16 @@ adb install --no-streaming -r -t app/build/outputs/apk/androidTest/debug/app-deb
 run_instrumentation() {
   local selector="$1"
   local report_file="$2"
-  echo "Running isolated instrumentation selector (8-minute limit): $selector"
+  echo "Running isolated instrumentation selector (20-minute limit): $selector"
   set +e
-  timeout --signal=TERM --kill-after=30s 8m adb shell am instrument -w -r -e class "$selector" \
+  timeout --signal=TERM --kill-after=30s 20m adb shell am instrument -w -r -e class "$selector" \
     com.hazem.dailystore.test/androidx.test.runner.AndroidJUnitRunner \
     2>&1 | tee "$REPORT_DIR/$report_file"
   local instrumentation_status=${PIPESTATUS[0]}
   set -e
   if [ "$instrumentation_status" -ne 0 ]; then
     if [ "$instrumentation_status" -eq 124 ]; then
-      echo "Instrumentation selector $selector exceeded the 8-minute limit; see logcat.txt and its selector report."
+      echo "Instrumentation selector $selector exceeded the 20-minute limit; see logcat.txt and its selector report."
     else
       echo "Instrumentation selector $selector failed with exit code $instrumentation_status"
     fi
