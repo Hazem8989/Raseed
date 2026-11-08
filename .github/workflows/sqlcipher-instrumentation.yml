@@ -60,7 +60,7 @@ jobs:
           "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" \
             "platform-tools" \
             "platforms;android-34" \
-            "system-images;android-34;google_apis;x86_64"
+            "system-images;android-34;default;x86_64"
 
       - name: Build instrumentation APKs before emulator startup
         run: |
@@ -69,11 +69,11 @@ jobs:
             :app:assembleDebugAndroidTest \
             --stacktrace
 
-      - name: Run isolated SQLCipher suite on lightweight AOSP emulator
+      - name: Run isolated SQLCipher suite on minimal AOSP emulator
         uses: reactivecircus/android-emulator-runner@v2
         with:
           api-level: 34
-          target: google_apis
+          target: default
           arch: x86_64
           profile: pixel_2
           emulator-options: -no-window -gpu swiftshader_indirect -no-snapshot -noaudio -no-boot-anim -camera-back none -camera-front none -memory 3072 -cores 2
