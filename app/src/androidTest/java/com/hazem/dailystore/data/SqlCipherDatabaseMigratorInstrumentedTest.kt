@@ -12,6 +12,7 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
 import java.io.File
+import java.math.BigDecimal
 import java.util.UUID
 
 @RunWith(AndroidJUnit4::class)
@@ -188,6 +189,134 @@ class SqlCipherDatabaseMigratorInstrumentedTest {
             }
         } finally {
             runCatching { helper.close() }
+            key.fill(0)
+            listOf(source, destination).forEach { file ->
+                file.delete()
+                File(file.path + "-wal").delete()
+                File(file.path + "-shm").delete()
+                File(file.path + "-journal").delete()
+            }
+        }
+    }
+
+
+    @Test
+    fun exportsPopulatedProductionV33DatabaseWithInventorySalesCashAndWalletDataIntact() {
+        val context = InstrumentationRegistry.getInstrumentation().targetContext as Context
+        val suffix = UUID.randomUUID().toString().replace("-", "")
+        val source = context.getDatabasePath("migration-populated-v33-$suffix.db")
+        val destination = context.getDatabasePath("migration-populated-v33-cipher-$suffix.db")
+        val key = ByteArray(32).also(java.security.SecureRandom()::nextBytes)
+        val helper = AppDatabase(context, source.name)
+        AppDatabase.installForTests(helper)
+
+        try {
+            val store = StoreRepository(context)
+            store.ensureBaseSetup()
+
+            val auth = AuthRepository(context)
+            auth.ensureInitialAdmin()
+            val temporaryAdmin = auth.authenticate("admin", "1234")
+                ?: error("Initial test administrator could not be authenticated")
+            auth.changePassword(temporaryAdmin.id, "1234", "MigrationAudit123")
+            val actorId = temporaryAdmin.id
+
+            store.saveExchangeRate(BigDecimal("15000"), actorId)
+            val unit = store.getUnits().first()
+            val category = store.getCategories().first()
+            val productId = store.saveProduct(
+                null, "صنف اختبار ترحيل مشفر", null, "MIGRATION-$suffix",
+                category.id, unit.id, 125, 175, true, 10.0, actorId
+            )
+            val cashAccount = CashAccountRepository(context).create(
+                actorId, "صندوق اختبار الترحيل", "CASH_BOX", "SYP", 100_000L
+            )
+            CustomerRepository(context).create(actorId, "زبون اختبار الترحيل $suffix")
+            ServiceTransferRepository(context).ensureSystemAccounts()
+
+            val invoiceId = "migration-sale-$suffix"
+            val saleOperationId = "migration-sale-post-$suffix"
+            val saved = InvoiceRepository(context).saveSalesDraft(
+                actorId,
+                "migration-sale-draft-$suffix",
+                invoiceId,
+                null,
+                "2026-11-08",
+                0L,
+                "SQLCipher populated production fixture",
+                listOf(InvoiceLineInput(productId, BigDecimal("2"), 175L)),
+                "CASH"
+            )
+            assertEquals(invoiceId, saved.invoiceId)
+            assertTrue(
+                InvoiceRepository(context).postCashSale(
+                    actorId, invoiceId, saleOperationId, cashAccount.id,
+                    "2026-11-08T12:00:00Z", "2026-11-08"
+                )
+            )
+
+            helper.checkpointAndCloseForBackup()
+            val originalBytes = source.readBytes()
+            assertTrue("Populated production database must be non-empty", originalBytes.isNotEmpty())
+            assertTrue("Encrypted destination must be unique", !destination.exists())
+
+            SqlCipherDatabaseMigrator.exportPlainDatabase(source, destination, key)
+
+            assertTrue("Original SQLite database must remain present", source.isFile)
+            assertTrue(
+                "Original SQLite database bytes must remain unchanged",
+                originalBytes.contentEquals(source.readBytes())
+            )
+            SqlCipherDatabaseMigrator.validateEncryptedDatabase(
+                destination, key, sourceVersion = AppDatabase.DATABASE_VERSION
+            )
+
+            val passphrase = key.joinToString("") { "%02x".format(it) }.toByteArray(Charsets.US_ASCII)
+            val encrypted = CipherSQLiteDatabase.openDatabase(
+                destination.absolutePath,
+                passphrase,
+                null,
+                CipherSQLiteDatabase.OPEN_READONLY,
+                null,
+                null
+            )
+            try {
+                assertEquals(AppDatabase.DATABASE_VERSION, encrypted.version)
+                assertEquals(1, encrypted.rawQuery(
+                    "SELECT COUNT(*) FROM products WHERE id=? AND name=?",
+                    arrayOf(productId, "صنف اختبار ترحيل مشفر")
+                ).use { cursor -> assertTrue(cursor.moveToFirst()); cursor.getInt(0) })
+                assertEquals(8.0, encrypted.rawQuery(
+                    "SELECT quantity FROM inventory_balances WHERE product_id=?",
+                    arrayOf(productId)
+                ).use { cursor -> assertTrue(cursor.moveToFirst()); cursor.getDouble(0) }, 0.000001)
+                assertEquals("PAID", encrypted.rawQuery(
+                    "SELECT status FROM sales_invoices WHERE id=?",
+                    arrayOf(invoiceId)
+                ).use { cursor -> assertTrue(cursor.moveToFirst()); cursor.getString(0) })
+                assertEquals(1, encrypted.rawQuery(
+                    "SELECT COUNT(*) FROM cash_transactions WHERE source_type='SALES_INVOICE' AND source_id=?",
+                    arrayOf(invoiceId)
+                ).use { cursor -> assertTrue(cursor.moveToFirst()); cursor.getInt(0) })
+                assertEquals(1, encrypted.rawQuery(
+                    "SELECT COUNT(*) FROM cash_accounts WHERE id=? AND opening_balance_minor=100000",
+                    arrayOf(cashAccount.id)
+                ).use { cursor -> assertTrue(cursor.moveToFirst()); cursor.getInt(0) })
+                assertTrue(encrypted.rawQuery(
+                    "SELECT COUNT(*) FROM service_wallets",
+                    null
+                ).use { cursor -> assertTrue(cursor.moveToFirst()); cursor.getInt(0) >= 2 })
+                assertTrue(encrypted.rawQuery(
+                    "SELECT COUNT(*) FROM sync_operation_envelopes WHERE entity_id=?",
+                    arrayOf(productId)
+                ).use { cursor -> assertTrue(cursor.moveToFirst()); cursor.getInt(0) >= 1 })
+            } finally {
+                encrypted.close()
+                passphrase.fill(0)
+            }
+        } finally {
+            runCatching { helper.close() }
+            runCatching { AppDatabase.resetForTests(context, deleteExisting = false) }
             key.fill(0)
             listOf(source, destination).forEach { file ->
                 file.delete()
