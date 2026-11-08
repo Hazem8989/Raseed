@@ -47,7 +47,7 @@ jobs:
 
       - name: Install Gradle 8.9
         run: |
-          curl -fL https://services.gradle.org/distributions/gradle-8.9-bin.zip -o /tmp/gradle.zip
+          curl -fL --retry 5 --retry-all-errors --retry-delay 10 --retry-max-time 180 https://downloads.gradle.org/distributions/gradle-8.9-bin.zip -o /tmp/gradle.zip
           unzip -q /tmp/gradle.zip -d /tmp
           /tmp/gradle-8.9/bin/gradle --version
 
