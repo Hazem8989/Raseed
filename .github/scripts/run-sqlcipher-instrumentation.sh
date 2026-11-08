@@ -64,7 +64,7 @@ run_instrumentation() {
     if [ "$instrumentation_status" -eq 124 ]; then
       echo "Instrumentation selector $selector exceeded the 20-minute limit; collecting ART thread dumps before cleanup."
       for package_name in com.hazem.dailystore com.hazem.dailystore.test; do
-        package_pid="$(adb shell pidof "$package_name" 2>/dev/null | tr -d '\\r' || true)"
+        package_pid="$(adb shell pidof "$package_name" 2>/dev/null | tr -d '\r' || true)"
         if [ -n "$package_pid" ]; then
           adb shell kill -3 $package_pid 2>/dev/null || true
         fi
@@ -78,7 +78,7 @@ run_instrumentation() {
     fi
     return "$instrumentation_status"
   fi
-  if ! grep -Eq 'OK \\([1-9][0-9]* tests?\\)' "$REPORT_DIR/$report_file"; then
+  if ! grep -Eq 'OK \([1-9][0-9]* tests?\)' "$REPORT_DIR/$report_file"; then
     echo "Instrumentation selector $selector did not report a passing test count."
     return 1
   fi
