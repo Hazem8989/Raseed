@@ -21,18 +21,50 @@ adb install --no-streaming -r -t app/build/outputs/apk/androidTest/debug/app-deb
 run_instrumentation() {
   local selector="$1"
   local report_file="$2"
-  echo "Running isolated instrumentation selector (20-minute limit): $selector"
-  set +e
-  timeout --signal=TERM --kill-after=30s 20m adb shell am instrument -w -r -e class "$selector" \
-    com.hazem.dailystore.test/androidx.test.runner.AndroidJUnitRunner \
-    2>&1 | tee "$REPORT_DIR/$report_file"
-  local instrumentation_status=${PIPESTATUS[0]}
-  set -e
+  local instrumentation_status=1
+  local attempt_log=""
+  local attempt
+  for attempt in 1 2 3; do
+    attempt_log="$REPORT_DIR/${report_file%.txt}-attempt-${attempt}.txt"
+    echo "Running isolated instrumentation selector (20-minute limit, attempt $attempt/3): $selector"
+    set +e
+    timeout --signal=TERM --kill-after=30s 20m adb shell am instrument -w -r -e class "$selector" \
+      com.hazem.dailystore.test/androidx.test.runner.AndroidJUnitRunner \
+      2>&1 | tee "$attempt_log"
+    instrumentation_status=${PIPESTATUS[0]}
+    set -e
+
+    if [ "$instrumentation_status" -eq 0 ]; then
+      cp "$attempt_log" "$REPORT_DIR/$report_file"
+      break
+    fi
+
+    # A transient system_server restart can make the instrumentation command
+    # throw this framework NPE before the test process starts. Retry only this
+    # exact infrastructure signature; real test failures remain immediate failures.
+    if grep -Fq "IActivityManager.startInstrumentation" "$attempt_log" &&
+       grep -Fq "on a null object reference" "$attempt_log" &&
+       [ "$attempt" -lt 3 ]; then
+      echo "Android ActivityManager was temporarily unavailable before instrumentation. Waiting for the binder service before retry."
+      for recovery_attempt in $(seq 1 30); do
+        if adb shell service check activity 2>&1 | grep -q "found"; then
+          sleep 3
+          break
+        fi
+        sleep 2
+      done
+      continue
+    fi
+
+    break
+  done
+
   if [ "$instrumentation_status" -ne 0 ]; then
+    cp "$attempt_log" "$REPORT_DIR/$report_file"
     if [ "$instrumentation_status" -eq 124 ]; then
       echo "Instrumentation selector $selector exceeded the 20-minute limit; collecting ART thread dumps before cleanup."
       for package_name in com.hazem.dailystore com.hazem.dailystore.test; do
-        package_pid="$(adb shell pidof "$package_name" 2>/dev/null | tr -d '\r' || true)"
+        package_pid="$(adb shell pidof "$package_name" 2>/dev/null | tr -d '\\r' || true)"
         if [ -n "$package_pid" ]; then
           adb shell kill -3 $package_pid 2>/dev/null || true
         fi
@@ -42,16 +74,15 @@ run_instrumentation() {
       adb logcat -d -v threadtime > "$REPORT_DIR/timeout-thread-dump-$report_file" 2>/dev/null || true
       echo "Thread dumps and process state saved for $selector."
     else
-      echo "Instrumentation selector $selector failed with exit code $instrumentation_status"
+      echo "Instrumentation selector $selector failed with exit code $instrumentation_status after infrastructure retry policy."
     fi
     return "$instrumentation_status"
   fi
-  if ! grep -Eq 'OK \([1-9][0-9]* tests?\)' "$REPORT_DIR/$report_file"; then
+  if ! grep -Eq 'OK \\([1-9][0-9]* tests?\\)' "$REPORT_DIR/$report_file"; then
     echo "Instrumentation selector $selector did not report a passing test count."
     return 1
   fi
 }
-
 case "$SUITE" in
   core)
     run_instrumentation "com.hazem.dailystore.data.DatabaseKeyVaultInstrumentedTest" "database-key-vault.txt"
