@@ -6,11 +6,6 @@ mkdir -p "$REPORT_DIR"
 trap 'adb logcat -d -t 6000 > "$REPORT_DIR/logcat.txt" 2>/dev/null || true' EXIT
 
 SUITE="${1:-all}"
-/tmp/gradle-8.9/bin/gradle --no-daemon \
-  :app:assembleDebug \
-  :app:assembleDebugAndroidTest \
-  --stacktrace
-
 adb wait-for-device
 for attempt in $(seq 1 60); do
   if [ "$(adb shell getprop sys.boot_completed 2>/dev/null | tr -d '\r')" = "1" ]; then
