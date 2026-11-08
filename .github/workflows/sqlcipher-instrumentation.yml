@@ -62,6 +62,13 @@ jobs:
             "platforms;android-34" \
             "system-images;android-34;google_apis;x86_64"
 
+      - name: Build instrumentation APKs before emulator startup
+        run: |
+          /tmp/gradle-8.9/bin/gradle --no-daemon --max-workers=2 \
+            :app:assembleDebug \
+            :app:assembleDebugAndroidTest \
+            --stacktrace
+
       - name: Run isolated SQLCipher suite on lightweight AOSP emulator
         uses: reactivecircus/android-emulator-runner@v2
         with:
@@ -69,7 +76,7 @@ jobs:
           target: google_apis
           arch: x86_64
           profile: pixel_2
-          emulator-options: -no-window -gpu swiftshader_indirect -no-snapshot -noaudio -no-boot-anim -camera-back none -camera-front none -memory 4096 -cores 4
+          emulator-options: -no-window -gpu swiftshader_indirect -no-snapshot -noaudio -no-boot-anim -camera-back none -camera-front none -memory 3072 -cores 2
           emulator-boot-timeout: 900
           disable-animations: true
           script: bash .github/scripts/run-sqlcipher-instrumentation.sh "${{ matrix.suite }}"
