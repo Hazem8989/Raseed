@@ -117,4 +117,85 @@ class SqlCipherDatabaseMigratorInstrumentedTest {
             }
         }
     }
+    @Test
+    fun exportsRealProductionV33AppDatabaseWithoutChangingTheOriginalFile() {
+        val context = InstrumentationRegistry.getInstrumentation().targetContext as Context
+        val suffix = UUID.randomUUID().toString().replace("-", "")
+        val source = context.getDatabasePath("migration-real-app-v33-$suffix.db")
+        val destination = context.getDatabasePath("migration-real-app-v33-cipher-$suffix.db")
+        val key = ByteArray(32).also(java.security.SecureRandom()::nextBytes)
+        val helper = AppDatabase(context, source.name)
+
+        try {
+            val database = helper.writableDatabase
+            assertEquals(AppDatabase.DATABASE_VERSION, database.version)
+            database.execSQL(
+                "INSERT INTO app_settings(setting_key,setting_value,updated_at) VALUES(?,?,?)",
+                arrayOf("sqlcipher_migration_audit_marker", "preserve-this-value", "2026-11-08T00:00:00Z")
+            )
+            helper.checkpointAndCloseForBackup()
+
+            val originalBytes = source.readBytes()
+            assertTrue("Production schema fixture must be non-empty", originalBytes.isNotEmpty())
+            assertTrue("Unique encrypted destination must not exist", !destination.exists())
+
+            SqlCipherDatabaseMigrator.exportPlainDatabase(source, destination, key)
+
+            assertTrue("The original production SQLite database must remain present", source.isFile)
+            assertTrue(
+                "The original production SQLite bytes must remain unchanged",
+                originalBytes.contentEquals(source.readBytes())
+            )
+            SqlCipherDatabaseMigrator.validateEncryptedDatabase(
+                destination,
+                key,
+                sourceVersion = AppDatabase.DATABASE_VERSION
+            )
+
+            val passphrase = key.joinToString("") { "%02x".format(it) }.toByteArray(Charsets.US_ASCII)
+            val encrypted = CipherSQLiteDatabase.openDatabase(
+                destination.absolutePath,
+                passphrase,
+                null,
+                CipherSQLiteDatabase.OPEN_READONLY,
+                null,
+                null
+            )
+            try {
+                assertEquals(AppDatabase.DATABASE_VERSION, encrypted.version)
+                encrypted.rawQuery(
+                    "SELECT setting_value FROM app_settings WHERE setting_key=?",
+                    arrayOf("sqlcipher_migration_audit_marker")
+                ).use { cursor ->
+                    assertTrue("Production settings marker must survive export", cursor.moveToFirst())
+                    assertEquals("preserve-this-value", cursor.getString(0))
+                    assertTrue("Marker must be unique", !cursor.moveToNext())
+                }
+                encrypted.rawQuery(
+                    "SELECT COUNT(*) FROM sqlite_master " +
+                        "WHERE name NOT LIKE 'sqlite_%' AND type IN ('table','index','trigger','view')",
+                    null
+                ).use { cursor ->
+                    assertTrue(cursor.moveToFirst())
+                    assertTrue(
+                        "The real application schema must include its production objects",
+                        cursor.getInt(0) > 20
+                    )
+                }
+            } finally {
+                encrypted.close()
+                passphrase.fill(0)
+            }
+        } finally {
+            runCatching { helper.close() }
+            key.fill(0)
+            listOf(source, destination).forEach { file ->
+                file.delete()
+                File(file.path + "-wal").delete()
+                File(file.path + "-shm").delete()
+                File(file.path + "-journal").delete()
+            }
+        }
+    }
+
 }
