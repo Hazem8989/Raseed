@@ -183,118 +183,102 @@ class SqlCipherBackupRestoreInstrumentedTest {
 
 
     @Test
-    fun pipelineRoundTripsAndRejectsWrongPasswordAndTamperedPayload() {
-        val context = InstrumentationRegistry.getInstrumentation().targetContext as Context
-        val suffix = UUID.randomUUID().toString().replace("-", "")
-        val source = context.getDatabasePath("pipeline-source-$suffix.db")
-        val staged = context.getDatabasePath("pipeline-stage-$suffix.db")
-        val restored = context.getDatabasePath("pipeline-restored-$suffix.db")
-        val metadata = "pipeline-key-$suffix.bin"
-        val alias = "tds_pipeline_$suffix"
-        val key = ByteArray(32).also(java.security.SecureRandom()::nextBytes)
-        val password = "Pipeline-Backup-2026".toCharArray()
+    fun pipelineRejectsWrongPasswordBeforeStaging() = withPipelineFixture { fixture ->
         val wrongPassword = "Wrong-Pipeline-Password".toCharArray()
-        val pipeline = SqlCipherBackupRestorePipeline()
-        var db: SQLiteDatabase? = null
-        var recovered: ByteArray? = null
         try {
-            val parent = source.parentFile ?: error("Database directory unavailable")
-            check(parent.isDirectory || parent.mkdirs())
-            check(source.createNewFile())
-            db = openEncrypted(source, key)
-            db.execSQL("CREATE TABLE ledger(id TEXT PRIMARY KEY, amount_minor INTEGER NOT NULL)")
-            db.execSQL("INSERT INTO ledger VALUES('cash-1', 12500)")
-            db.version = 33
-            db.close()
-            db = null
-
-            // A non-empty WAL means the caller did not complete the checkpoint/close phase.
-            val pendingWal = File(source.path + "-wal")
-            pendingWal.writeBytes(byteArrayOf(0x01))
             try {
-                android.util.Log.i("SqlCipherPipelineTest", "checkpoint: reject non-empty WAL")
-            pipeline.createBackup(source, key, password, ByteArrayOutputStream())
-                throw AssertionError("Backup accepted a non-empty WAL sidecar")
-            } catch (_: IllegalArgumentException) {
-                assertTrue(source.isFile)
-            } finally {
-                pendingWal.delete()
-            }
-
-            android.util.Log.i("SqlCipherPipelineTest", "checkpoint: create encrypted backup")
-            val backup = ByteArrayOutputStream()
-            pipeline.createBackup(source, key, password, backup)
-            val backupBytes = backup.toByteArray()
-            assertTrue(backupBytes.size > source.length())
-
-            android.util.Log.i("SqlCipherPipelineTest", "checkpoint: backup created; testing wrong password")
-            // A wrong password must fail before a staged database is accepted.
-            try {
-                pipeline.stageRestore(
-                    ByteArrayInputStream(backupBytes),
+                fixture.pipeline.stageRestore(
+                    ByteArrayInputStream(fixture.backupBytes),
                     wrongPassword,
-                    staged
+                    fixture.staged
                 )
                 throw AssertionError("Wrong password was accepted")
             } catch (_: IllegalArgumentException) {
-                assertFalse(staged.exists())
+                assertFalse(fixture.staged.exists())
             }
+        } finally {
+            wrongPassword.fill('\u0000')
+        }
+    }
 
-            android.util.Log.i("SqlCipherPipelineTest", "checkpoint: wrong password rejected; testing tampering")
-            // Authenticated SQLCipher payload corruption must also be rejected.
-            val damaged = backupBytes.copyOf()
-            damaged[damaged.lastIndex] = (damaged.last().toInt() xor 0x01).toByte()
-            try {
-                pipeline.stageRestore(
-                    ByteArrayInputStream(damaged),
-                    password,
-                    staged
-                )
-                throw AssertionError("Tampered SQLCipher payload was accepted")
-            } catch (_: IllegalArgumentException) {
-                assertFalse(staged.exists())
-            }
-            android.util.Log.i("SqlCipherPipelineTest", "checkpoint: tampered payload rejected; testing truncation")
-            try {
-                pipeline.stageRestore(
-                    ByteArrayInputStream(backupBytes.copyOf(backupBytes.size - 1)),
-                    password,
-                    staged
-                )
-                throw AssertionError("Truncated backup was accepted")
-            } catch (_: IllegalArgumentException) {
-                assertFalse(staged.exists())
-            }
-            android.util.Log.i("SqlCipherPipelineTest", "checkpoint: truncated payload rejected; testing trailing bytes")
-            try {
-                pipeline.stageRestore(
-                    ByteArrayInputStream(backupBytes + byteArrayOf(0x01)),
-                    password,
-                    staged
-                )
-                throw AssertionError("Backup with trailing bytes was accepted")
-            } catch (_: IllegalArgumentException) {
-                assertFalse(staged.exists())
-            }
-
-            android.util.Log.i("SqlCipherPipelineTest", "checkpoint: malformed payloads rejected; testing valid restore")
-            recovered = pipeline.stageRestore(
-                ByteArrayInputStream(backupBytes),
-                password,
-                staged
+    @Test
+    fun pipelineRejectsTamperedSqlCipherPayload() = withPipelineFixture { fixture ->
+        val damaged = fixture.backupBytes.copyOf()
+        damaged[damaged.lastIndex] = (damaged.last().toInt() xor 0x01).toByte()
+        try {
+            fixture.pipeline.stageRestore(
+                ByteArrayInputStream(damaged),
+                fixture.password,
+                fixture.staged
             )
-            android.util.Log.i("SqlCipherPipelineTest", "checkpoint: valid backup staged; committing restore")
-            assertArrayEquals(key, recovered)
-            val vault = DatabaseKeyVault(context, metadata, alias)
-            pipeline.commitRestoreToEmptyDevice(staged, restored, recovered, vault)
+            throw AssertionError("Tampered SQLCipher payload was accepted")
+        } catch (_: IllegalArgumentException) {
+            assertFalse(fixture.staged.exists())
+        }
+    }
 
-            android.util.Log.i("SqlCipherPipelineTest", "checkpoint: restore committed; verifying restored database")
+    @Test
+    fun pipelineRejectsTruncatedBackupPayload() = withPipelineFixture { fixture ->
+        try {
+            fixture.pipeline.stageRestore(
+                ByteArrayInputStream(fixture.backupBytes.copyOf(fixture.backupBytes.size - 1)),
+                fixture.password,
+                fixture.staged
+            )
+            throw AssertionError("Truncated backup was accepted")
+        } catch (_: IllegalArgumentException) {
+            assertFalse(fixture.staged.exists())
+        }
+    }
+
+    @Test
+    fun pipelineRejectsTrailingBackupBytes() = withPipelineFixture { fixture ->
+        try {
+            fixture.pipeline.stageRestore(
+                ByteArrayInputStream(fixture.backupBytes + byteArrayOf(0x01)),
+                fixture.password,
+                fixture.staged
+            )
+            throw AssertionError("Backup with trailing bytes was accepted")
+        } catch (_: IllegalArgumentException) {
+            assertFalse(fixture.staged.exists())
+        }
+    }
+
+    @Test
+    fun pipelineStagesAndCommitsValidEncryptedBackup() = withPipelineFixture { fixture ->
+        var recovered: ByteArray? = null
+        var db: SQLiteDatabase? = null
+        try {
+            recovered = fixture.pipeline.stageRestore(
+                ByteArrayInputStream(fixture.backupBytes),
+                fixture.password,
+                fixture.staged
+            )
+            assertArrayEquals(fixture.key, recovered)
+            val vault = DatabaseKeyVault(
+                fixture.context,
+                fixture.metadata,
+                fixture.alias
+            )
+            fixture.pipeline.commitRestoreToEmptyDevice(
+                fixture.staged,
+                fixture.restored,
+                recovered,
+                vault
+            )
+            assertTrue(fixture.restored.isFile)
+
             val imported = vault.getOrCreateDatabaseKey(databaseExists = true)
             try {
-                assertArrayEquals(key, imported)
-                db = openEncrypted(restored, imported)
+                assertArrayEquals(fixture.key, imported)
+                db = openEncrypted(fixture.restored, imported)
                 assertEquals(33, db.version)
-                db.rawQuery("SELECT amount_minor FROM ledger WHERE id='cash-1'", null).use { cursor ->
+                assertIntegrity(db)
+                db.rawQuery(
+                    "SELECT amount_minor FROM ledger WHERE id='cash-1'",
+                    null
+                ).use { cursor ->
                     assertTrue(cursor.moveToFirst())
                     assertEquals(12500, cursor.getLong(0))
                 }
@@ -303,8 +287,45 @@ class SqlCipherBackupRestoreInstrumentedTest {
             }
         } finally {
             db?.close()
-            key.fill(0)
             recovered?.fill(0)
+        }
+    }
+
+    @Test
+    fun pipelineRejectsBackupWhileWalIsNonEmpty() = withPipelineFixture { fixture ->
+        val pendingWal = File(fixture.source.path + "-wal")
+        try {
+            pendingWal.writeBytes(byteArrayOf(0x01))
+            try {
+                fixture.pipeline.createBackup(
+                    fixture.source,
+                    fixture.key,
+                    fixture.password,
+                    ByteArrayOutputStream()
+                )
+                throw AssertionError("Backup accepted a non-empty WAL sidecar")
+            } catch (_: IllegalArgumentException) {
+                assertTrue(fixture.source.isFile)
+            }
+        } finally {
+            pendingWal.delete()
+        }
+    }
+
+    private data class PipelineFixture(
+        val context: Context,
+        val source: File,
+        val staged: File,
+        val restored: File,
+        val metadata: String,
+        val alias: String,
+        val key: ByteArray,
+        val password: CharArray,
+        val backupBytes: ByteArray,
+        val pipeline: SqlCipherBackupRestorePipeline
+    ) {
+        fun cleanup() {
+            key.fill(0)
             password.fill('\u0000')
             listOf(source, staged, restored).forEach { file ->
                 file.delete()
@@ -317,6 +338,68 @@ class SqlCipherBackupRestoreInstrumentedTest {
             runCatching {
                 val store = KeyStore.getInstance("AndroidKeyStore").apply { load(null) }
                 if (store.containsAlias(alias)) store.deleteEntry(alias)
+            }
+        }
+    }
+
+    private fun withPipelineFixture(block: (PipelineFixture) -> Unit) {
+        val context = InstrumentationRegistry.getInstrumentation().targetContext as Context
+        val suffix = UUID.randomUUID().toString().replace("-", "")
+        val source = context.getDatabasePath("pipeline-source-$suffix.db")
+        val staged = context.getDatabasePath("pipeline-stage-$suffix.db")
+        val restored = context.getDatabasePath("pipeline-restored-$suffix.db")
+        val metadata = "pipeline-key-$suffix.bin"
+        val alias = "tds_pipeline_$suffix"
+        val key = ByteArray(32).also(java.security.SecureRandom()::nextBytes)
+        val password = "Pipeline-Backup-2026".toCharArray()
+        val pipeline = SqlCipherBackupRestorePipeline()
+        var db: SQLiteDatabase? = null
+        var fixture: PipelineFixture? = null
+        try {
+            val parent = source.parentFile ?: error("Database directory unavailable")
+            check(parent.isDirectory || parent.mkdirs())
+            check(source.createNewFile())
+            db = openEncrypted(source, key)
+            db.execSQL("CREATE TABLE ledger(id TEXT PRIMARY KEY, amount_minor INTEGER NOT NULL)")
+            db.execSQL("INSERT INTO ledger VALUES('cash-1', 12500)")
+            db.version = 33
+            db.close()
+            db = null
+
+            val backup = ByteArrayOutputStream()
+            pipeline.createBackup(source, key, password, backup)
+            fixture = PipelineFixture(
+                context,
+                source,
+                staged,
+                restored,
+                metadata,
+                alias,
+                key,
+                password,
+                backup.toByteArray(),
+                pipeline
+            )
+            block(fixture)
+        } finally {
+            db?.close()
+            if (fixture != null) {
+                fixture.cleanup()
+            } else {
+                key.fill(0)
+                password.fill('\u0000')
+                listOf(source, staged, restored).forEach { file ->
+                    file.delete()
+                    File(file.path + "-wal").delete()
+                    File(file.path + "-shm").delete()
+                    File(file.path + "-journal").delete()
+                }
+                File(context.noBackupFilesDir, metadata).delete()
+                File(context.noBackupFilesDir, "$metadata.bak").delete()
+                runCatching {
+                    val store = KeyStore.getInstance("AndroidKeyStore").apply { load(null) }
+                    if (store.containsAlias(alias)) store.deleteEntry(alias)
+                }
             }
         }
     }

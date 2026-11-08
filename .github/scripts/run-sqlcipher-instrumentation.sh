@@ -62,7 +62,12 @@ case "$SUITE" in
     run_instrumentation "com.hazem.dailystore.data.SqlCipherBackupRestoreInstrumentedTest#encryptedDatabaseBackupRestoresOnFreshDeviceVaultWithAllDataIntact" "restore-end-to-end.txt"
     ;;
   pipeline)
-    run_instrumentation "com.hazem.dailystore.data.SqlCipherBackupRestoreInstrumentedTest#pipelineRoundTripsAndRejectsWrongPasswordAndTamperedPayload" "backup-pipeline.txt"
+    run_instrumentation "com.hazem.dailystore.data.SqlCipherBackupRestoreInstrumentedTest#pipelineRejectsWrongPasswordBeforeStaging" "pipeline-wrong-password.txt"
+    run_instrumentation "com.hazem.dailystore.data.SqlCipherBackupRestoreInstrumentedTest#pipelineRejectsTamperedSqlCipherPayload" "pipeline-tampered-payload.txt"
+    run_instrumentation "com.hazem.dailystore.data.SqlCipherBackupRestoreInstrumentedTest#pipelineRejectsTruncatedBackupPayload" "pipeline-truncated-payload.txt"
+    run_instrumentation "com.hazem.dailystore.data.SqlCipherBackupRestoreInstrumentedTest#pipelineRejectsTrailingBackupBytes" "pipeline-trailing-bytes.txt"
+    run_instrumentation "com.hazem.dailystore.data.SqlCipherBackupRestoreInstrumentedTest#pipelineStagesAndCommitsValidEncryptedBackup" "pipeline-valid-restore.txt"
+    run_instrumentation "com.hazem.dailystore.data.SqlCipherBackupRestoreInstrumentedTest#pipelineRejectsBackupWhileWalIsNonEmpty" "pipeline-wal-rejection.txt"
     run_instrumentation "com.hazem.dailystore.data.SqlCipherBackupRestoreInstrumentedTest#pipelineRejectsNonEmptyDestinationAndKeyVaultRejectsDifferentKeyButAllowsRetry" "backup-rejection-safety.txt"
     run_instrumentation "com.hazem.dailystore.data.SqlCipherBackupRestoreInstrumentedTest#restoreJournalPersistsMonotonicPhasesWithoutStoringSecrets" "restore-journal-phases.txt"
     run_instrumentation "com.hazem.dailystore.data.SqlCipherBackupRestoreInstrumentedTest#restoreJournalRejectsSkippedOrReversedPhasesAndDifferentPaths" "restore-journal-order.txt"
