@@ -30,7 +30,17 @@ run_instrumentation() {
   set -e
   if [ "$instrumentation_status" -ne 0 ]; then
     if [ "$instrumentation_status" -eq 124 ]; then
-      echo "Instrumentation selector $selector exceeded the 20-minute limit; see logcat.txt and its selector report."
+      echo "Instrumentation selector $selector exceeded the 20-minute limit; collecting ART thread dumps before cleanup."
+      for package_name in com.hazem.dailystore com.hazem.dailystore.test; do
+        package_pid="$(adb shell pidof "$package_name" 2>/dev/null | tr -d '\r' || true)"
+        if [ -n "$package_pid" ]; then
+          adb shell kill -3 $package_pid 2>/dev/null || true
+        fi
+      done
+      adb shell dumpsys activity processes > "$REPORT_DIR/processes-$report_file" 2>&1 || true
+      sleep 3
+      adb logcat -d -v threadtime > "$REPORT_DIR/timeout-thread-dump-$report_file" 2>/dev/null || true
+      echo "Thread dumps and process state saved for $selector."
     else
       echo "Instrumentation selector $selector failed with exit code $instrumentation_status"
     fi
