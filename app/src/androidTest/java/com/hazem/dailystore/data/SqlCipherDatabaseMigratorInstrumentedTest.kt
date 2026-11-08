@@ -228,9 +228,10 @@ class SqlCipherDatabaseMigratorInstrumentedTest {
                 null, "صنف اختبار ترحيل مشفر", null, "MIGRATION-$suffix",
                 category.id, unit.id, 125, 175, true, 10.0, actorId
             )
-            val cashAccount = CashAccountRepository(context).create(
-                actorId, "صندوق اختبار الترحيل", "CASH_BOX", "SYP", 100_000L
-            )
+            val cashRepository = CashAccountRepository(context)
+            cashRepository.ensureSystemCashAccounts()
+            val cashAccount = cashRepository.currentDayPrimaryDrawer()
+                ?: error("Production daily primary cash drawer was not initialized")
             CustomerRepository(context).create(actorId, "زبون اختبار الترحيل $suffix")
             ServiceTransferRepository(context).ensureSystemAccounts()
 
@@ -299,7 +300,9 @@ class SqlCipherDatabaseMigratorInstrumentedTest {
                     arrayOf(invoiceId)
                 ).use { cursor -> assertTrue(cursor.moveToFirst()); cursor.getInt(0) })
                 assertEquals(1, encrypted.rawQuery(
-                    "SELECT COUNT(*) FROM cash_accounts WHERE id=? AND opening_balance_minor=100000",
+                    "SELECT COUNT(*) FROM cash_accounts a " +
+                        "JOIN daily_cash_sessions s ON s.primary_cash_account_id=a.id " +
+                        "WHERE a.id=? AND a.account_type='CASH_BOX' AND a.currency_code='SYP'",
                     arrayOf(cashAccount.id)
                 ).use { cursor -> assertTrue(cursor.moveToFirst()); cursor.getInt(0) })
                 assertTrue(encrypted.rawQuery(
