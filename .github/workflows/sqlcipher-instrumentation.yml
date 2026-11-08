@@ -6,6 +6,9 @@ on:
       - the-daily-shop-development
     paths:
       - "app/**"
+      - "settings.gradle.kts"
+      - "build.gradle.kts"
+      - "gradle.properties"
       - ".github/workflows/sqlcipher-instrumentation.yml"
       - ".github/scripts/run-sqlcipher-instrumentation.sh"
   workflow_dispatch:
