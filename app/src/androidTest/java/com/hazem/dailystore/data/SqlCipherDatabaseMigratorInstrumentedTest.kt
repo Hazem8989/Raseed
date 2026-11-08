@@ -221,6 +221,11 @@ class SqlCipherDatabaseMigratorInstrumentedTest {
                 "MigrationAudit123"
             )
 
+            // Product creation emits an outbox envelope only after the installation
+            // has been explicitly configured as the primary device.
+            SyncProtocolRepository(context).configureAsPrimary(
+                actorId, "SQLCipher Migration Test Primary"
+            )
             store.saveExchangeRate(BigDecimal("15000"), actorId)
             val unit = store.getUnits().first()
             val category = store.getCategories().first()
