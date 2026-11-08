@@ -232,6 +232,13 @@ class SqlCipherDatabaseMigratorInstrumentedTest {
             cashRepository.ensureSystemCashAccounts()
             val cashAccount = cashRepository.currentDayPrimaryDrawer()
                 ?: error("Production daily primary cash drawer was not initialized")
+            val operatingDate = helper.readableDatabase.rawQuery(
+                "SELECT operating_date FROM daily_cash_sessions WHERE primary_cash_account_id=?",
+                arrayOf(cashAccount.id)
+            ).use { cursor ->
+                check(cursor.moveToFirst()) { "Daily cash session date was not initialized" }
+                cursor.getString(0)
+            }
             CustomerRepository(context).create(actorId, "زبون اختبار الترحيل $suffix")
             ServiceTransferRepository(context).ensureSystemAccounts()
 
@@ -242,7 +249,7 @@ class SqlCipherDatabaseMigratorInstrumentedTest {
                 "migration-sale-draft-$suffix",
                 invoiceId,
                 null,
-                "2026-11-08",
+                operatingDate,
                 0L,
                 "SQLCipher populated production fixture",
                 listOf(InvoiceLineInput(productId, BigDecimal("2"), 175L)),
@@ -252,7 +259,7 @@ class SqlCipherDatabaseMigratorInstrumentedTest {
             assertTrue(
                 InvoiceRepository(context).postCashSale(
                     actorId, invoiceId, saleOperationId, cashAccount.id,
-                    "2026-11-08T12:00:00Z", "2026-11-08"
+                    "${operatingDate}T12:00:00Z", operatingDate
                 )
             )
 
