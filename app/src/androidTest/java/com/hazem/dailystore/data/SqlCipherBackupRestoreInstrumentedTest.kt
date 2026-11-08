@@ -368,7 +368,7 @@ class SqlCipherBackupRestoreInstrumentedTest {
 
             val backup = ByteArrayOutputStream()
             pipeline.createBackup(source, key, password, backup)
-            fixture = PipelineFixture(
+            val createdFixture = PipelineFixture(
                 context,
                 source,
                 staged,
@@ -380,7 +380,8 @@ class SqlCipherBackupRestoreInstrumentedTest {
                 backup.toByteArray(),
                 pipeline
             )
-            block(fixture)
+            fixture = createdFixture
+            block(createdFixture)
         } finally {
             db?.close()
             if (fixture != null) {
