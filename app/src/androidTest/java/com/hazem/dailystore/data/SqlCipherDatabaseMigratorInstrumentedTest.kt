@@ -215,11 +215,11 @@ class SqlCipherDatabaseMigratorInstrumentedTest {
             store.ensureBaseSetup()
 
             val auth = AuthRepository(context)
-            auth.ensureInitialAdmin()
-            val temporaryAdmin = auth.authenticate("admin", "1234")
-                ?: error("Initial test administrator could not be authenticated")
-            auth.changePassword(temporaryAdmin.id, "1234", "MigrationAudit123")
-            val actorId = temporaryAdmin.id
+            val actorId = auth.createInitialAdmin(
+                "mig$suffix",
+                "SQLCipher Migration Test",
+                "MigrationAudit123"
+            )
 
             store.saveExchangeRate(BigDecimal("15000"), actorId)
             val unit = store.getUnits().first()
