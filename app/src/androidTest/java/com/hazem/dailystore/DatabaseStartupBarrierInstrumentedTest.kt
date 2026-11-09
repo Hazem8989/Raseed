@@ -23,7 +23,8 @@ class DatabaseStartupBarrierInstrumentedTest {
             PackageManager.GET_ACTIVITIES or
                 PackageManager.GET_RECEIVERS or
                 PackageManager.GET_SERVICES or
-                PackageManager.GET_PROVIDERS
+                PackageManager.GET_PROVIDERS or
+                PackageManager.GET_META_DATA
         )
 
         assertEquals(
