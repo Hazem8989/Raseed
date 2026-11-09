@@ -60,7 +60,12 @@ jobs:
         run: |
           set -euo pipefail
           SDKMANAGER="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
+          # sdkmanager exits normally after consuming the final "y"; the yes
+          # producer may receive SIGPIPE. Ignore pipefail only for this license pipe,
+          # while still propagating sdkmanager failures through its exit status.
+          set +o pipefail
           yes | "$SDKMANAGER" --licenses
+          set -o pipefail
 
           # Install stable SDK components separately so a transient emulator archive
           # failure cannot force needless redownloads of the platform and system image.
