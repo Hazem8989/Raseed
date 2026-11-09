@@ -36,13 +36,19 @@ install_apk_with_recovery() {
     if adb install --no-streaming -r -t "$apk" 2>&1 | tee "$install_log"; then
       return 0
     fi
-    if ! grep -Eqi "Broken pipe|Can't find service: (package|activity)|device offline|no devices/emulators found|transport.*error" "$install_log"; then
+    if ! grep -Eqi "Broken pipe|Can't find service: (package|activity)|device offline|no devices/emulators found|transport.*error|INSTALL_FAILED_VERIFICATION_FAILURE: Integrity verification timed out" "$install_log"; then
       echo "APK installation failed for a non-transient reason; not retrying." >&2
       return 1
     fi
     echo "Transient emulator/binder failure during APK installation; reconnecting and waiting for Android services."
     adb reconnect || true
-    sleep 5
+    if grep -Fq "Integrity verification timed out" "$install_log"; then
+      # Package-verifier timeout is transient on cold AVDs; allow verifier services
+      # to settle before retrying without disabling verification or weakening policy.
+      sleep 15
+    else
+      sleep 5
+    fi
   done
   echo "APK installation did not recover after four attempts: $apk" >&2
   adb logcat -d -v threadtime > "$REPORT_DIR/install-failure-logcat.txt" 2>/dev/null || true
