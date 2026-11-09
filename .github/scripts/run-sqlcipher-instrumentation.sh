@@ -129,6 +129,8 @@ case "$SUITE" in
   coordinator)
     run_instrumentation "com.hazem.dailystore.data.SqlCipherBackupRestoreInstrumentedTest#restoreCoordinatorWaitsForMissingKeyAndResumesAfterKeyImport" "restore-coordinator.txt"
     run_instrumentation "com.hazem.dailystore.data.SqlCipherSameDeviceRestoreInstrumentedTest" "same-device-restore-crash-recovery.txt"
+    ;;
+  startup_barrier)
     run_instrumentation "com.hazem.dailystore.DatabaseStartupBarrierInstrumentedTest" "database-startup-barrier.txt"
     ;;
   end_to_end)
