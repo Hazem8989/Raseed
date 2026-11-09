@@ -150,6 +150,129 @@ class SqlCipherSameDeviceRestoreInstrumentedTest {
         }
     }
 
+    @Test
+    fun missingKeyDuringInterruptedRestoreFailsClosedAndPreservesEveryDatabaseFile() {
+        val context = InstrumentationRegistry.getInstrumentation().targetContext as Context
+        System.loadLibrary("sqlcipher")
+        val suffix = UUID.randomUUID().toString().replace("-", "")
+        val live = context.getDatabasePath("same-device-missing-key-live-$suffix.db")
+        val staged = context.getDatabasePath("same-device-missing-key-stage-$suffix.db")
+        val journalName = "same-device-missing-key-journal-$suffix.bin"
+        val metadataName = "same-device-missing-key-vault-$suffix.bin"
+        val alias = "tds_same_device_missing_key_$suffix"
+        val oldKey = ByteArray(32).also(SecureRandom()::nextBytes)
+        val newKey = ByteArray(32).also(SecureRandom()::nextBytes)
+        val vault = DatabaseKeyVault(context, metadataName, alias)
+        val journalFile = File(context.noBackupFilesDir, journalName)
+
+        try {
+            vault.importDatabaseKey(oldKey, databaseExists = false)
+            createDatabase(live, oldKey, 444L)
+            createDatabase(staged, newKey, 555L)
+
+            try {
+                SqlCipherSameDeviceRestoreCoordinator(context, journalName) { checkpoint ->
+                    if (checkpoint == SqlCipherSameDeviceRestoreCoordinator.Checkpoint.JOURNAL_PREPARED) {
+                        throw SimulatedProcessDeath()
+                    }
+                }.commit(staged, live, newKey, vault, closeLiveDatabase = {})
+                throw AssertionError("Expected interruption after durable journal creation")
+            } catch (_: SimulatedProcessDeath) {
+                // Continue as if Android killed the process after the journal was synced.
+            }
+
+            // Simulate lost/unavailable local key metadata. Recovery must not
+            // generate a replacement key or touch either database file.
+            File(context.noBackupFilesDir, metadataName).delete()
+            File(context.noBackupFilesDir, "$metadataName.bak").delete()
+            val store = KeyStore.getInstance("AndroidKeyStore").apply { load(null) }
+            if (store.containsAlias(alias)) store.deleteEntry(alias)
+
+            try {
+                SqlCipherSameDeviceRestoreCoordinator(context, journalName).recover(vault)
+                throw AssertionError("Recovery proceeded without the required local key")
+            } catch (expected: IllegalStateException) {
+                assertTrue(expected.message.orEmpty().contains("مفتاح قاعدة البيانات مفقود"))
+            }
+
+            assertTrue("Recovery journal must be retained", journalFile.exists())
+            assertTrue("Original live database must be retained", live.exists())
+            assertTrue("Staged database must be retained", staged.exists())
+            assertEquals(444L, readProbe(live, oldKey))
+            assertEquals(555L, readProbe(staged, newKey))
+        } finally {
+            oldKey.fill(0)
+            newKey.fill(0)
+            listOf(live, staged, File(live.path + ".sqlcipher-rollback")).forEach { file ->
+                file.delete()
+                File(file.path + "-wal").delete()
+                File(file.path + "-shm").delete()
+                File(file.path + "-journal").delete()
+            }
+            journalFile.delete()
+            File(journalFile.path + ".bak").delete()
+            File(context.noBackupFilesDir, metadataName).delete()
+            File(context.noBackupFilesDir, "$metadataName.bak").delete()
+            runCatching {
+                val store = KeyStore.getInstance("AndroidKeyStore").apply { load(null) }
+                if (store.containsAlias(alias)) store.deleteEntry(alias)
+            }
+        }
+    }
+
+    @Test
+    fun malformedRestoreJournalFailsClosedWithoutChangingLiveOrStagedDatabase() {
+        val context = InstrumentationRegistry.getInstrumentation().targetContext as Context
+        System.loadLibrary("sqlcipher")
+        val suffix = UUID.randomUUID().toString().replace("-", "")
+        val live = context.getDatabasePath("same-device-corrupt-journal-live-$suffix.db")
+        val staged = context.getDatabasePath("same-device-corrupt-journal-stage-$suffix.db")
+        val journalName = "same-device-corrupt-journal-$suffix.bin"
+        val metadataName = "same-device-corrupt-vault-$suffix.bin"
+        val alias = "tds_same_device_corrupt_journal_$suffix"
+        val oldKey = ByteArray(32).also(SecureRandom()::nextBytes)
+        val newKey = ByteArray(32).also(SecureRandom()::nextBytes)
+        val vault = DatabaseKeyVault(context, metadataName, alias)
+        val journalFile = File(context.noBackupFilesDir, journalName)
+
+        try {
+            vault.importDatabaseKey(oldKey, databaseExists = false)
+            createDatabase(live, oldKey, 666L)
+            createDatabase(staged, newKey, 777L)
+            journalFile.writeBytes(byteArrayOf(0x00, 0x01, 0x02, 0x03))
+
+            try {
+                SqlCipherSameDeviceRestoreCoordinator(context, journalName).recover(vault)
+                throw AssertionError("Malformed restore journal was accepted")
+            } catch (expected: IllegalStateException) {
+                assertTrue(expected.message.orEmpty().contains("سجل استعادة SQLCipher"))
+            }
+
+            assertTrue("Corrupt journal must be retained for diagnosis", journalFile.exists())
+            assertTrue("Live database must be preserved", live.exists())
+            assertTrue("Staged database must be preserved", staged.exists())
+            assertEquals(666L, readProbe(live, oldKey))
+            assertEquals(777L, readProbe(staged, newKey))
+        } finally {
+            oldKey.fill(0)
+            newKey.fill(0)
+            listOf(live, staged).forEach { file ->
+                file.delete()
+                File(file.path + "-wal").delete()
+                File(file.path + "-shm").delete()
+                File(file.path + "-journal").delete()
+            }
+            journalFile.delete()
+            File(journalFile.path + ".bak").delete()
+            File(context.noBackupFilesDir, metadataName).delete()
+            File(context.noBackupFilesDir, "$metadataName.bak").delete()
+            runCatching {
+                val store = KeyStore.getInstance("AndroidKeyStore").apply { load(null) }
+                if (store.containsAlias(alias)) store.deleteEntry(alias)
+            }
+        }
+    }
+
     private fun createDatabase(file: File, key: ByteArray, value: Long) {
         val parent = file.parentFile ?: error("Database directory unavailable")
         check(parent.isDirectory || parent.mkdirs())
