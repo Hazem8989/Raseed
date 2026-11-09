@@ -36,11 +36,34 @@ class DatabaseStartupBarrierInstrumentedTest {
             context.applicationContext is TheDailyShopApplication
         )
 
+        // AndroidX Startup is contributed by AppCompat's Emoji2 integration.
+        // Its only permitted initializer performs emoji metadata setup; no database
+        // initializer may run before TheDailyShopApplication.onCreate().
         val providers = packageInfo.providers.orEmpty()
-        assertTrue(
-            "A ContentProvider can run before Application.onCreate and bypass recovery: " +
-                providers.joinToString { it.name },
-            providers.isEmpty()
+        assertEquals(
+            "Only the audited AndroidX Startup provider may run before Application.onCreate",
+            1,
+            providers.size
+        )
+        val startupProvider = providers.singleOrNull()
+        assertEquals(
+            "Unexpected early ContentProvider",
+            "androidx.startup.InitializationProvider",
+            startupProvider?.name
+        )
+        assertEquals(
+            "AndroidX Startup must stay in the recovered default process",
+            context.packageName,
+            startupProvider?.processName
+        )
+        val startupMetadata = startupProvider?.metaData
+        val initializerNames = startupMetadata?.keySet().orEmpty()
+            .filter { key -> startupMetadata?.get(key) == "androidx.startup" }
+            .toSet()
+        assertEquals(
+            "Only EmojiCompat's audited non-database initializer may run before recovery",
+            setOf("androidx.emoji2.text.EmojiCompatInitializer"),
+            initializerNames
         )
 
         // Keep the component data strongly typed. Combining the three different
