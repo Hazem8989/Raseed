@@ -55,6 +55,13 @@ jobs:
           unzip -q /tmp/gradle.zip -d /tmp
           /tmp/gradle-8.9/bin/gradle --version
 
+      - name: Install Android Emulator host libraries
+        run: |
+          sudo apt-get update
+          # Ubuntu 24.04 ships PulseAudio runtime as the t64 package.
+          # The Android Emulator QEMU binary links against libpulse.so.0.
+          sudo apt-get install --yes libpulse0t64
+
       - name: Install Android SDK packages
         shell: bash
         run: |
