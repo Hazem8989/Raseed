@@ -43,15 +43,20 @@ class DatabaseStartupBarrierInstrumentedTest {
             providers.isEmpty()
         )
 
-        val components = packageInfo.activities.orEmpty().toList() +
-            packageInfo.receivers.orEmpty().toList() +
-            packageInfo.services.orEmpty().toList()
-        val splitProcesses = components.filter {
-            !it.processName.isNullOrBlank() && it.processName != context.packageName
+        // Keep the component data strongly typed. Combining the three different
+        // PackageItemInfo arrays into one inferred list can degrade to Object on
+        // older Android verifiers and trigger a VerifyError before JUnit starts.
+        val componentProcesses = buildList<Pair<String, String?>> {
+            packageInfo.activities.orEmpty().forEach { add(it.name to it.processName) }
+            packageInfo.receivers.orEmpty().forEach { add(it.name to it.processName) }
+            packageInfo.services.orEmpty().forEach { add(it.name to it.processName) }
+        }
+        val splitProcesses = componentProcesses.filter { (_, processName) ->
+            !processName.isNullOrBlank() && processName != context.packageName
         }
         assertTrue(
             "Every database-capable component must share the Application recovery process: " +
-                splitProcesses.joinToString { "${it.name}=${it.processName}" },
+                splitProcesses.joinToString { (name, processName) -> "$name=$processName" },
             splitProcesses.isEmpty()
         )
     }
