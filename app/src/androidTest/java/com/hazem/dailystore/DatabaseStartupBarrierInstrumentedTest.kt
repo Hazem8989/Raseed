@@ -37,9 +37,12 @@ class DatabaseStartupBarrierInstrumentedTest {
             context.applicationContext is TheDailyShopApplication
         )
 
-        // AndroidX Startup is contributed by AppCompat's Emoji2 integration.
-        // Its only permitted initializer performs emoji metadata setup; no database
-        // initializer may run before TheDailyShopApplication.onCreate().
+        // These AndroidX Startup initializers are contributed by the app's
+        // AndroidX dependencies. Their responsibilities are limited to framework
+        // lifecycle dispatch, emoji compatibility metadata, and baseline profile
+        // installation. None receives or opens AppDatabase/SQLite/SQLCipher.
+        // Keep this exact allowlist: any newly merged initializer must be audited
+        // before it can execute ahead of TheDailyShopApplication.onCreate().
         val providers = packageInfo.providers.orEmpty()
         assertEquals(
             "Only the audited AndroidX Startup provider may run before Application.onCreate",
@@ -62,8 +65,12 @@ class DatabaseStartupBarrierInstrumentedTest {
             .filter { key -> startupMetadata?.get(key) == "androidx.startup" }
             .toSet()
         assertEquals(
-            "Only EmojiCompat's audited non-database initializer may run before recovery",
-            setOf("androidx.emoji2.text.EmojiCompatInitializer"),
+            "Only the audited non-database AndroidX initializers may run before recovery",
+            setOf(
+                "androidx.emoji2.text.EmojiCompatInitializer",
+                "androidx.lifecycle.ProcessLifecycleInitializer",
+                "androidx.profileinstaller.ProfileInstallerInitializer"
+            ),
             initializerNames
         )
 
