@@ -1,15 +1,15 @@
 # SQLCipher Production Integration Audit
 
-Audit date: 2026-11-08  
+Audit date: 2026-11-09  
 Audited branch: `the-daily-shop-development`  
-Audited commit: `c77baecefd2a7eee9d06d49e59a339a15ee40a61`  
+Audited commit: `2bb0aa238d1775fbb2f6f743b0f85216472727a0`  
 Scope: production integration readiness, backup/restore, process interruption recovery, and preservation of the existing plaintext SQLite database.
 
 ## Executive decision
 
 **NO-GO: SQLCipher must remain isolated and must not be enabled for the production database or shipped as a live migration yet.**
 
-The current production database is still `the_daily_shop.db`, opened by Android `SQLiteOpenHelper` through `AppDatabase`, schema version 33. The SQLCipher key vault, exporter, backup container, restore pipeline, journals, and restore coordinators are not connected to the production database lifecycle.
+The current production database is still `the_daily_shop.db`, opened by Android `SQLiteOpenHelper` through `AppDatabase`, schema version 33. The SQLCipher key vault, exporter, backup container, restore pipeline, journals, and restore coordinators are still not connected to the production database lifecycle.
 
 This is a safe boundary today: the existing plaintext SQLite database has not been replaced by the new SQLCipher code. It is not evidence that production migration is ready.
 
@@ -19,10 +19,10 @@ This is a safe boundary today: the existing plaintext SQLite database has not be
 
 - `AppDatabase.kt` still extends `SQLiteOpenHelper` and opens `the_daily_shop.db` at schema version 33.
 - `AppDatabase.getInstance(context)` remains the production database factory.
-- `MainActivity.onCreate()` invokes `BackupRestoreManager(this).recoverInterruptedRestore()` before the normal repository setup. This is recovery for the legacy SQLite restore flow only.
+- `MainActivity.onCreate()` invokes `BackupRestoreManager(this).recoverInterruptedRestore()` before its normal repository setup. This is recovery for the legacy SQLite restore flow only. It is not a process-wide startup barrier: `SyncBootReceiver` can start `SyncForegroundService` after boot/package replacement, and that service constructs `SyncProtocolRepository`, which obtains `AppDatabase` directly, without first invoking SQLCipher or legacy recovery.
 - `BackupRestoreManager.kt` still creates/restores the legacy `TDSBACK1` password-encrypted SQLite backup format.
 - There is no format dispatcher connecting the legacy backup format to the new SQLCipher `TDSBKUP1` container.
-- No production migration coordinator, app-wide database maintenance gate, or SQLCipher startup-recovery hook exists in the audited source tree.
+- No production migration coordinator, app-wide database maintenance gate, or SQLCipher startup-recovery hook exists in the audited source tree. The manifest has no custom `Application` initializer to establish a database-open barrier before activities/services/receivers.
 - The SQLCipher same-device coordinator documents that recovery must run before opening the live database, but no production startup path invokes it.
 - The new-device SQLCipher restore coordinator is also isolated from `BackupRestoreManager` and `AppDatabase`.
 
@@ -47,15 +47,34 @@ The pipeline instrumentation reports were inspected; the individual reports show
 
 Passing these tests proves the isolated components and test fixtures, not production integration.
 
+## Revalidation addendum — 2026-11-09
+
+The branch was rechecked after the isolated SQLCipher suite completed on commit `2bb0aa238d1775fbb2f6f743b0f85216472727a0`:
+
+- SQLCipher Android Instrumentation run [42535174521](https://github.com/Hazem8989/Raseed/actions/runs/42535174521), attempt 2: **success**; core, coordinator, end_to_end, and pipeline jobs all completed successfully.
+- APK build run [42535174485](https://github.com/Hazem8989/Raseed/actions/runs/42535174485): **success** on the same commit.
+- Cloudflare Sync Relay validation run [42535174496](https://github.com/Hazem8989/Raseed/actions/runs/42535174496): **success** on the same commit.
+
+Additional source verification on that branch confirms:
+
+- `AppDatabase` still extends Android `SQLiteOpenHelper`; its production database remains plaintext SQLite at schema version 33.
+- `MainActivity.onCreate()` runs only the legacy `BackupRestoreManager.recoverInterruptedRestore()`, then immediately calls `StoreRepository.ensureBaseSetup()`. It does not call either SQLCipher restore coordinator.
+- `SyncBootReceiver` may start `SyncForegroundService` on boot or package replacement. The service constructs `SyncProtocolRepository`; that repository immediately obtains `AppDatabase.getInstance(context)`. This creates a database-open path outside the recovery call in `MainActivity` and is a concrete startup-order blocker.
+- `SyncProtocolRepository` and several production repositories still import/use Android `SQLiteDatabase`; SQLCipher has not replaced the production database API.
+- `BackupRestoreManager` still copies, validates, replaces, and recovers the legacy SQLite database. Its live UI path has no explicit dispatcher for the SQLCipher `TDSBKUP1` container.
+- The new real-v33 tests are meaningful progress, but they are instrumentation tests of the exporter against a test-created `AppDatabase`, not an end-to-end migration through the production application lifecycle. The populated fixture covers inventory quantity, paid sales, cash, service wallets, and a sync envelope; broader domain parity is still required.
+
+**Revalidation decision remains NO-GO.** The four isolated SQLCipher jobs passing is confirmed, but it does not clear the production integration blockers. No production source was switched to SQLCipher during this audit pass; the existing SQLite database and live data remain on the legacy path.
+
 ## Findings and risk assessment
 
 | ID | Severity | Finding | Consequence / required action |
 |---|---|---|---|
 | F-01 | BLOCKER | No production migration transaction/coordinator exists. | There is no single controlled operation that blocks sales, purchases, collections and sync writes, checkpoints WAL, closes every DB handle, exports, verifies, swaps, and recovers. Do not invoke the exporter from production yet. |
-| F-02 | BLOCKER | SQLCipher recovery is not wired into application startup before database access. | A future partially completed same-device restore could be followed by opening the wrong database/key pair. Invoke recovery before any repository, `StoreRepository.ensureBaseSetup()`, authentication, sync, or `AppDatabase` access. Fail closed if recovery cannot prove a valid state. |
+| F-02 | BLOCKER | SQLCipher recovery is not wired into application startup before database access; the current legacy recovery is only in `MainActivity`. | A boot/package-replacement receiver can start the sync service, which opens `SyncProtocolRepository`/`AppDatabase` before `MainActivity` recovery. A future partially completed SQLCipher operation could therefore be followed by opening the wrong database/key pair. Establish a process-wide startup barrier before every component can open a database; fail closed if recovery cannot prove a valid state. |
 | F-03 | BLOCKER | Production database consumers remain on Android SQLite APIs. | Switching only `AppDatabase` would leave mixed SQLite/SQLCipher APIs, incompatible transaction/database types, and unconverted repository/sync paths. Convert all consumers and test factories together. |
 | F-04 | BLOCKER | Production backup/restore still uses legacy SQLite-only manager and format. | SQLCipher backups cannot be created/restored through the live production UI, and legacy backup compatibility is not yet dispatched explicitly. Add format detection and tested legacy restore/import before changing the live database. |
-| F-05 | HIGH | Migration instrumentation uses a synthetic miniature schema, not a real version-33 application database fixture. | The test proves typed-value/schema/trigger/sequence preservation and source-byte preservation for its fixture, but not all real tables, indexes, triggers, views, FIFO/accounting/sync state, or real v33 data. Add a representative full-schema fixture and populated financial/inventory/sync data. |
+| F-05 | HIGH | Real v33 migration coverage has improved but is still not a comprehensive production-data rehearsal. | `SqlCipherDatabaseMigratorInstrumentedTest` now creates a real `AppDatabase` v33 schema and a populated production-helper fixture covering inventory, a paid sale, cash transaction/account, service wallets, and a sync envelope, while asserting source-byte preservation. It still does not cover every financial/party/FIFO/return/expense/receivable/sync state or a captured representative shop database. Extend the fixture and domain parity report before production activation. |
 | F-06 | HIGH | Existing legacy backup recovery is not equivalent to the SQLCipher same-device crash matrix. | Legacy tests cover interruption after moving the live database and recovery from a corrupted live file, but do not simulate process death at every restore phase. Keep this flow unchanged until SQLCipher recovery is integrated and tested at every durable boundary. |
 | F-07 | HIGH | No app-wide write/maintenance lock is connected to migration. | A sync worker or another repository could write while migration is taking its snapshot or while files are being swapped. Add a shared gate covering UI writes, background work, relay sync, scheduled jobs, and all database handles. |
 | F-08 | HIGH | SQLCipher restore coordinators are tested as isolated helpers, not through the actual startup and backup UI paths. | Their recovery guarantees are not yet demonstrated end-to-end with Android process recreation, real database factory initialization, permissions, and user-selected backup streams. Add instrumentation through those production entry points. |
