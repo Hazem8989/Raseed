@@ -56,12 +56,44 @@ jobs:
           /tmp/gradle-8.9/bin/gradle --version
 
       - name: Install Android SDK packages
+        shell: bash
         run: |
-          yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --licenses
-          "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" \
-            "platform-tools" \
-            "platforms;android-34" \
-            "system-images;android-34;default;x86_64"
+          set -euo pipefail
+          SDKMANAGER="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
+          yes | "$SDKMANAGER" --licenses
+
+          # Install stable SDK components separately so a transient emulator archive
+          # failure cannot force needless redownloads of the platform and system image.
+          "$SDKMANAGER" "platform-tools" "platforms;android-34" "system-images;android-34;default;x86_64"
+
+          # The emulator package download can occasionally be truncated/corrupted by
+          # the upstream CDN or runner network. Retry only this package, preserve each
+          # attempt's log, and clear SDK Manager's temporary extraction cache between
+          # attempts. Do not bypass package verification or use an unverified archive.
+          emulator_installed=false
+          for attempt in 1 2 3 4; do
+            echo "Installing Android Emulator package (attempt $attempt/4)"
+            if "$SDKMANAGER" --verbose "emulator" 2>&1 | tee "/tmp/sdkmanager-emulator-attempt-$attempt.log"; then
+              emulator_installed=true
+              break
+            fi
+
+            if ! grep -Eqi "unknown archive|ZipFile|corrupt|unexpected end|failed to install" "/tmp/sdkmanager-emulator-attempt-$attempt.log"; then
+              echo "Android Emulator installation failed for a non-retryable reason; see attempt log." >&2
+              exit 1
+            fi
+
+            echo "Detected a damaged/incomplete SDK download or extraction; clearing temporary SDK Manager cache before retry."
+            rm -rf "$ANDROID_HOME/.temp" "$ANDROID_HOME/temp"
+            sleep 15
+          done
+
+          if [ "$emulator_installed" != true ]; then
+            echo "Android Emulator package could not be installed after four verified retries." >&2
+            exit 1
+          fi
+
+          "$ANDROID_HOME/emulator/emulator" -version
 
       - name: Build instrumentation APKs before emulator startup
         run: |
