@@ -60,7 +60,7 @@ jobs:
           sudo apt-get update
           # Ubuntu 24.04 ships PulseAudio runtime as the t64 package.
           # The Android Emulator QEMU binary links against libpulse.so.0.
-          sudo apt-get install --yes libpulse0t64
+          sudo apt-get install --yes libpulse0
 
       - name: Install Android SDK packages
         shell: bash
