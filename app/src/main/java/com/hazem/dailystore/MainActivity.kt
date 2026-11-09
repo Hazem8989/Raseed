@@ -286,7 +286,6 @@ class MainActivity : Activity() {
         window.navigationBarColor = green
         window.setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE)
         window.decorView.layoutDirection = View.LAYOUT_DIRECTION_RTL
-        BackupRestoreManager(this).recoverInterruptedRestore()
         StoreRepository(this).ensureBaseSetup()
         val authRepository = AuthRepository(this)
         if (authRepository.needsInitialAdminSetup()) {
