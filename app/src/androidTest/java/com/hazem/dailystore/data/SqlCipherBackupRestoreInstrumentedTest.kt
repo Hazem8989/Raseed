@@ -183,21 +183,45 @@ class SqlCipherBackupRestoreInstrumentedTest {
 
 
     @Test
-    fun pipelineRejectsWrongPasswordBeforeStaging() = withPipelineFixture { fixture ->
+    fun pipelineRejectsWrongPasswordBeforeStaging() {
+        val context = InstrumentationRegistry.getInstrumentation().targetContext as Context
+        val suffix = UUID.randomUUID().toString().replace("-", "")
+        val staged = context.getDatabasePath("pipeline-wrong-password-stage-$suffix.db")
+        val key = ByteArray(32).also(java.security.SecureRandom()::nextBytes)
+        val correctPassword = "Correct-Pipeline-Password".toCharArray()
         val wrongPassword = "Wrong-Pipeline-Password".toCharArray()
         try {
+            // Reject at authenticated key-envelope verification, before touching
+            // payload bytes or opening a SQLCipher database.
+            val envelope = BackupKeyEnvelope.wrap(key, correctPassword)
+            val backup = ByteArrayOutputStream().also { bytes ->
+                java.io.DataOutputStream(bytes).use { output ->
+                    output.write(byteArrayOf(
+                        0x54, 0x44, 0x53, 0x42, 0x4B, 0x55, 0x50, 0x31
+                    ))
+                    output.writeInt(1)
+                    output.writeInt(envelope.size)
+                    output.writeLong(1L)
+                    output.write(envelope)
+                    output.writeByte(0x01)
+                }
+            }.toByteArray()
+
             try {
-                fixture.pipeline.stageRestore(
-                    ByteArrayInputStream(fixture.backupBytes),
+                SqlCipherBackupRestorePipeline().stageRestore(
+                    ByteArrayInputStream(backup),
                     wrongPassword,
-                    fixture.staged
+                    staged
                 )
                 throw AssertionError("Wrong password was accepted")
             } catch (_: IllegalArgumentException) {
-                assertFalse(fixture.staged.exists())
+                assertFalse(staged.exists())
             }
         } finally {
-            wrongPassword.fill('\u0000')
+            key.fill(0)
+            correctPassword.fill('\\u0000')
+            wrongPassword.fill('\\u0000')
+            staged.delete()
         }
     }
 
