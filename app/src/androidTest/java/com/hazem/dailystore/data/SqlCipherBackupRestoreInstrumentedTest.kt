@@ -219,8 +219,8 @@ class SqlCipherBackupRestoreInstrumentedTest {
             }
         } finally {
             key.fill(0)
-            correctPassword.fill('\\u0000')
-            wrongPassword.fill('\\u0000')
+            correctPassword.fill('\u0000')
+            wrongPassword.fill('\u0000')
             staged.delete()
         }
     }
