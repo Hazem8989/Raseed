@@ -12,7 +12,7 @@ SUITE="${1:-all}"
 wait_for_android_framework() {
   local attempt
   adb wait-for-device
-  for attempt in $(seq 1 90); do
+  for attempt in $(seq 1 180); do
     if [ "$(adb shell getprop sys.boot_completed 2>/dev/null | tr -d '\r')" = "1" ] &&
        adb shell service check package 2>&1 | grep -q "found" &&
        adb shell service check activity 2>&1 | grep -q "found"; then
@@ -42,7 +42,14 @@ install_apk_with_recovery() {
     fi
     echo "Transient emulator/binder failure during APK installation; reconnecting and waiting for Android services."
     adb reconnect || true
-    if grep -Fq "Integrity verification timed out" "$install_log"; then
+    if grep -Eq "Can't find service: (package|activity)|Broken pipe" "$install_log"; then
+      # system_server/binder may have died after a slow cold boot. Reboot the AVD
+      # rather than repeatedly attempting package operations against dead services.
+      echo "Android framework services disappeared; rebooting the test emulator."
+      adb reboot || true
+      sleep 10
+      wait_for_android_framework
+    elif grep -Fq "Integrity verification timed out" "$install_log"; then
       # Package-verifier timeout is transient on cold AVDs; allow verifier services
       # to settle before retrying without disabling verification or weakening policy.
       sleep 15
@@ -84,16 +91,15 @@ run_instrumentation() {
     # throw this framework NPE before the test process starts. Retry only this
     # exact infrastructure signature; real test failures remain immediate failures.
     if grep -Fq "IActivityManager.startInstrumentation" "$attempt_log" &&
-       grep -Fq "on a null object reference" "$attempt_log" &&
+       { grep -Fq "on a null object reference" "$attempt_log" || grep -Fq "DeadObjectException" "$attempt_log"; } &&
        [ "$attempt" -lt 3 ]; then
-      echo "Android ActivityManager was temporarily unavailable before instrumentation. Waiting for the binder service before retry."
-      for recovery_attempt in $(seq 1 30); do
-        if adb shell service check activity 2>&1 | grep -q "found"; then
-          sleep 3
-          break
-        fi
-        sleep 2
-      done
+      echo "Android ActivityManager binder failed before instrumentation; recovering framework before retry."
+      adb reconnect || true
+      if ! adb shell service check activity 2>&1 | grep -q "found"; then
+        adb reboot || true
+      fi
+      wait_for_android_framework
+      sleep 3
       continue
     fi
 
