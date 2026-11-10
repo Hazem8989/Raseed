@@ -32,9 +32,13 @@ internal object BackupKeyEnvelope {
 
     private const val LEGACY_VERSION = 1
     private const val VERSION = 2
-    private const val ITERATIONS = 310_000
-    private const val MIN_ITERATIONS = 200_000
-    private const val MAX_ITERATIONS = 500_000
+    // OWASP's current PBKDF2-HMAC-SHA256 baseline is 600,000 iterations.
+    // Keep the legacy v1 range separate so existing backups remain readable.
+    private const val ITERATIONS = 600_000
+    private const val LEGACY_MIN_ITERATIONS = 200_000
+    private const val LEGACY_MAX_ITERATIONS = 500_000
+    private const val MIN_ITERATIONS = 600_000
+    private const val MAX_ITERATIONS = 1_000_000
     private const val SALT_BYTES = 16
     private const val IV_BYTES = 12
     private const val KEY_BYTES = 32
@@ -75,7 +79,12 @@ internal object BackupKeyEnvelope {
             "Unsupported database-key envelope version"
         }
         val iterations = input.readInt()
-        require(iterations in MIN_ITERATIONS..MAX_ITERATIONS) { "Invalid key-derivation parameters" }
+        val validIterations = if (version == LEGACY_VERSION) {
+            iterations in LEGACY_MIN_ITERATIONS..LEGACY_MAX_ITERATIONS
+        } else {
+            iterations in MIN_ITERATIONS..MAX_ITERATIONS
+        }
+        require(validIterations) { "Invalid key-derivation parameters" }
         val salt = ByteArray(SALT_BYTES).also(input::readFully)
         val iv = ByteArray(IV_BYTES).also(input::readFully)
         val header = envelope.copyOfRange(0, HEADER_BYTES)
