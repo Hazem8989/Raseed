@@ -73,6 +73,51 @@ class DatabaseKeyVault(
     }
 
     /**
+     * Creates or reloads the device-local key for a verified legacy plaintext
+     * database migration. Unlike getOrCreateDatabaseKey(), this explicitly
+     * permits key provisioning while the legacy database file exists.
+     *
+     * The caller must first validate that legacyDatabase is the intended
+     * plaintext SQLite file and must keep it untouched until encrypted export,
+     * parity checks, and the atomic replacement have all completed.
+     */
+    @Synchronized
+    internal fun getOrCreateMigrationKey(legacyDatabase: File): ByteArray {
+        require(legacyDatabase.isFile && legacyDatabase.length() > 0L) {
+            "قاعدة SQLite القديمة غير موجودة أو فارغة؛ رُفض إنشاء مفتاح ترحيل"
+        }
+        if (hasMetadata()) return decryptExistingKey()
+
+        // No encrypted database can be opened without metadata. An orphaned
+        // wrapping alias from an interrupted first setup is therefore replaceable.
+        deleteWrappingKeyIfPresent()
+        val databaseKey = ByteArray(DATABASE_KEY_BYTES).also(SECURE_RANDOM::nextBytes)
+        try {
+            val wrappingKey = createWrappingKey()
+            val cipher = Cipher.getInstance(TRANSFORMATION)
+            cipher.init(Cipher.ENCRYPT_MODE, wrappingKey)
+            val header = metadataHeader()
+            cipher.updateAAD(header)
+            val encryptedKey = cipher.doFinal(databaseKey)
+            writeMetadata(header, cipher.iv, encryptedKey)
+            encryptedKey.fill(0)
+
+            val verified = decryptExistingKey()
+            try {
+                check(java.security.MessageDigest.isEqual(verified, databaseKey)) {
+                    "فشل التحقق من مفتاح ترحيل قاعدة البيانات"
+                }
+            } finally {
+                verified.fill(0)
+            }
+            return databaseKey
+        } catch (error: Exception) {
+            databaseKey.fill(0)
+            throw DatabaseKeyException("تعذر إنشاء مفتاح آمن لترحيل قاعدة SQLite القديمة", error)
+        }
+    }
+
+    /**
      * Imports a recovered SQLCipher key onto a new device by wrapping it with
      * this device's non-exportable Android Keystore key.
      *
