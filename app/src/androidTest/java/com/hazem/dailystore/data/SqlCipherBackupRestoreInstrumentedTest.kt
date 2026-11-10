@@ -652,11 +652,11 @@ class SqlCipherBackupRestoreInstrumentedTest {
             db.execSQL("INSERT INTO restore_probe VALUES('probe-1', 8800)")
             db.close()
             db = null
-            tracePhase("coordinator_source_database_closed")
+            tracePhase("coordinator_source_database_closed databaseBytes=${staging.length()}")
             val backup = ByteArrayOutputStream()
             tracePhase("coordinator_backup_write_start")
             SqlCipherBackupContainer.write(staging, key, password, backup)
-            tracePhase("coordinator_backup_write_complete")
+            tracePhase("coordinator_backup_write_complete containerBytes=${backup.size()} databaseBytes=${staging.length()}")
             val journal = SqlCipherRestoreJournal(journalFile)
             tracePhase("coordinator_journal_begin_start")
             journal.begin(staging, destination)
