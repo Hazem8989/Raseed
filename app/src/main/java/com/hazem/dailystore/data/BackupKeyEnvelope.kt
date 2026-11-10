@@ -4,9 +4,7 @@ import java.io.ByteArrayInputStream
 import java.io.ByteArrayOutputStream
 import java.io.DataInputStream
 import java.io.DataOutputStream
-import java.nio.ByteBuffer
-import java.nio.CharBuffer
-import java.nio.charset.StandardCharsets
+import javax.crypto.spec.PBEKeySpec
 import java.security.SecureRandom
 import javax.crypto.Cipher
 import javax.crypto.Mac
@@ -131,41 +129,21 @@ internal object BackupKeyEnvelope {
      * SecretKeyFactory path observed on the Android emulator.
      */
     private fun deriveSha256(password: CharArray, salt: ByteArray, iterations: Int): ByteArray {
-        val encodedPassword = StandardCharsets.UTF_8.encode(CharBuffer.wrap(password))
-        val passwordBytes = ByteArray(encodedPassword.remaining()).also(encodedPassword::get)
-        if (encodedPassword.hasArray()) encodedPassword.array().fill(0)
-
-        var u = ByteArray(0)
-        var next = ByteArray(KEY_BYTES)
-        var result = ByteArray(KEY_BYTES)
-        try {
-            val mac = Mac.getInstance("HmacSHA256")
-            mac.init(SecretKeySpec(passwordBytes, "HmacSHA256"))
-            val firstBlock = ByteBuffer.allocate(salt.size + Int.SIZE_BYTES)
-                .put(salt)
-                .putInt(1)
-                .array()
-            u = mac.doFinal(firstBlock)
-            u.copyInto(result)
-            // Reuse two fixed-size buffers. Allocating a new 32-byte array in
-            // every PBKDF2 round caused hundreds of thousands of allocations
-            // per key derivation and prolonged ART GC/CPU pressure on Android.
-            for (round in 1 until iterations) {
-                mac.update(u)
-                mac.doFinal(next, 0)
-                for (index in result.indices) {
-                    result[index] = (result[index].toInt() xor next[index].toInt()).toByte()
-                }
-                val previous = u
-                u = next
-                next = previous
-            }
-            return result.also { result = ByteArray(0) }
+        // Use the platform PBKDF2 implementation. Calling Mac.doFinal() once per
+        // round crosses the Android Conscrypt/JNI boundary 600,000 times; the
+        // coordinator ART dump showed the instrumentation thread spending its
+        // entire 20-minute window inside that call. SecretKeyFactory performs
+        // the complete PBKDF2 operation in the provider and preserves the
+        // PBKDF2-HMAC-SHA256 output format used by existing v2 envelopes.
+        val spec = PBEKeySpec(password, salt, iterations, KEY_BYTES * 8)
+        return try {
+            val derived = SecretKeyFactory.getInstance("PBKDF2WithHmacSHA256")
+                .generateSecret(spec)
+                .encoded
+            require(derived.size == KEY_BYTES) { "Invalid PBKDF2-SHA256 output size" }
+            derived
         } finally {
-            passwordBytes.fill(0)
-            u.fill(0)
-            next.fill(0)
-            result.fill(0)
+            spec.clearPassword()
         }
     }
 
