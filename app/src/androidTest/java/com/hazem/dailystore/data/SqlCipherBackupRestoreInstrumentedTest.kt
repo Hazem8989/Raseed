@@ -633,6 +633,7 @@ class SqlCipherBackupRestoreInstrumentedTest {
         val vault = DatabaseKeyVault(context, metadata, alias)
         var db: SQLiteDatabase? = null
         try {
+            tracePhase("coordinator_test_start")
             // SQLCipher openDatabase() requires the target file to exist on this
             // Android runtime. getDatabasePath() resolves the path but does not
             // create the file; create it explicitly before opening the staged DB.
@@ -644,22 +645,32 @@ class SqlCipherBackupRestoreInstrumentedTest {
             check(staging.createNewFile()) {
                 "Unable to pre-create SQLCipher staging database: ${staging.absolutePath}"
             }
+            tracePhase("coordinator_source_database_open_start")
             db = openEncrypted(staging, key)
+            tracePhase("coordinator_source_database_open_complete")
             db.execSQL("CREATE TABLE restore_probe(id TEXT PRIMARY KEY, amount INTEGER NOT NULL)")
             db.execSQL("INSERT INTO restore_probe VALUES('probe-1', 8800)")
             db.close()
             db = null
+            tracePhase("coordinator_source_database_closed")
             val backup = ByteArrayOutputStream()
+            tracePhase("coordinator_backup_write_start")
             SqlCipherBackupContainer.write(staging, key, password, backup)
+            tracePhase("coordinator_backup_write_complete")
             val journal = SqlCipherRestoreJournal(journalFile)
+            tracePhase("coordinator_journal_begin_start")
             journal.begin(staging, destination)
+            tracePhase("coordinator_journal_begin_complete")
             val coordinator = SqlCipherRestoreCoordinator(journal)
 
+            tracePhase("coordinator_recover_waiting_start")
             assertEquals(SqlCipherRestoreCoordinator.RecoveryResult.WAITING_FOR_KEY,
                 coordinator.recover(staging.parentFile!!, vault))
+            tracePhase("coordinator_recover_waiting_complete")
             assertTrue(staging.isFile)
             assertFalse(destination.exists())
 
+            tracePhase("coordinator_resume_start")
             assertEquals(SqlCipherRestoreCoordinator.RecoveryResult.RESTORE_COMPLETED,
                 coordinator.resumeFromBackup(
                     ByteArrayInputStream(backup.toByteArray()),
@@ -667,21 +678,30 @@ class SqlCipherBackupRestoreInstrumentedTest {
                     staging.parentFile!!,
                     vault
                 ))
+            tracePhase("coordinator_resume_complete")
             assertFalse(staging.exists())
             assertTrue(destination.isFile)
             assertTrue(journal.read() == null)
+            tracePhase("coordinator_destination_key_read_start")
             val imported = vault.getOrCreateDatabaseKey(databaseExists = true)
+            tracePhase("coordinator_destination_key_read_complete")
             try {
+                tracePhase("coordinator_destination_database_open_start")
                 db = openEncrypted(destination, imported)
+                tracePhase("coordinator_destination_database_open_complete")
                 db.rawQuery("SELECT amount FROM restore_probe", null).use { cursor ->
                     assertTrue(cursor.moveToFirst())
                     assertEquals(8800, cursor.getLong(0))
                 }
+                tracePhase("coordinator_integrity_check_start")
                 assertIntegrity(db)
+                tracePhase("coordinator_integrity_check_complete")
             } finally {
                 imported.fill(0)
             }
+            tracePhase("coordinator_assertions_complete")
         } finally {
+            tracePhase("coordinator_cleanup_start")
             db?.close()
             key.fill(0)
             password.fill(Char.MIN_VALUE)
