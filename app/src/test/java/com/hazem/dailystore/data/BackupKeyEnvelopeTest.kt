@@ -41,7 +41,7 @@ class BackupKeyEnvelopeTest {
             "030a11181f262d343b424950575e656c737a81888f969da4abb2b9c0c7ced5dc"
         )
         assertArrayEquals(expectedKey, BackupKeyEnvelope.unwrap(fixture, unicodePassword))
-        unicodePassword.fill('\\u0000')
+        unicodePassword.fill('\u0000')
     }
 
     private fun hex(value: String): ByteArray {
