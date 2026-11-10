@@ -37,6 +37,59 @@ class DatabaseKeyVaultInstrumentedTest {
     }
 
     @Test
+    fun provisionsMigrationKeyOnlyForAnExistingLegacyDatabaseAndReloadsIt() {
+        val fixture = Fixture()
+        val legacyDatabase = File(fixture.context.cacheDir, "legacy-${UUID.randomUUID()}.db")
+        try {
+            assertThrows(IllegalArgumentException::class.java) {
+                fixture.vault.getOrCreateMigrationKey(legacyDatabase)
+            }
+            assertFalse(fixture.metadata.exists())
+            legacyDatabase.writeBytes(byteArrayOf(1, 2, 3))
+
+            val first = fixture.vault.getOrCreateMigrationKey(legacyDatabase)
+            val second = fixture.vault.getOrCreateMigrationKey(legacyDatabase)
+            try {
+                assertEquals(32, first.size)
+                assertArrayEquals(first, second)
+                assertTrue(fixture.metadata.exists())
+                assertTrue(hasKeystoreAlias(fixture.alias))
+            } finally {
+                first.fill(0)
+                second.fill(0)
+            }
+        } finally {
+            legacyDatabase.delete()
+            fixture.cleanUp()
+        }
+    }
+
+    @Test
+    fun migrationKeyProvisioningDoesNotReplaceExistingWrappedKey() {
+        val fixture = Fixture()
+        val legacyDatabase = File(fixture.context.cacheDir, "legacy-${UUID.randomUUID()}.db")
+        try {
+            legacyDatabase.writeBytes(byteArrayOf(4, 5, 6))
+            val original = fixture.vault.getOrCreateDatabaseKey(databaseExists = false)
+            val metadataBefore = fixture.metadata.readBytes()
+            try {
+                val loaded = fixture.vault.getOrCreateMigrationKey(legacyDatabase)
+                try {
+                    assertArrayEquals(original, loaded)
+                } finally {
+                    loaded.fill(0)
+                }
+                assertArrayEquals(metadataBefore, fixture.metadata.readBytes())
+            } finally {
+                original.fill(0)
+            }
+        } finally {
+            legacyDatabase.delete()
+            fixture.cleanUp()
+        }
+    }
+
+    @Test
     fun importsRecoveredKeyAndWrapsItWithThisDevicesKeystoreKey() {
         val fixture = Fixture()
         val recoveredKey = ByteArray(32) { (it * 13 + 2).toByte() }
