@@ -27,6 +27,31 @@ class BackupKeyEnvelopeTest {
     }
 
     @Test
+    fun readsFixedVersionTwoEnvelopeFromOriginalUtf8Pbkdf2Implementation() {
+        // Produced independently from the pre-optimization v2 contract:
+        // UTF-8(password), PBKDF2-HMAC-SHA256, 600,000 rounds, 256-bit key.
+        // Fixed salt/IV make this a compatibility vector, not a round-trip.
+        val fixture = hex(
+            "5444534b4559303100000002000927c0000102030405060708090a0b0c0d0e0f" +
+                "101112131415161718191a1b80a09b62f07b58ab619db829d12b4f78b5abe1f" +
+                "25f2b4ebb9e103ac1c6079569e9aeb401d5c04c370a48c47396e555ae"
+        )
+        val unicodePassword = "pässword-💾-2026".toCharArray()
+        val expectedKey = hex(
+            "030a11181f262d343b424950575e656c737a81888f969da4abb2b9c0c7ced5dc"
+        )
+        assertArrayEquals(expectedKey, BackupKeyEnvelope.unwrap(fixture, unicodePassword))
+        unicodePassword.fill('\\u0000')
+    }
+
+    private fun hex(value: String): ByteArray {
+        require(value.length % 2 == 0)
+        return ByteArray(value.length / 2) { index ->
+            value.substring(index * 2, index * 2 + 2).toInt(16).toByte()
+        }
+    }
+
+    @Test
     fun readsLegacyVersionOneSha1BackupEnvelopes() {
         val legacy = createLegacyV1Envelope(key, password)
         assertEquals(1, readInt(legacy, 8))

@@ -5,6 +5,11 @@ import java.io.ByteArrayOutputStream
 import java.io.DataInputStream
 import java.io.DataOutputStream
 import javax.crypto.spec.PBEKeySpec
+import java.nio.CharBuffer
+import java.nio.charset.StandardCharsets
+import org.bouncycastle.crypto.digests.SHA256Digest
+import org.bouncycastle.crypto.generators.PKCS5S2ParametersGenerator
+import org.bouncycastle.crypto.params.KeyParameter
 import java.security.SecureRandom
 import javax.crypto.Cipher
 import javax.crypto.Mac
@@ -122,27 +127,28 @@ internal object BackupKeyEnvelope {
         }.toByteArray()
 
     /**
-     * PBKDF2-HMAC-SHA256. SHA-256 produces exactly the 32 bytes required for the
-     * AES-256 wrapping key in one PBKDF2 block (legacy SHA-1 needed two blocks).
-     * Mac uses the platform HMAC provider, avoiding the slow pure-Java SHA-1
-     * SecretKeyFactory path observed on the Android emulator.
+     * PBKDF2-HMAC-SHA256 using Bouncy Castle's lightweight pure-Java SHA-256
+     * implementation. Android's built-in BC SecretKeyFactory delegates each
+     * digest update through OpenSSL/JNI; 600,000 iterations caused millions of
+     * JNI crossings and exceeded the restore coordinator's 20-minute limit.
+     *
+     * The byte-oriented API is intentional: v2 was originally defined over
+     * UTF-8 password bytes. Do not replace this with PBEKeySpec, whose
+     * provider-specific char conversion can change non-ASCII password keys.
      */
     private fun deriveSha256(password: CharArray, salt: ByteArray, iterations: Int): ByteArray {
-        // Use the platform PBKDF2 implementation. Calling Mac.doFinal() once per
-        // round crosses the Android Conscrypt/JNI boundary 600,000 times; the
-        // coordinator ART dump showed the instrumentation thread spending its
-        // entire 20-minute window inside that call. SecretKeyFactory performs
-        // the complete PBKDF2 operation in the provider and preserves the
-        // PBKDF2-HMAC-SHA256 output format used by existing v2 envelopes.
-        val spec = PBEKeySpec(password, salt, iterations, KEY_BYTES * 8)
+        val encodedPassword = StandardCharsets.UTF_8.encode(CharBuffer.wrap(password))
+        val passwordBytes = ByteArray(encodedPassword.remaining()).also(encodedPassword::get)
+        if (encodedPassword.hasArray()) encodedPassword.array().fill(0)
+
         return try {
-            val derived = SecretKeyFactory.getInstance("PBKDF2WithHmacSHA256")
-                .generateSecret(spec)
-                .encoded
+            val generator = PKCS5S2ParametersGenerator(SHA256Digest())
+            generator.init(passwordBytes, salt, iterations)
+            val derived = (generator.generateDerivedParameters(KEY_BYTES * 8) as KeyParameter).key
             require(derived.size == KEY_BYTES) { "Invalid PBKDF2-SHA256 output size" }
             derived
         } finally {
-            spec.clearPassword()
+            passwordBytes.fill(0)
         }
     }
 

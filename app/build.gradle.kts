@@ -63,6 +63,8 @@ dependencies {
 
     // Modern SQLCipher Android API; minSdk 23 is supported.
     implementation("net.zetetic:sqlcipher-android:4.17.0")
+    // Lightweight PBKDF2 uses pure-Java SHA-256 to avoid 600k JNI digest calls on Android.
+    implementation("org.bouncycastle:bcprov-jdk18on:1.80")
     implementation("androidx.sqlite:sqlite:2.7.0")
 
     testImplementation("com.squareup.okhttp3:mockwebserver:4.12.0")
