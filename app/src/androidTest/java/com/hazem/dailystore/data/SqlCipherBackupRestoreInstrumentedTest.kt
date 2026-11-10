@@ -1,6 +1,7 @@
 package com.hazem.dailystore.data
 
 import android.content.Context
+import android.util.Log
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import net.zetetic.database.sqlcipher.SQLiteDatabase
@@ -56,6 +57,7 @@ class SqlCipherBackupRestoreInstrumentedTest {
         var restoredDb: SQLiteDatabase? = null
 
         try {
+            tracePhase("setup_complete")
             check(!source.exists() && !staged.exists() && !restored.exists())
 
             // getDatabasePath() only resolves the path; it does not create the
@@ -73,8 +75,12 @@ class SqlCipherBackupRestoreInstrumentedTest {
                 "Unable to pre-create SQLCipher source database: ${source.absolutePath}"
             }
 
+            tracePhase("source_vault_key_start")
             sourceKey = sourceVault.getOrCreateDatabaseKey(databaseExists = false)
+            tracePhase("source_vault_key_complete")
+            tracePhase("source_database_open_start")
             sourceDb = openEncrypted(source, sourceKey)
+            tracePhase("source_database_open_complete")
             sourceDb.execSQL("PRAGMA foreign_keys=ON")
             sourceDb.execSQL("CREATE TABLE products(id TEXT PRIMARY KEY, name TEXT NOT NULL, qty INTEGER NOT NULL)")
             sourceDb.execSQL("CREATE TABLE sales_invoices(id TEXT PRIMARY KEY, total_minor INTEGER NOT NULL)")
@@ -97,20 +103,27 @@ class SqlCipherBackupRestoreInstrumentedTest {
             sourceDb.rawQuery("PRAGMA wal_checkpoint(FULL)", null).use { it.moveToFirst() }
             sourceDb.close()
             sourceDb = null
+            tracePhase("source_database_closed")
 
             val container = ByteArrayOutputStream()
+            tracePhase("backup_container_write_start")
             SqlCipherBackupContainer.write(source, sourceKey, password, container)
+            tracePhase("backup_container_write_complete bytes=${container.size()}")
 
+            tracePhase("backup_container_extract_start")
             recoveredKey = SqlCipherBackupContainer.extract(
                 ByteArrayInputStream(container.toByteArray()),
                 staged,
                 password
             )
+            tracePhase("backup_container_extract_complete bytes=${staged.length()}")
             assertTrue(staged.isFile)
             assertFalse(restored.exists())
 
             // Validate the extracted payload with SQLCipher before importing its key.
+            tracePhase("staged_database_open_start")
             stagedDb = openEncrypted(staged, recoveredKey)
+            tracePhase("staged_database_open_complete")
             assertEquals(33, stagedDb.version)
             assertIntegrity(stagedDb)
             stagedDb.rawQuery(
@@ -130,15 +143,20 @@ class SqlCipherBackupRestoreInstrumentedTest {
             }
             stagedDb.close()
             stagedDb = null
+            tracePhase("staged_database_validation_complete")
 
             // The destination vault has a distinct alias and no source-device metadata.
+            tracePhase("destination_key_import_start")
             restoredVault.importDatabaseKey(recoveredKey, databaseExists = false)
+            tracePhase("destination_key_import_complete")
             check(staged.renameTo(restored)) { "Could not atomically place validated restore file" }
 
             val importedKey = restoredVault.getOrCreateDatabaseKey(databaseExists = true)
             try {
                 assertArrayEquals(recoveredKey, importedKey)
+                tracePhase("restored_database_open_start")
                 restoredDb = openEncrypted(restored, importedKey)
+                tracePhase("restored_database_open_complete")
                 assertEquals(33, restoredDb.version)
                 assertIntegrity(restoredDb)
                 restoredDb.rawQuery(
@@ -157,7 +175,9 @@ class SqlCipherBackupRestoreInstrumentedTest {
             } finally {
                 importedKey.fill(0)
             }
+            tracePhase("restore_end_to_end_assertions_complete")
         } finally {
+            tracePhase("restore_end_to_end_cleanup_start")
             sourceDb?.close()
             stagedDb?.close()
             restoredDb?.close()
@@ -733,6 +753,10 @@ class SqlCipherBackupRestoreInstrumentedTest {
                 if (store.containsAlias(alias)) store.deleteEntry(alias)
             }
         }
+    }
+
+    private fun tracePhase(phase: String) {
+        Log.i("SqlCipherRestoreTest", "phase=$phase elapsedRealtime=${android.os.SystemClock.elapsedRealtime()}")
     }
 
     private fun openEncrypted(file: File, rawKey: ByteArray): SQLiteDatabase {
