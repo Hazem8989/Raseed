@@ -21,6 +21,7 @@ class BackupKeyEnvelopeTest {
     fun wrapsAndRecoversKeyWithCorrectPasswordUsingVersionTwoSha256() {
         val envelope = BackupKeyEnvelope.wrap(key, password)
         assertEquals(2, readInt(envelope, 8))
+        assertEquals(600_000, readInt(envelope, 12))
         assertArrayEquals(key, BackupKeyEnvelope.unwrap(envelope, password))
         assertNotEquals(key.toList(), envelope.toList())
     }
