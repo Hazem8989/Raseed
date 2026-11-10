@@ -44,35 +44,40 @@ class DatabaseStartupBarrierInstrumentedTest {
         // Keep this exact allowlist: any newly merged initializer must be audited
         // before it can execute ahead of TheDailyShopApplication.onCreate().
         val providers = packageInfo.providers.orEmpty()
-        assertEquals(
-            "Only the audited AndroidX Startup provider may run before Application.onCreate",
-            1,
-            providers.size
+        assertTrue(
+            "At most the audited AndroidX Startup provider may run before Application.onCreate",
+            providers.size <= 1
         )
-        val startupProvider = providers.singleOrNull()
-        assertEquals(
-            "Unexpected early ContentProvider",
-            "androidx.startup.InitializationProvider",
-            startupProvider?.name
-        )
-        assertEquals(
-            "AndroidX Startup must stay in the recovered default process",
-            context.packageName,
-            startupProvider?.processName
-        )
-        val startupMetadata = startupProvider?.metaData
-        val initializerNames = startupMetadata?.keySet().orEmpty()
-            .filter { key -> startupMetadata?.get(key) == "androidx.startup" }
-            .toSet()
-        assertEquals(
-            "Only the audited non-database AndroidX initializers may run before recovery",
-            setOf(
-                "androidx.emoji2.text.EmojiCompatInitializer",
-                "androidx.lifecycle.ProcessLifecycleInitializer",
-                "androidx.profileinstaller.ProfileInstallerInitializer"
-            ),
-            initializerNames
-        )
+        // AndroidX Startup's provider is optional: dependency manifest merging or
+        // library versions may omit it entirely. Absence is safe and must not fail
+        // the recovery barrier. If it is present, audit its identity, process and
+        // every initializer exactly as before.
+        if (providers.isNotEmpty()) {
+            val startupProvider = providers.single()
+            assertEquals(
+                "Unexpected early ContentProvider",
+                "androidx.startup.InitializationProvider",
+                startupProvider.name
+            )
+            assertEquals(
+                "AndroidX Startup must stay in the recovered default process",
+                context.packageName,
+                startupProvider.processName
+            )
+            val startupMetadata = startupProvider.metaData
+            val initializerNames = startupMetadata?.keySet().orEmpty()
+                .filter { key -> startupMetadata?.get(key) == "androidx.startup" }
+                .toSet()
+            assertEquals(
+                "Only the audited non-database AndroidX initializers may run before recovery",
+                setOf(
+                    "androidx.emoji2.text.EmojiCompatInitializer",
+                    "androidx.lifecycle.ProcessLifecycleInitializer",
+                    "androidx.profileinstaller.ProfileInstallerInitializer"
+                ),
+                initializerNames
+            )
+        }
 
         // Keep the component data strongly typed. Combining the three different
         // PackageItemInfo arrays into one inferred list can degrade to Object on
