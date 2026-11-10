@@ -4,9 +4,12 @@ import java.io.ByteArrayInputStream
 import java.io.ByteArrayOutputStream
 import java.io.DataInputStream
 import java.io.DataOutputStream
+import java.nio.ByteBuffer
+import java.nio.CharBuffer
+import java.nio.charset.StandardCharsets
 import java.security.SecureRandom
-import javax.crypto.AEADBadTagException
 import javax.crypto.Cipher
+import javax.crypto.Mac
 import javax.crypto.SecretKeyFactory
 import javax.crypto.spec.GCMParameterSpec
 import javax.crypto.spec.PBEKeySpec
@@ -16,9 +19,9 @@ import javax.crypto.spec.SecretKeySpec
  * Versioned, authenticated envelope for recovering a SQLCipher database key
  * from a password-protected backup on a different Android device.
  *
- * The envelope contains no plaintext database key. The caller must separately
- * encrypt/authenticate the database payload and store this envelope alongside
- * it in the backup container.
+ * Version 2 uses PBKDF2-HMAC-SHA256 and a single 256-bit output block. Version 1
+ * remains readable so backups already created by released builds stay restorable.
+ * The database key is never stored in plaintext in the envelope.
  */
 internal object BackupKeyEnvelope {
     private val random = SecureRandom()
@@ -27,7 +30,8 @@ internal object BackupKeyEnvelope {
         0x54, 0x44, 0x53, 0x4B, 0x45, 0x59, 0x30, 0x31 // TDSKEY01
     )
 
-    private const val VERSION = 1
+    private const val LEGACY_VERSION = 1
+    private const val VERSION = 2
     private const val ITERATIONS = 310_000
     private const val MIN_ITERATIONS = 200_000
     private const val MAX_ITERATIONS = 500_000
@@ -46,8 +50,8 @@ internal object BackupKeyEnvelope {
 
         val salt = ByteArray(SALT_BYTES).also(random::nextBytes)
         val iv = ByteArray(IV_BYTES).also(random::nextBytes)
-        val header = header(salt, iv, ITERATIONS)
-        val derived = derive(password, salt, ITERATIONS)
+        val header = header(salt, iv, ITERATIONS, VERSION)
+        val derived = deriveSha256(password, salt, ITERATIONS)
         return try {
             val cipher = Cipher.getInstance("AES/GCM/NoPadding")
             cipher.init(Cipher.ENCRYPT_MODE, SecretKeySpec(derived, "AES"), GCMParameterSpec(TAG_BITS, iv))
@@ -66,14 +70,21 @@ internal object BackupKeyEnvelope {
         val input = DataInputStream(ByteArrayInputStream(envelope))
         val foundMagic = ByteArray(magic.size).also(input::readFully)
         require(foundMagic.contentEquals(magic)) { "Unknown database-key envelope" }
-        require(input.readInt() == VERSION) { "Unsupported database-key envelope version" }
+        val version = input.readInt()
+        require(version == LEGACY_VERSION || version == VERSION) {
+            "Unsupported database-key envelope version"
+        }
         val iterations = input.readInt()
         require(iterations in MIN_ITERATIONS..MAX_ITERATIONS) { "Invalid key-derivation parameters" }
         val salt = ByteArray(SALT_BYTES).also(input::readFully)
         val iv = ByteArray(IV_BYTES).also(input::readFully)
         val header = envelope.copyOfRange(0, HEADER_BYTES)
         val encryptedKey = envelope.copyOfRange(HEADER_BYTES, envelope.size)
-        val derived = derive(password, salt, iterations)
+        val derived = if (version == LEGACY_VERSION) {
+            deriveLegacySha1(password, salt, iterations)
+        } else {
+            deriveSha256(password, salt, iterations)
+        }
         return try {
             val cipher = Cipher.getInstance("AES/GCM/NoPadding")
             cipher.init(Cipher.DECRYPT_MODE, SecretKeySpec(derived, "AES"), GCMParameterSpec(TAG_BITS, iv))
@@ -88,18 +99,62 @@ internal object BackupKeyEnvelope {
         }
     }
 
-    private fun header(salt: ByteArray, iv: ByteArray, iterations: Int): ByteArray =
+    private fun header(
+        salt: ByteArray,
+        iv: ByteArray,
+        iterations: Int,
+        version: Int
+    ): ByteArray =
         ByteArrayOutputStream(HEADER_BYTES).also { bytes ->
             DataOutputStream(bytes).use { out ->
                 out.write(magic)
-                out.writeInt(VERSION)
+                out.writeInt(version)
                 out.writeInt(iterations)
                 out.write(salt)
                 out.write(iv)
             }
         }.toByteArray()
 
-    private fun derive(password: CharArray, salt: ByteArray, iterations: Int): ByteArray {
+    /**
+     * PBKDF2-HMAC-SHA256. SHA-256 produces exactly the 32 bytes required for the
+     * AES-256 wrapping key in one PBKDF2 block (legacy SHA-1 needed two blocks).
+     * Mac uses the platform HMAC provider, avoiding the slow pure-Java SHA-1
+     * SecretKeyFactory path observed on the Android emulator.
+     */
+    private fun deriveSha256(password: CharArray, salt: ByteArray, iterations: Int): ByteArray {
+        val encodedPassword = StandardCharsets.UTF_8.encode(CharBuffer.wrap(password))
+        val passwordBytes = ByteArray(encodedPassword.remaining()).also(encodedPassword::get)
+        if (encodedPassword.hasArray()) encodedPassword.array().fill(0)
+
+        var u = ByteArray(0)
+        var result = ByteArray(KEY_BYTES)
+        try {
+            val mac = Mac.getInstance("HmacSHA256")
+            mac.init(SecretKeySpec(passwordBytes, "HmacSHA256"))
+            val firstBlock = ByteBuffer.allocate(salt.size + Int.SIZE_BYTES)
+                .put(salt)
+                .putInt(1)
+                .array()
+            u = mac.doFinal(firstBlock)
+            u.copyInto(result)
+            for (round in 1 until iterations) {
+                val next = mac.doFinal(u)
+                u.fill(0)
+                u = next
+                for (index in result.indices) {
+                    result[index] = (result[index].toInt() xor u[index].toInt()).toByte()
+                }
+            }
+            return result.also { result = ByteArray(0) }
+        } finally {
+            passwordBytes.fill(0)
+            u.fill(0)
+            result.fill(0)
+        }
+    }
+
+    /** Reads legacy version-1 backups without changing their original KDF semantics. */
+    private fun deriveLegacySha1(password: CharArray, salt: ByteArray, iterations: Int): ByteArray {
         val spec = PBEKeySpec(password, salt, iterations, KEY_BYTES * 8)
         return try {
             SecretKeyFactory.getInstance("PBKDF2WithHmacSHA1").generateSecret(spec).encoded
