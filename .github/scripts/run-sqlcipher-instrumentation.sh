@@ -113,13 +113,24 @@ run_instrumentation() {
       for package_name in com.hazem.dailystore com.hazem.dailystore.test; do
         package_pid="$(adb shell pidof "$package_name" 2>/dev/null | tr -d '\r' || true)"
         if [ -n "$package_pid" ]; then
-          adb shell kill -3 $package_pid 2>/dev/null || true
+          echo "Requesting ART SIGQUIT thread dump for $package_name (pid $package_pid)."
+          adb shell kill -s QUIT $package_pid 2>/dev/null || true
+          adb shell top -b -n 1 -p "$package_pid" > "$REPORT_DIR/top-$package_name-$report_file" 2>&1 || true
         fi
       done
+      # SIGQUIT traces are written to the emulator's ANR trace store on Android.
+      # Capture both log buffers and the trace files; logcat alone is not a thread dump.
+      sleep 8
+      adb logcat -d -b all -v threadtime > "$REPORT_DIR/timeout-logcat-$report_file" 2>/dev/null || true
       adb shell dumpsys activity processes > "$REPORT_DIR/processes-$report_file" 2>&1 || true
-      sleep 3
-      adb logcat -d -v threadtime > "$REPORT_DIR/timeout-thread-dump-$report_file" 2>/dev/null || true
-      echo "Thread dumps and process state saved for $selector."
+      adb shell dumpsys cpuinfo > "$REPORT_DIR/cpuinfo-$report_file" 2>&1 || true
+      adb shell ls -la /data/anr > "$REPORT_DIR/anr-directory-$report_file" 2>&1 || true
+      if adb root >/dev/null 2>&1; then
+        sleep 2
+        adb shell 'for f in /data/anr/traces.txt /data/anr/anr_*; do [ -f "$f" ] && { echo "===== $f ====="; cat "$f"; }; done' \
+          > "$REPORT_DIR/art-thread-dumps-$report_file" 2>&1 || true
+      fi
+      echo "ART SIGQUIT requests, ANR traces, CPU state, and process state saved for $selector."
     else
       echo "Instrumentation selector $selector failed with exit code $instrumentation_status after infrastructure retry policy."
     fi
