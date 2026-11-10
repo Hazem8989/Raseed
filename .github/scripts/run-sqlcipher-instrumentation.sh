@@ -11,18 +11,15 @@ SUITE="${1:-all}"
 # package/activity binder services may briefly disappear after a slow AVD boot.
 wait_for_android_framework() {
   local attempt
-  local ready_streak=0
   adb wait-for-device
   for attempt in $(seq 1 180); do
-    # Binder service registration alone is too early: PackageManager's internal
-    # services may still be initializing, and pm install can then crash in
-    # StorageManagerService.allocateBytes(). Require real package queries to work
-    # on three consecutive probes before allowing installation/instrumentation.
     if [ "$(adb shell getprop sys.boot_completed 2>/dev/null | tr -d '\r')" = "1" ] &&
        adb shell service check package 2>&1 | grep -q "found" &&
        adb shell service check activity 2>&1 | grep -q "found" &&
        adb shell pm path android 2>/dev/null | grep -q '^package:' &&
        adb shell cmd package list packages android 2>/dev/null | grep -q '^package:android
+    sleep 2
+  done
   echo "Android framework services did not become ready (package/activity)." >&2
   adb shell getprop sys.boot_completed >&2 || true
   adb shell service list >&2 || true
@@ -39,13 +36,13 @@ install_apk_with_recovery() {
     if adb install --no-streaming -r -t "$apk" 2>&1 | tee "$install_log"; then
       return 0
     fi
-    if ! grep -Eqi "Broken pipe|Can't find service: (package|activity)|device offline|no devices/emulators found|transport.*error|INSTALL_FAILED_VERIFICATION_FAILURE: Integrity verification timed out|PackageManagerInternal\.freeStorage" "$install_log"; then
+    if ! grep -Eqi "Broken pipe|Can't find service: (package|activity)|device offline|no devices/emulators found|transport.*error|INSTALL_FAILED_VERIFICATION_FAILURE: Integrity verification timed out" "$install_log"; then
       echo "APK installation failed for a non-transient reason; not retrying." >&2
       return 1
     fi
     echo "Transient emulator/binder failure during APK installation; reconnecting and waiting for Android services."
     adb reconnect || true
-    if grep -Eq "Can't find service: (package|activity)|Broken pipe|PackageManagerInternal\.freeStorage" "$install_log"; then
+    if grep -Eq "Can't find service: (package|activity)|Broken pipe" "$install_log"; then
       # system_server/binder may have died after a slow cold boot. Reboot the AVD
       # rather than repeatedly attempting package operations against dead services.
       echo "Android framework services disappeared; rebooting the test emulator."
@@ -117,10 +114,7 @@ run_instrumentation() {
         package_pid="$(adb shell pidof "$package_name" 2>/dev/null | tr -d '\r' || true)"
         if [ -n "$package_pid" ]; then
           echo "Requesting ART SIGQUIT thread dump for $package_name (pid $package_pid)."
-          adb shell kill -s QUIT "$package_pid" > "$REPORT_DIR/sigquit-$package_name-$report_file.txt" 2>&1 || true
-          # debuggerd -b captures native frames for SQLCipher/JNI stalls; ART's
-          # SIGQUIT output and ANR traces are collected separately below.
-          adb shell debuggerd -b "$package_pid" > "$REPORT_DIR/native-backtrace-$package_name-$report_file.txt" 2>&1 || true
+          adb shell kill -s QUIT $package_pid 2>/dev/null || true
           adb shell top -b -n 1 -p "$package_pid" > "$REPORT_DIR/top-$package_name-$report_file" 2>&1 || true
         fi
       done
@@ -135,8 +129,6 @@ run_instrumentation() {
         sleep 2
         adb shell 'for f in /data/anr/traces.txt /data/anr/anr_*; do [ -f "$f" ] && { echo "===== $f ====="; cat "$f"; }; done' \
           > "$REPORT_DIR/art-thread-dumps-$report_file" 2>&1 || true
-        # SIGQUIT may be recorded in the global trace file rather than a per-ANR file.
-        adb shell 'ls -l /data/anr' > "$REPORT_DIR/anr-files-$report_file.txt" 2>&1 || true
       fi
       echo "ART SIGQUIT requests, ANR traces, CPU state, and process state saved for $selector."
     else
@@ -187,14 +179,9 @@ esac
 
 echo "SQLCipher Android instrumentation suite '$SUITE' passed."
 ; then
-      ready_streak=$((ready_streak + 1))
-      if [ "$ready_streak" -ge 3 ]; then
-        return 0
-      fi
-    else
-      ready_streak=0
+      return 0
     fi
-    sleep 3
+    sleep 2
   done
   echo "Android framework services did not become ready (package/activity)." >&2
   adb shell getprop sys.boot_completed >&2 || true
