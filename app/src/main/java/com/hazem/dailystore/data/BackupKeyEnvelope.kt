@@ -136,6 +136,7 @@ internal object BackupKeyEnvelope {
         if (encodedPassword.hasArray()) encodedPassword.array().fill(0)
 
         var u = ByteArray(0)
+        var next = ByteArray(KEY_BYTES)
         var result = ByteArray(KEY_BYTES)
         try {
             val mac = Mac.getInstance("HmacSHA256")
@@ -146,18 +147,24 @@ internal object BackupKeyEnvelope {
                 .array()
             u = mac.doFinal(firstBlock)
             u.copyInto(result)
+            // Reuse two fixed-size buffers. Allocating a new 32-byte array in
+            // every PBKDF2 round caused hundreds of thousands of allocations
+            // per key derivation and prolonged ART GC/CPU pressure on Android.
             for (round in 1 until iterations) {
-                val next = mac.doFinal(u)
-                u.fill(0)
-                u = next
+                mac.update(u)
+                mac.doFinal(next, 0)
                 for (index in result.indices) {
-                    result[index] = (result[index].toInt() xor u[index].toInt()).toByte()
+                    result[index] = (result[index].toInt() xor next[index].toInt()).toByte()
                 }
+                val previous = u
+                u = next
+                next = previous
             }
             return result.also { result = ByteArray(0) }
         } finally {
             passwordBytes.fill(0)
             u.fill(0)
+            next.fill(0)
             result.fill(0)
         }
     }

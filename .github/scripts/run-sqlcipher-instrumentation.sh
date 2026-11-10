@@ -129,7 +129,7 @@ run_instrumentation() {
         # SIGQUIT traces are written to Android's ANR trace store.
         sleep 8
         adb shell ls -la /data/anr > "$REPORT_DIR/anr-directory-$report_file" 2>&1 || true
-        adb shell 'for f in /data/anr/traces.txt /data/anr/anr_*; do [ -f "$f" ] && { echo "===== $f ====="; cat "$f"; }; done' \
+        adb shell 'for f in /data/anr/traces.txt /data/anr/anr_* /data/anr/trace_*; do [ -f "$f" ] && { echo "===== $f ====="; cat "$f"; }; done' \
           > "$REPORT_DIR/art-thread-dumps-$report_file" 2>&1 || true
       else
         echo "adb root unavailable; app-UID SIGQUIT traces could not be collected." \
