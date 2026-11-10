@@ -65,6 +65,29 @@ class DatabaseKeyVaultInstrumentedTest {
     }
 
     @Test
+    fun migrationKeyProvisioningFailsClosedWhenWrappedMetadataIsCorrupted() {
+        val fixture = Fixture()
+        val legacyDatabase = File(fixture.context.cacheDir, "legacy-${UUID.randomUUID()}.db")
+        try {
+            legacyDatabase.writeBytes(byteArrayOf(7, 8, 9))
+            val key = fixture.vault.getOrCreateMigrationKey(legacyDatabase)
+            key.fill(0)
+            val corrupted = fixture.metadata.readBytes().also {
+                it[it.lastIndex] = (it.last().toInt() xor 0x01).toByte()
+            }
+            fixture.metadata.writeBytes(corrupted)
+
+            assertThrows(DatabaseKeyVault.DatabaseKeyException::class.java) {
+                fixture.vault.getOrCreateMigrationKey(legacyDatabase)
+            }
+            assertArrayEquals(corrupted, fixture.metadata.readBytes())
+        } finally {
+            legacyDatabase.delete()
+            fixture.cleanUp()
+        }
+    }
+
+    @Test
     fun migrationKeyProvisioningDoesNotReplaceExistingWrappedKey() {
         val fixture = Fixture()
         val legacyDatabase = File(fixture.context.cacheDir, "legacy-${UUID.randomUUID()}.db")
