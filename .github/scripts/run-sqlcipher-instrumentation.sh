@@ -16,13 +16,14 @@ wait_for_android_framework() {
     if [ "$(adb shell getprop sys.boot_completed 2>/dev/null | tr -d '\r')" = "1" ] &&
        adb shell service check package 2>&1 | grep -q "found" &&
        adb shell service check activity 2>&1 | grep -q "found" &&
+       adb shell service check mount 2>&1 | grep -q "found" &&
        adb shell pm path android 2>/dev/null | grep -q '^package:' &&
        adb shell cmd package list packages android 2>/dev/null | grep -q '^package:android$'; then
       return 0
     fi
     sleep 2
   done
-  echo "Android framework services did not become ready (package/activity)." >&2
+  echo "Android framework services did not become ready (package/activity/storage)." >&2
   adb shell getprop sys.boot_completed >&2 || true
   adb shell service list >&2 || true
   return 1
