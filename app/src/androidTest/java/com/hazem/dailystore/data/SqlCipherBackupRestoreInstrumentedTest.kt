@@ -203,6 +203,72 @@ class SqlCipherBackupRestoreInstrumentedTest {
 
 
     @Test
+    fun legacyPlaintextBackupIsConvertedToEncryptedStageWithoutChangingSource() {
+        val context = InstrumentationRegistry.getInstrumentation().targetContext as Context
+        val suffix = UUID.randomUUID().toString().replace("-", "")
+        val legacy = context.getDatabasePath("legacy-backup-$suffix.db")
+        val encrypted = context.getDatabasePath("legacy-backup-encrypted-$suffix.db")
+        val key = ByteArray(32).also(java.security.SecureRandom()::nextBytes)
+        var legacyDb: android.database.sqlite.SQLiteDatabase? = null
+        var encryptedDb: SQLiteDatabase? = null
+        try {
+            val parent = legacy.parentFile ?: error("Database directory unavailable")
+            check(parent.isDirectory || parent.mkdirs())
+            legacyDb = android.database.sqlite.SQLiteDatabase.openOrCreateDatabase(legacy, null)
+            legacyDb.execSQL("PRAGMA foreign_keys=ON")
+            legacyDb.execSQL("CREATE TABLE users(id TEXT PRIMARY KEY, name TEXT NOT NULL)")
+            legacyDb.execSQL("CREATE TABLE products(id TEXT PRIMARY KEY, name TEXT NOT NULL, qty INTEGER NOT NULL)")
+            legacyDb.execSQL("CREATE TABLE app_settings(setting_key TEXT PRIMARY KEY, setting_value TEXT NOT NULL)")
+            legacyDb.execSQL("CREATE TABLE sales_invoices(id TEXT PRIMARY KEY, total_minor INTEGER NOT NULL)")
+            legacyDb.execSQL("CREATE TABLE sale_items(id TEXT PRIMARY KEY, invoice_id TEXT NOT NULL REFERENCES sales_invoices(id), product_id TEXT NOT NULL REFERENCES products(id))")
+            legacyDb.execSQL("INSERT INTO users VALUES('u-1','Owner')")
+            legacyDb.execSQL("INSERT INTO products VALUES('p-1','Rice',19)")
+            legacyDb.execSQL("INSERT INTO app_settings VALUES('store_currency','SYP')")
+            legacyDb.execSQL("INSERT INTO sales_invoices VALUES('i-1',12500)")
+            legacyDb.execSQL("INSERT INTO sale_items VALUES('si-1','i-1','p-1')")
+            legacyDb.version = 33
+            legacyDb.close()
+            legacyDb = null
+
+            val originalHeader = ByteArray(16).also { bytes ->
+                legacy.inputStream().use { input -> check(input.read(bytes) == bytes.size) }
+            }
+            SqlCipherBackupRestorePipeline().stageLegacyPlaintextBackup(legacy, encrypted, key)
+
+            assertTrue("Legacy SQLite source must remain intact", legacy.isFile)
+            assertTrue("Encrypted staging file must be created", encrypted.isFile)
+            assertTrue(originalHeader.contentEquals(
+                ByteArray(16).also { bytes -> legacy.inputStream().use { check(it.read(bytes) == bytes.size) } }
+            ))
+            SqlCipherDatabaseMigrator.validateEncryptedDatabase(encrypted, key)
+            encryptedDb = openEncrypted(encrypted, key)
+            assertEquals(33, encryptedDb.version)
+            encryptedDb.rawQuery(
+                "SELECT p.qty, s.total_minor FROM products p JOIN sales_invoices s ON s.id='i-1' WHERE p.id='p-1'",
+                null
+            ).use { cursor ->
+                assertTrue(cursor.moveToFirst())
+                assertEquals(19, cursor.getInt(0))
+                assertEquals(12500, cursor.getLong(1))
+            }
+            encryptedDb.rawQuery("SELECT COUNT(*) FROM sale_items", null).use { cursor ->
+                assertTrue(cursor.moveToFirst())
+                assertEquals(1, cursor.getInt(0))
+            }
+        } finally {
+            legacyDb?.close()
+            encryptedDb?.close()
+            key.fill(0)
+            listOf(legacy, encrypted).forEach { file ->
+                file.delete()
+                File(file.path + "-wal").delete()
+                File(file.path + "-shm").delete()
+                File(file.path + "-journal").delete()
+            }
+        }
+    }
+
+    @Test
     fun pipelineRejectsWrongPasswordBeforeStaging() {
         val context = InstrumentationRegistry.getInstrumentation().targetContext as Context
         val suffix = UUID.randomUUID().toString().replace("-", "")

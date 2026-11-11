@@ -36,6 +36,76 @@ internal class SqlCipherBackupRestorePipeline {
     }
 
     /**
+     * Converts the plaintext SQLite payload produced by a historical TDSBACK1
+     * backup into a verified SQLCipher staging file. The source is never moved,
+     * overwritten, or deleted; callers retain it until the coordinated restore
+     * transaction has committed and passed its post-install checks.
+     */
+    fun stageLegacyPlaintextBackup(
+        legacyDatabase: File,
+        encryptedStagingFile: File,
+        databaseKey: ByteArray
+    ) {
+        require(legacyDatabase.isFile && legacyDatabase.length() in 1..MAX_DATABASE_BYTES) {
+            "ملف قاعدة SQLite المستعادة غير موجود أو تجاوز الحجم المدعوم"
+        }
+        require(databaseKey.size == 32) { "SQLCipher key must be 256 bits" }
+        require(!encryptedStagingFile.exists() || encryptedStagingFile.length() == 0L) {
+            "ملف SQLCipher المؤقت موجود مسبقاً؛ رُفضت الكتابة فوقه"
+        }
+        validateLegacyPlaintextDatabase(legacyDatabase)
+        SqlCipherDatabaseMigrator.exportPlainDatabase(
+            legacyDatabase,
+            encryptedStagingFile,
+            databaseKey
+        )
+        SqlCipherDatabaseMigrator.validateEncryptedDatabase(encryptedStagingFile, databaseKey)
+    }
+
+    private fun validateLegacyPlaintextDatabase(file: File) {
+        val header = ByteArray(16)
+        file.inputStream().use { input ->
+            require(input.read(header) == header.size &&
+                header.contentEquals("SQLite format 3\\u0000".toByteArray(Charsets.US_ASCII) +
+                    ByteArray(16 - 16))) {
+                "ملف النسخة القديمة ليس قاعدة SQLite plaintext معروفة"
+            }
+        }
+        val database = android.database.sqlite.SQLiteDatabase.openDatabase(
+            file.absolutePath,
+            null,
+            android.database.sqlite.SQLiteDatabase.OPEN_READONLY
+        )
+        try {
+            require(database.version in 1..33) {
+                "إصدار قاعدة SQLite داخل النسخة القديمة غير مدعوم"
+            }
+            database.rawQuery("PRAGMA integrity_check", null).use { cursor ->
+                require(cursor.moveToFirst() && cursor.getString(0).equals("ok", ignoreCase = true)) {
+                    "فشل فحص سلامة قاعدة SQLite القديمة"
+                }
+            }
+            database.rawQuery("PRAGMA foreign_key_check", null).use { cursor ->
+                require(!cursor.moveToFirst()) {
+                    "تحتوي قاعدة SQLite القديمة على علاقات غير سليمة"
+                }
+            }
+            listOf("users", "products", "app_settings", "sales_invoices").forEach { table ->
+                database.rawQuery(
+                    "SELECT 1 FROM sqlite_master WHERE type='table' AND name=?",
+                    arrayOf(table)
+                ).use { cursor ->
+                    require(cursor.moveToFirst()) {
+                        "النسخة القديمة لا تحتوي على جدول أساسي: $table"
+                    }
+                }
+            }
+        } finally {
+            database.close()
+        }
+    }
+
+    /**
      * Extracts to a caller-owned staging file and validates it with SQLCipher.
      * The returned key belongs to the caller and must be zeroed after commit.
      */
