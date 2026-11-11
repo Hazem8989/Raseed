@@ -78,7 +78,6 @@ class SqlCipherDatabaseRuntimeInstrumentedTest {
             SqlCipherDatabaseRuntime.loadNativeLibrary()
             helper = TestEncryptedHelper(fixture.context, fixture.database.name, key)
             val db = helper.writableDatabase
-            db.execSQL("CREATE TABLE runtime_probe (id INTEGER PRIMARY KEY, value TEXT NOT NULL)")
             db.execSQL("INSERT INTO runtime_probe(value) VALUES('cipher-ok')")
             helper.close()
 
