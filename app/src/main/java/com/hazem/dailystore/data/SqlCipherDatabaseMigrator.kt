@@ -35,7 +35,7 @@ internal object SqlCipherDatabaseMigrator {
         var sourceSnapshot: DatabaseSnapshot? = null
         var sourceVersion = 0
         try {
-            System.loadLibrary("sqlcipher")
+            SqlCipherDatabaseRuntime.loadNativeLibrary()
             // SQLCipher can read a plaintext SQLite source when no passphrase is supplied.
             sourceDb = SQLiteDatabase.openDatabase(
                 source.absolutePath, null, SQLiteDatabase.OPEN_READWRITE
@@ -85,7 +85,7 @@ internal object SqlCipherDatabaseMigrator {
         val passphrase = databaseKey.toHex().toByteArray(Charsets.US_ASCII)
         var database: SQLiteDatabase? = null
         try {
-            System.loadLibrary("sqlcipher")
+            SqlCipherDatabaseRuntime.loadNativeLibrary()
             database = SQLiteDatabase.openDatabase(
                 file.absolutePath,
                 passphrase,
