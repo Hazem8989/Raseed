@@ -23,6 +23,20 @@ import javax.crypto.spec.PBEKeySpec
 import javax.crypto.spec.SecretKeySpec
 
 /**
+ * Caller-owned verified SQLCipher staging result. Close it after the restore
+ * coordinator has consumed the file; the in-memory key is zeroed on close.
+ */
+internal class StagedSqlCipherBackup(
+    val databaseFile: File,
+    val databaseKey: ByteArray
+) : AutoCloseable {
+    override fun close() {
+        databaseKey.fill(0)
+        databaseFile.delete()
+    }
+}
+
+/**
  * Password-encrypted, authenticated, single-file database backup.
  *
  * The database is checkpointed and closed before it is copied so committed
@@ -31,6 +45,58 @@ import javax.crypto.spec.SecretKeySpec
  * the restored database has opened and passed integrity checks.
  */
 class BackupRestoreManager(private val context: Context) {
+    /**
+     * Prepares either a historical TDSBACK1 plaintext backup or a TDSBKUP1
+     * SQLCipher backup for the encrypted restore transaction.
+     *
+     * This method deliberately stages and validates only. It never replaces
+     * AppDatabase: production installation must be performed by the SQLCipher
+     * restore coordinator after AppDatabase has been migrated.
+     */
+    internal fun stageBackupForSqlCipherRestore(
+        actorUserId: String,
+        password: CharArray,
+        source: InputStream,
+        keyVault: DatabaseKeyVault
+    ): StagedSqlCipherBackup {
+        requireBackupPermission(actorUserId)
+        validatePassword(password)
+        val directory = context.getDatabasePath(AppDatabase.DATABASE_NAME).parentFile
+            ?: throw IllegalStateException("مجلد قاعدة البيانات غير متاح")
+        check(directory.isDirectory || directory.mkdirs()) { "تعذر إنشاء مجلد قاعدة البيانات" }
+        val suffix = System.nanoTime()
+        val staging = File(directory, "${AppDatabase.DATABASE_NAME}.restore-sqlcipher-$suffix.db")
+        val legacyPlaintext = File(context.cacheDir, "tds-legacy-restore-$suffix.db")
+        val prefix = ByteArray(8)
+        DataInputStream(source).readFully(prefix)
+        val replay = java.io.SequenceInputStream(prefix.inputStream(), source)
+        var key: ByteArray? = null
+        try {
+            when {
+                prefix.contentEquals(SQLCIPHER_BACKUP_MAGIC) -> {
+                    key = SqlCipherBackupRestorePipeline().stageRestore(replay, password, staging)
+                }
+                prefix.contentEquals(LEGACY_BACKUP_MAGIC) -> {
+                    decryptToFile(replay, legacyPlaintext, password)
+                    validateDatabase(legacyPlaintext)
+                    key = keyVault.getOrCreateMigrationKey(legacyPlaintext)
+                    SqlCipherBackupRestorePipeline().stageLegacyPlaintextBackup(
+                        legacyPlaintext,
+                        staging,
+                        key
+                    )
+                }
+                else -> throw IllegalArgumentException("صيغة النسخة الاحتياطية غير معروفة")
+            }
+            return StagedSqlCipherBackup(staging, key!!).also { key = null }
+        } catch (error: Exception) {
+            staging.delete()
+            key?.fill(0)
+            throw error
+        } finally {
+            legacyPlaintext.delete()
+        }
+    }
     fun createBackup(actorUserId: String, password: CharArray, destination: OutputStream, onProgress: ((String) -> Unit)? = null) {
         requireBackupPermission(actorUserId)
         validatePassword(password)
@@ -312,6 +378,8 @@ class BackupRestoreManager(private val context: Context) {
     }
 
     companion object {
+        private val LEGACY_BACKUP_MAGIC = byteArrayOf(0x54, 0x44, 0x53, 0x42, 0x41, 0x43, 0x4B, 0x31)
+        private val SQLCIPHER_BACKUP_MAGIC = byteArrayOf(0x54, 0x44, 0x53, 0x42, 0x4B, 0x55, 0x50, 0x31)
         private val LOCK = Any()
         private val SECURE_RANDOM = SecureRandom()
         private val MAGIC = byteArrayOf(0x54, 0x44, 0x53, 0x42, 0x41, 0x43, 0x4B, 0x31) // TDSBACK1
