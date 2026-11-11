@@ -124,13 +124,14 @@ jobs:
           target: default
           arch: x86_64
           profile: pixel_2
-          # The previous 4-vCPU/4-GiB AVD booted for 7.7 minutes, then
-          # settings/input binder calls returned Broken pipe before the test
-          # script started. Use a smaller guest footprint and non-indirect
-          # software rendering to reduce host/guest contention on hosted runners.
+          # The previous AVD lost Binder/system_server during early post-boot setup.
+          # Keep animation changes out of the action's pre-script phase: the test
+          # script first waits for package/activity/storage services to be healthy.
           emulator-options: -no-window -gpu swiftshader -no-snapshot -noaudio -no-boot-anim -camera-back none -camera-front none -memory 3072 -cores 2
           emulator-boot-timeout: 900
-          disable-animations: true
+          # The action applies animation settings before our framework-readiness guard.
+          # Defer that optional optimization; tests must not depend on animation scale.
+          disable-animations: false
           script: bash .github/scripts/run-sqlcipher-instrumentation.sh "${{ matrix.suite }}"
 
       - name: Upload instrumentation test reports
