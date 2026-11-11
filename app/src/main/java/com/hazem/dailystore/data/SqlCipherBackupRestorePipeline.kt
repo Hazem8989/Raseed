@@ -66,8 +66,7 @@ internal class SqlCipherBackupRestorePipeline {
         val header = ByteArray(16)
         file.inputStream().use { input ->
             require(input.read(header) == header.size &&
-                header.contentEquals("SQLite format 3\\u0000".toByteArray(Charsets.US_ASCII) +
-                    ByteArray(16 - 16))) {
+                header.contentEquals("SQLite format 3\u0000".toByteArray(Charsets.US_ASCII))) {
                 "ملف النسخة القديمة ليس قاعدة SQLite plaintext معروفة"
             }
         }
