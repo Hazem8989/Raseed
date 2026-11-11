@@ -161,6 +161,7 @@ case "$SUITE" in
     run_instrumentation "com.hazem.dailystore.data.SqlCipherDatabaseMigratorInstrumentedTest" "sqlcipher-database-migrator.txt"
     run_instrumentation "com.hazem.dailystore.data.SqlCipherLegacyMigrationCoordinatorInstrumentedTest" "sqlcipher-legacy-migration-coordinator.txt"
     run_instrumentation "com.hazem.dailystore.data.SqlCipherCompatibilityInstrumentedTest" "sqlcipher-compatibility.txt"
+    run_instrumentation "com.hazem.dailystore.data.SqlCipherOpenHelperBaseInstrumentedTest" "sqlcipher-open-helper-base.txt"
     ;;
   coordinator)
     run_instrumentation "com.hazem.dailystore.data.SqlCipherBackupRestoreInstrumentedTest#restoreCoordinatorWaitsForMissingKeyAndResumesAfterKeyImport" "restore-coordinator.txt"
