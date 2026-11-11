@@ -69,6 +69,57 @@ class SqlCipherDatabaseRuntimeInstrumentedTest {
         }
     }
 
+    @Test
+    fun openHelperCreatesAnEncryptedDatabaseAndReopensItWithTheSameVaultKey() {
+        val fixture = Fixture()
+        val key = fixture.vault.getOrCreateDatabaseKey(databaseExists = false)
+        var helper: TestEncryptedHelper? = null
+        try {
+            SqlCipherDatabaseRuntime.loadNativeLibrary()
+            helper = TestEncryptedHelper(fixture.context, fixture.database.name, key)
+            val db = helper.writableDatabase
+            db.execSQL("CREATE TABLE runtime_probe (id INTEGER PRIMARY KEY, value TEXT NOT NULL)")
+            db.execSQL("INSERT INTO runtime_probe(value) VALUES('cipher-ok')")
+            helper.close()
+
+            val header = fixture.database.inputStream().use { input ->
+                ByteArray("SQLite format 3".length).also { input.read(it) }
+            }
+            assertFalse("The production helper must not create a plaintext SQLite header",
+                header.contentEquals("SQLite format 3".toByteArray(Charsets.US_ASCII)))
+
+            helper = TestEncryptedHelper(fixture.context, fixture.database.name, key)
+            helper.writableDatabase.rawQuery(
+                "SELECT value FROM runtime_probe WHERE id=1", null
+            ).use { cursor ->
+                assertTrue(cursor.moveToFirst())
+                org.junit.Assert.assertEquals("cipher-ok", cursor.getString(0))
+            }
+        } finally {
+            helper?.close()
+            key.fill(0)
+            fixture.cleanUp()
+        }
+    }
+
+    private class TestEncryptedHelper(
+        context: android.content.Context,
+        databaseName: String,
+        databaseKey: ByteArray
+    ) : SqlCipherOpenHelperBase(context, databaseName, databaseKey, 1) {
+        override fun onCreate(db: net.zetetic.database.sqlcipher.SQLiteDatabase) {
+            db.execSQL("CREATE TABLE runtime_probe (id INTEGER PRIMARY KEY, value TEXT NOT NULL)")
+        }
+
+        override fun onUpgrade(
+            db: net.zetetic.database.sqlcipher.SQLiteDatabase,
+            oldVersion: Int,
+            newVersion: Int
+        ) {
+            throw IllegalStateException("Unexpected test database upgrade: $oldVersion -> $newVersion")
+        }
+    }
+
     private class Fixture {
         private val suffix = UUID.randomUUID().toString().replace("-", "")
         val context = InstrumentationRegistry.getInstrumentation().targetContext
