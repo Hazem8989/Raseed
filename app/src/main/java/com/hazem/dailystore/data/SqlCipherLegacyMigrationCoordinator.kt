@@ -9,7 +9,6 @@ import java.io.DataOutputStream
 import java.io.File
 import java.io.FileOutputStream
 import java.security.MessageDigest
-import java.util.UUID
 
 /**
  * Crash-recoverable, same-device plaintext SQLite -> SQLCipher migration.
@@ -105,7 +104,7 @@ internal class SqlCipherLegacyMigrationCoordinator(
             journal.advance(MigrationJournal.Phase.ENCRYPTED_INSTALLED, MigrationJournal.Phase.VERIFIED)
             afterCheckpoint(Checkpoint.VERIFICATION_RECORDED)
 
-            finishCommittedMigration(legacyDatabase, rollback)
+            finishCommittedMigration(legacyDatabase, rollback, databaseKey)
             MigrationResult.MIGRATED
         } catch (error: Exception) {
             // Before the journal exists, the live SQLite file is untouched and
@@ -209,15 +208,8 @@ internal class SqlCipherLegacyMigrationCoordinator(
         }
     }
 
-    private fun finishCommittedMigration(live: File, rollback: File) {
-        SqlCipherDatabaseMigrator.validateEncryptedDatabase(
-            live,
-            requireNotNull(journal.read()).let {
-                // Validation is performed by the caller immediately before this
-                // cleanup. The key itself is never stored in the journal.
-                throw IllegalStateException("Internal migration key handoff missing")
-            }
-        )
+    private fun finishCommittedMigration(live: File, rollback: File, databaseKey: ByteArray) {
+        SqlCipherDatabaseMigrator.validateEncryptedDatabase(live, databaseKey)
         check(isPlainSqlite(rollback)) { "نسخة التراجع الأصلية غير سليمة؛ لن يتم حذفها" }
         check(rollback.delete()) { "نجح الترحيل لكن تعذر حذف نسخة التراجع؛ سيُستكمل التنظيف عند التشغيل التالي" }
         journal.clear()
@@ -244,8 +236,7 @@ internal class SqlCipherLegacyMigrationCoordinator(
     private fun sibling(database: File, suffix: String): File =
         File(database.parentFile ?: error("Database parent directory unavailable"), database.name + suffix)
 
-    private fun withMigrationLock(block: () -> RecoveryResult): RecoveryResult =
-        withFileLock(block)
+    private fun <T> withMigrationLock(block: () -> T): T = withFileLock(block)
 
     private fun <T> withFileLock(block: () -> T): T {
         val lockFile = File(appContext.noBackupFilesDir, LOCK_FILE_NAME)
