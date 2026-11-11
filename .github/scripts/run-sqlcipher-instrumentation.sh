@@ -45,7 +45,7 @@ install_apk_with_recovery() {
     fi
     echo "Transient emulator/binder failure during APK installation; reconnecting and waiting for Android services."
     adb reconnect || true
-    if grep -Eq "PackageManagerInternal\.freeStorage|freeStorage\(|Can't find service: (package|activity)|Broken pipe" "$install_log"; then
+    if grep -Eq "PackageManagerInternal\\.freeStorage|freeStorage\\(|StorageManager\\.getVolumes\\(\\)|InstallLocationUtils\\.resolveInstallVolume|Can\x27t find service: (package|activity|mount)|Broken pipe" "$install_log"; then
       # system_server/binder may have died after a slow cold boot. Reboot the AVD
       # rather than repeatedly attempting package operations against dead services.
       echo "Android framework services disappeared; rebooting the test emulator."
