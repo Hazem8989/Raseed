@@ -29,6 +29,8 @@ jobs:
     timeout-minutes: 90
     strategy:
       fail-fast: false
+      # Limit simultaneous AVD boots to reduce host scheduling and memory pressure.
+      max-parallel: 2
       matrix:
         suite:
           - core
@@ -121,11 +123,11 @@ jobs:
           target: default
           arch: x86_64
           profile: pixel_2
-          # The previous AVD hit severe CPU pressure (CPU PSI avg10 ~87%),
-          # causing com.android.phone ANR and then system_server/zygote death.
-          # Give the emulator four vCPUs and 4 GiB so framework services can
-          # finish booting and package installation without starving binder threads.
-          emulator-options: -no-window -gpu swiftshader_indirect -no-snapshot -noaudio -no-boot-anim -camera-back none -camera-front none -memory 4096 -cores 4
+          # The previous 4-vCPU/4-GiB AVD booted for 7.7 minutes, then
+          # settings/input binder calls returned Broken pipe before the test
+          # script started. Use a smaller guest footprint and non-indirect
+          # software rendering to reduce host/guest contention on hosted runners.
+          emulator-options: -no-window -gpu swiftshader -no-snapshot -noaudio -no-boot-anim -camera-back none -camera-front none -memory 3072 -cores 2
           emulator-boot-timeout: 900
           disable-animations: true
           script: bash .github/scripts/run-sqlcipher-instrumentation.sh "${{ matrix.suite }}"
