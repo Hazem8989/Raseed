@@ -39,7 +39,7 @@ install_apk_with_recovery() {
     if adb install --no-streaming -r -t "$apk" 2>&1 | tee "$install_log"; then
       return 0
     fi
-    if ! grep -Eqi "PackageManagerInternal\.freeStorage|freeStorage\(|Broken pipe|Can't find service: (package|activity)|device offline|no devices/emulators found|transport.*error|INSTALL_FAILED_VERIFICATION_FAILURE: Integrity verification timed out" "$install_log"; then
+    if ! grep -Eqi "PackageManagerInternal\.freeStorage|freeStorage\(|StorageManager\\.getVolumes\\(\\)|InstallLocationUtils\\.resolveInstallVolume|Broken pipe|Can't find service: (package|activity|mount)|device offline|no devices/emulators found|transport.*error|INSTALL_FAILED_VERIFICATION_FAILURE: Integrity verification timed out" "$install_log"; then
       echo "APK installation failed for a non-transient reason; not retrying." >&2
       return 1
     fi
