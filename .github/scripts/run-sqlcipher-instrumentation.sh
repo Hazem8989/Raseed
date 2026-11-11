@@ -39,13 +39,13 @@ install_apk_with_recovery() {
     if adb install --no-streaming -r -t "$apk" 2>&1 | tee "$install_log"; then
       return 0
     fi
-    if ! grep -Eqi "PackageManagerInternal\.freeStorage|freeStorage\(|StorageManager\\.getVolumes\\(\\)|InstallLocationUtils\\.resolveInstallVolume|Broken pipe|Can't find service: (package|activity|mount)|device offline|no devices/emulators found|transport.*error|INSTALL_FAILED_VERIFICATION_FAILURE: Integrity verification timed out" "$install_log"; then
+    if ! grep -Eqi "PackageManagerInternal\.freeStorage|freeStorage\(|StorageManager\.getVolumes\(\)|InstallLocationUtils\.resolveInstallVolume|Broken pipe|Can't find service: (package|activity|mount)|device offline|no devices/emulators found|transport.*error|INSTALL_FAILED_VERIFICATION_FAILURE: Integrity verification timed out" "$install_log"; then
       echo "APK installation failed for a non-transient reason; not retrying." >&2
       return 1
     fi
     echo "Transient emulator/binder failure during APK installation; reconnecting and waiting for Android services."
     adb reconnect || true
-    if grep -Eq "PackageManagerInternal\\.freeStorage|freeStorage\\(|StorageManager\\.getVolumes\\(\\)|InstallLocationUtils\\.resolveInstallVolume|Can't find service: (package|activity|mount)|Broken pipe" "$install_log"; then
+    if grep -Eq "PackageManagerInternal\.freeStorage|freeStorage\(|StorageManager\.getVolumes\(\)|InstallLocationUtils\.resolveInstallVolume|Can't find service: (package|activity|mount)|Broken pipe" "$install_log"; then
       # system_server/binder may have died after a slow cold boot. Reboot the AVD
       # rather than repeatedly attempting package operations against dead services.
       echo "Android framework services disappeared; rebooting the test emulator."
