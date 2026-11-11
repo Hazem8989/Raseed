@@ -50,10 +50,13 @@ internal class SqlCipherLegacyMigrationCoordinator(
         keyVault: DatabaseKeyVault,
         closeLegacyDatabase: () -> Unit
     ): MigrationResult = withMigrationLock {
+        val recovery = recoverLocked(legacyDatabase, keyVault)
+        if (recovery == RecoveryResult.MIGRATION_COMPLETED) {
+            return@withMigrationLock MigrationResult.MIGRATED
+        }
         require(legacyDatabase.isFile && legacyDatabase.length() > 0L) {
             "قاعدة SQLite القديمة غير موجودة أو فارغة"
         }
-        recoverLocked(legacyDatabase, keyVault)
 
         val staging = sibling(legacyDatabase, STAGING_SUFFIX)
         val rollback = sibling(legacyDatabase, ROLLBACK_SUFFIX)
