@@ -19,7 +19,7 @@ internal abstract class SqlCipherOpenHelperBase(
 ) : SQLiteOpenHelper(
     context,
     databaseName,
-    encodeDatabaseKey(databaseKey),
+    prepareDatabaseKey(databaseKey),
     null,
     databaseVersion,
     0,
@@ -28,7 +28,11 @@ internal abstract class SqlCipherOpenHelperBase(
     false
 ) {
     companion object {
-        private fun encodeDatabaseKey(databaseKey: ByteArray): ByteArray {
+        private fun prepareDatabaseKey(databaseKey: ByteArray): ByteArray {
+            // SQLCipher Android requires its JNI library to be loaded before
+            // SQLiteOpenHelper opens a connection. Do this while evaluating
+            // the superclass arguments, before the helper can be used.
+            SqlCipherDatabaseRuntime.loadNativeLibrary()
             require(databaseKey.size == 32) { "SQLCipher database key must be exactly 256 bits" }
             val hex = CharArray(databaseKey.size * 2)
             val digits = "0123456789abcdef"
