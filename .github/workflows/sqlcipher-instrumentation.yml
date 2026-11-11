@@ -29,8 +29,9 @@ jobs:
     timeout-minutes: 90
     strategy:
       fail-fast: false
-      # Limit simultaneous AVD boots to reduce host scheduling and memory pressure.
-      max-parallel: 2
+      # Run one AVD at a time: concurrent emulator boots have stalled framework startup
+      # on hosted runners, leaving instrumentation jobs waiting before tests begin.
+      max-parallel: 1
       matrix:
         suite:
           - core
