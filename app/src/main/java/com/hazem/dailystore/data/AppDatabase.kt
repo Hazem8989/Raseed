@@ -1,8 +1,6 @@
 package com.hazem.dailystore.data
 
 import android.content.Context
-import android.database.sqlite.SQLiteDatabase
-import android.database.sqlite.SQLiteOpenHelper
 
 /**
  * Local-first database for The Daily Shop.
@@ -15,9 +13,9 @@ import android.database.sqlite.SQLiteOpenHelper
  * Exchange rates are stored as SYP per USD multiplied by 1,000.
  */
 class AppDatabase internal constructor(context: Context, databaseName: String = DATABASE_NAME) :
-    SQLiteOpenHelper(context, databaseName, null, DATABASE_VERSION) {
+    AppSqliteOpenHelper(context, databaseName, null, DATABASE_VERSION) {
 
-    override fun onConfigure(db: SQLiteDatabase) {
+    override fun onConfigure(db: AppSqliteDatabase) {
         super.onConfigure(db)
         db.setForeignKeyConstraintsEnabled(true)
     }
@@ -39,7 +37,7 @@ class AppDatabase internal constructor(context: Context, databaseName: String = 
         close()
     }
 
-    override fun onCreate(db: SQLiteDatabase) {
+    override fun onCreate(db: AppSqliteDatabase) {
         db.beginTransaction()
         try {
             SCHEMA.forEach(db::execSQL)
@@ -79,7 +77,7 @@ class AppDatabase internal constructor(context: Context, databaseName: String = 
         }
     }
 
-    override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) {
+    override fun onUpgrade(db: AppSqliteDatabase, oldVersion: Int, newVersion: Int) {
         var version = oldVersion
         if (version < 2) {
             db.beginTransaction()
@@ -626,7 +624,7 @@ class AppDatabase internal constructor(context: Context, databaseName: String = 
 
 
     /** Adds exact milli-SYP service-transfer values without rewriting legacy financial entries. */
-    private fun ensureServiceTransferPrecisionSchema(db: SQLiteDatabase) {
+    private fun ensureServiceTransferPrecisionSchema(db: AppSqliteDatabase) {
         fun hasColumn(table: String, column: String): Boolean =
             db.rawQuery("PRAGMA table_info($table)", null).use { c ->
                 var found = false
@@ -655,7 +653,7 @@ class AppDatabase internal constructor(context: Context, databaseName: String = 
     }
 
     /** Read-only receivable mirrors on secondary devices; no cash or ledger rows are created here. */
-    private fun ensureServiceTransferReceivableSyncSchema(db: SQLiteDatabase) {
+    private fun ensureServiceTransferReceivableSyncSchema(db: AppSqliteDatabase) {
         db.execSQL("""
             CREATE TABLE IF NOT EXISTS service_transfer_receivable_mirrors (
                 transfer_id TEXT PRIMARY KEY NOT NULL,
@@ -692,7 +690,7 @@ class AppDatabase internal constructor(context: Context, databaseName: String = 
         db.execSQL("CREATE INDEX IF NOT EXISTS idx_service_transfer_receivable_payment_mirrors_transfer ON service_transfer_receivable_payment_mirrors(transfer_id,operating_date,created_at)")
     }
 
-    private fun ensureServiceTransferReceivableSchema(db: SQLiteDatabase) {
+    private fun ensureServiceTransferReceivableSchema(db: AppSqliteDatabase) {
         fun hasColumn(table: String, column: String): Boolean =
             db.rawQuery("PRAGMA table_info($table)", null).use { cursor ->
                 var found = false
@@ -740,7 +738,7 @@ class AppDatabase internal constructor(context: Context, databaseName: String = 
         db.execSQL("CREATE INDEX IF NOT EXISTS idx_service_transfer_debt_payments_transfer ON service_transfer_receivable_payments(transfer_id,created_at)")
     }
 
-    private fun ensureSyncCategoryMappingSchema(db: SQLiteDatabase) {
+    private fun ensureSyncCategoryMappingSchema(db: AppSqliteDatabase) {
         db.execSQL("""
             CREATE TABLE IF NOT EXISTS sync_category_mappings (
                 primary_device_id TEXT NOT NULL,
@@ -759,7 +757,7 @@ class AppDatabase internal constructor(context: Context, databaseName: String = 
         db.execSQL("CREATE INDEX IF NOT EXISTS idx_sync_category_mappings_local ON sync_category_mappings(secondary_category_id)")
     }
 
-    private fun ensureSyncAckDeliverySchema(db: SQLiteDatabase) {
+    private fun ensureSyncAckDeliverySchema(db: AppSqliteDatabase) {
         db.execSQL("""
             CREATE TABLE IF NOT EXISTS sync_ack_delivery (
                 operation_id TEXT NOT NULL,
@@ -777,7 +775,7 @@ class AppDatabase internal constructor(context: Context, databaseName: String = 
         db.execSQL("CREATE INDEX IF NOT EXISTS idx_sync_ack_delivery_retry ON sync_ack_delivery(device_id, last_forwarded_at)")
     }
 
-    private fun ensureSyncUnitMappingSchema(db: SQLiteDatabase) {
+    private fun ensureSyncUnitMappingSchema(db: AppSqliteDatabase) {
         db.execSQL("""
             CREATE TABLE IF NOT EXISTS sync_unit_mappings (
                 primary_device_id TEXT NOT NULL,
@@ -798,7 +796,7 @@ class AppDatabase internal constructor(context: Context, databaseName: String = 
         db.execSQL("CREATE INDEX IF NOT EXISTS idx_sync_unit_mappings_local ON sync_unit_mappings(secondary_unit_id)")
     }
 
-    private fun ensureSyncCashAccountMappingSchema(db: SQLiteDatabase) {
+    private fun ensureSyncCashAccountMappingSchema(db: AppSqliteDatabase) {
         db.execSQL("""
             CREATE TABLE IF NOT EXISTS sync_cash_account_mappings (
                 device_id TEXT NOT NULL,
@@ -819,7 +817,7 @@ class AppDatabase internal constructor(context: Context, databaseName: String = 
         db.execSQL("CREATE INDEX IF NOT EXISTS idx_sync_cash_account_mappings_primary ON sync_cash_account_mappings(primary_cash_account_id,is_active)")
     }
 
-    private fun ensureSyncInboxOriginTimestampColumn(db: SQLiteDatabase) {
+    private fun ensureSyncInboxOriginTimestampColumn(db: AppSqliteDatabase) {
         var exists = false
         db.rawQuery("PRAGMA table_info(sync_inbox)", null).use { c ->
             while (c.moveToNext()) if (c.getString(1) == "origin_created_at") exists = true
@@ -829,7 +827,7 @@ class AppDatabase internal constructor(context: Context, databaseName: String = 
 
     /** Persists the authenticated remote actor so application-time authorization
      * resolves the exact mapping that was checked when the command was received. */
-    private fun ensureSyncInboxActorColumn(db: SQLiteDatabase) {
+    private fun ensureSyncInboxActorColumn(db: AppSqliteDatabase) {
         var exists = false
         db.rawQuery("PRAGMA table_info(sync_inbox)", null).use { c ->
             while (c.moveToNext()) if (c.getString(1) == "actor_user_id") exists = true
@@ -841,7 +839,7 @@ class AppDatabase internal constructor(context: Context, databaseName: String = 
      * Stores pinned public identities for enrolled peers. Private signing keys
      * remain exclusively in Android Keystore and are never persisted here.
      */
-    private fun ensureSyncDeviceIdentitySchema(db: SQLiteDatabase) {
+    private fun ensureSyncDeviceIdentitySchema(db: AppSqliteDatabase) {
         db.execSQL("""
             CREATE TABLE IF NOT EXISTS sync_device_public_keys (
                 device_id TEXT PRIMARY KEY NOT NULL,
@@ -865,7 +863,7 @@ class AppDatabase internal constructor(context: Context, databaseName: String = 
         db.execSQL("CREATE INDEX IF NOT EXISTS idx_sync_device_public_keys_status ON sync_device_public_keys(status,device_id)")
     }
 
-    private fun ensureSyncDeviceRevocationSchema(db: SQLiteDatabase) {
+    private fun ensureSyncDeviceRevocationSchema(db: AppSqliteDatabase) {
         db.execSQL("""
             CREATE TABLE IF NOT EXISTS sync_device_revocations (
                 device_id TEXT NOT NULL,
@@ -882,7 +880,7 @@ class AppDatabase internal constructor(context: Context, databaseName: String = 
         db.execSQL("CREATE INDEX IF NOT EXISTS idx_sync_device_revocations_status ON sync_device_revocations(status,created_at)")
     }
 
-    private fun ensureSyncActorMappingSchema(db: SQLiteDatabase) {
+    private fun ensureSyncActorMappingSchema(db: AppSqliteDatabase) {
         db.execSQL("""
             CREATE TABLE IF NOT EXISTS sync_actor_mappings (
                 device_id TEXT NOT NULL,
@@ -903,7 +901,7 @@ class AppDatabase internal constructor(context: Context, databaseName: String = 
         db.execSQL("CREATE INDEX IF NOT EXISTS idx_sync_actor_mappings_primary_user ON sync_actor_mappings(primary_user_id,is_active)")
     }
 
-    private fun ensureSalesReturnSchema(db: SQLiteDatabase) {
+    private fun ensureSalesReturnSchema(db: AppSqliteDatabase) {
         fun ensureColumn(table: String, column: String, definition: String) {
             var exists = false
             db.rawQuery("PRAGMA table_info($table)", null).use { c ->
@@ -945,7 +943,7 @@ class AppDatabase internal constructor(context: Context, databaseName: String = 
         db.execSQL("CREATE INDEX IF NOT EXISTS idx_return_cost_source ON return_cost_allocations(source_sale_allocation_id)")
     }
 
-    private fun ensureInventoryAdjustmentSchema(db: SQLiteDatabase) {
+    private fun ensureInventoryAdjustmentSchema(db: AppSqliteDatabase) {
         db.execSQL("""
             CREATE TABLE IF NOT EXISTS inventory_adjustments (
                 id TEXT PRIMARY KEY NOT NULL,
@@ -976,7 +974,7 @@ class AppDatabase internal constructor(context: Context, databaseName: String = 
      * their own source-item link and inbound cash-refund allocations. This
      * keeps customer refund semantics and supplier credits separate.
      */
-    private fun ensureSyncProtocolSchema(db: SQLiteDatabase) {
+    private fun ensureSyncProtocolSchema(db: AppSqliteDatabase) {
         db.execSQL("""
             CREATE TABLE IF NOT EXISTS sync_devices (
                 device_id TEXT PRIMARY KEY NOT NULL,
@@ -1077,7 +1075,7 @@ class AppDatabase internal constructor(context: Context, databaseName: String = 
         db.execSQL("CREATE INDEX IF NOT EXISTS idx_sync_invitations_expiry ON sync_pairing_invitations(expires_at, consumed_at)")
     }
 
-    private fun ensureOperatingExpenseSchema(db: SQLiteDatabase) {
+    private fun ensureOperatingExpenseSchema(db: AppSqliteDatabase) {
         db.execSQL("""
             CREATE TABLE IF NOT EXISTS expense_categories (
                 id TEXT PRIMARY KEY NOT NULL,
@@ -1133,7 +1131,7 @@ class AppDatabase internal constructor(context: Context, databaseName: String = 
         }
     }
 
-    private fun ensureSupplierReturnSchema(db: SQLiteDatabase) {
+    private fun ensureSupplierReturnSchema(db: AppSqliteDatabase) {
         fun ensureColumn(table: String, column: String, definition: String) {
             var exists = false
             db.rawQuery("PRAGMA table_info($table)", null).use { c ->
@@ -1183,7 +1181,7 @@ class AppDatabase internal constructor(context: Context, databaseName: String = 
         db.execSQL("CREATE INDEX IF NOT EXISTS idx_supplier_return_cost_source ON supplier_return_cost_allocations(source_cost_layer_id)")
     }
 
-    private fun ensureFifoSchema(db: SQLiteDatabase) {
+    private fun ensureFifoSchema(db: AppSqliteDatabase) {
         var hasCogsColumn = false
         db.rawQuery("PRAGMA table_info(sales_items)", null).use { c ->
             while (c.moveToNext()) if (c.getString(1) == "cogs_usd_cents") hasCogsColumn = true
@@ -1230,7 +1228,7 @@ class AppDatabase internal constructor(context: Context, databaseName: String = 
         db.execSQL("CREATE INDEX IF NOT EXISTS idx_fifo_allocations_invoice ON sales_item_cost_allocations(sales_invoice_id,sales_item_id)")
     }
 
-    private fun backfillFifoCostLayers(db: SQLiteDatabase) {
+    private fun backfillFifoCostLayers(db: AppSqliteDatabase) {
         data class Movement(
             val id: String, val productId: String, val warehouseId: String,
             val type: String, val delta: Double, val unitCost: Long,
