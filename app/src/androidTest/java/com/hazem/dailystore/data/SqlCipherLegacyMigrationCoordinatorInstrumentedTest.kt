@@ -153,6 +153,103 @@ class SqlCipherLegacyMigrationCoordinatorInstrumentedTest {
         }
     }
 
+    @Test
+    fun migrationPreservesRealAppDatabaseV33SchemaAndRows() {
+        val context = InstrumentationRegistry.getInstrumentation().targetContext as Context
+        val suffix = UUID.randomUUID().toString().replace("-", "")
+        val databaseName = "production-parity-$suffix.db"
+        val live = context.getDatabasePath(databaseName)
+        val vault = newVault(context, "production-parity-$suffix")
+        val journalName = "production-parity-$suffix.journal"
+        val helper = AppDatabase(context, databaseName)
+
+        try {
+            val legacy = helper.writableDatabase
+            legacy.execSQL(
+                "CREATE TABLE migration_probe(id INTEGER PRIMARY KEY, payload TEXT NOT NULL)"
+            )
+            legacy.execSQL(
+                "INSERT INTO migration_probe(id,payload) VALUES(1,'preserve-real-v33-row')"
+            )
+            val originalTableCount = legacy.rawQuery(
+                "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'",
+                null
+            ).use { cursor ->
+                assertTrue(cursor.moveToFirst())
+                cursor.getInt(0)
+            }
+            assertTrue("Expected the complete application schema, not a tiny fixture", originalTableCount >= 20)
+            helper.close()
+
+            val coordinator = SqlCipherLegacyMigrationCoordinator(context, journalName)
+            assertEquals(
+                SqlCipherLegacyMigrationCoordinator.MigrationResult.MIGRATED,
+                coordinator.migrate(live, vault) { helper.close() }
+            )
+
+            val key = vault.getImportedDatabaseKeyForRestoreRecovery()!!
+            try {
+                SqlCipherDatabaseMigrator.validateEncryptedDatabase(
+                    live,
+                    key,
+                    sourceVersion = AppDatabase.DATABASE_VERSION
+                )
+                val passphrase = key.toHexPassphrase()
+                val encrypted = CipherSQLiteDatabase.openDatabase(
+                    live.absolutePath,
+                    passphrase,
+                    null,
+                    CipherSQLiteDatabase.OPEN_READONLY,
+                    null,
+                    null
+                )
+                try {
+                    encrypted.rawQuery(
+                        "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'",
+                        null
+                    ).use { cursor ->
+                        assertTrue(cursor.moveToFirst())
+                        assertEquals(originalTableCount, cursor.getInt(0))
+                    }
+                    encrypted.rawQuery(
+                        "SELECT payload FROM migration_probe WHERE id=1",
+                        null
+                    ).use { cursor ->
+                        assertTrue(cursor.moveToFirst())
+                        assertEquals("preserve-real-v33-row", cursor.getString(0))
+                        assertFalse(cursor.moveToNext())
+                    }
+                    encrypted.rawQuery(
+                        "SELECT setting_value FROM app_settings WHERE setting_key='base_currency'",
+                        null
+                    ).use { cursor ->
+                        assertTrue("Core app settings must survive migration", cursor.moveToFirst())
+                        assertEquals("USD", cursor.getString(0))
+                    }
+                } finally {
+                    encrypted.close()
+                    passphrase.fill(0)
+                }
+            } finally {
+                key.fill(0)
+            }
+        } finally {
+            helper.close()
+            listOf(
+                live,
+                File(live.path + "-wal"),
+                File(live.path + "-shm"),
+                File(live.path + "-journal"),
+                File(live.path + ".sqlcipher-migration-staging"),
+                File(live.path + ".sqlite-migration-rollback"),
+                File(context.noBackupFilesDir, "migration-key-production-parity-$suffix.bin"),
+                File(context.noBackupFilesDir, "migration-key-production-parity-$suffix.bin.bak"),
+                File(context.noBackupFilesDir, journalName),
+                File(context.noBackupFilesDir, "$journalName.bak")
+            ).forEach { it.delete() }
+        }
+    }
+
     private fun createLegacyDatabase(context: Context, suffix: String): File {
         val file = context.getDatabasePath("legacy-migration-$suffix.db")
         file.parentFile?.let { check(it.isDirectory || it.mkdirs()) }
