@@ -158,6 +158,7 @@ case "$SUITE" in
     run_instrumentation "com.hazem.dailystore.data.DatabaseKeyVaultInstrumentedTest" "database-key-vault.txt"
     run_instrumentation "com.hazem.dailystore.data.SqlCipherDatabaseRuntimeInstrumentedTest" "sqlcipher-database-runtime.txt"
     run_instrumentation "com.hazem.dailystore.data.DatabaseMigrationInstrumentedTest" "database-migration.txt"
+    run_instrumentation "com.hazem.dailystore.data.AppDatabaseProductionMigrationInstrumentedTest" "app-database-production-migration.txt"
     run_instrumentation "com.hazem.dailystore.data.SqlCipherDatabaseMigratorInstrumentedTest" "sqlcipher-database-migrator.txt"
     run_instrumentation "com.hazem.dailystore.data.SqlCipherLegacyMigrationCoordinatorInstrumentedTest" "sqlcipher-legacy-migration-coordinator.txt"
     run_instrumentation "com.hazem.dailystore.data.SqlCipherCompatibilityInstrumentedTest" "sqlcipher-compatibility.txt"
