@@ -1,8 +1,10 @@
 package com.hazem.dailystore
 
 import android.app.Application
+import com.hazem.dailystore.data.AppDatabase
 import com.hazem.dailystore.data.BackupRestoreManager
 import com.hazem.dailystore.data.DatabaseKeyVault
+import com.hazem.dailystore.data.SqlCipherLegacyMigrationCoordinator
 import com.hazem.dailystore.data.SqlCipherSameDeviceRestoreCoordinator
 import java.io.File
 
@@ -21,23 +23,41 @@ class TheDailyShopApplication : Application() {
     }
 
     private fun recoverDatabasesBeforeAnyConsumer() {
-        val sameDeviceJournal = File(
-            noBackupFilesDir,
-            SAME_DEVICE_RESTORE_JOURNAL
-        )
+        val migrationJournal = File(noBackupFilesDir, LEGACY_MIGRATION_JOURNAL)
+        val migrationJournalBackup = File(migrationJournal.path + ".bak")
+        val sameDeviceJournal = File(noBackupFilesDir, SAME_DEVICE_RESTORE_JOURNAL)
         val sameDeviceJournalBackup = File(sameDeviceJournal.path + ".bak")
-        if (sameDeviceJournal.exists() || sameDeviceJournalBackup.exists()) {
-            val vault = DatabaseKeyVault(applicationContext)
-            SqlCipherSameDeviceRestoreCoordinator(applicationContext)
-                .recover(vault)
+
+        val hasMigrationRecovery = migrationJournal.exists() || migrationJournalBackup.exists()
+        val hasSameDeviceRecovery = sameDeviceJournal.exists() || sameDeviceJournalBackup.exists()
+
+        // These transactions replace the same live database and key. If both
+        // journals exist, their ordering cannot be inferred safely: stop startup
+        // and preserve all recovery files rather than guessing which transaction
+        // owns the live database.
+        check(!(hasMigrationRecovery && hasSameDeviceRecovery)) {
+            "توجد عمليتا تعافٍ متداخلتان لقاعدة البيانات؛ أُوقف التشغيل لحماية الملفات"
         }
 
-        // Retain the legacy SQLite recovery path until the production database
-        // has been migrated. It runs only after SQLCipher restore recovery.
+        val vault = DatabaseKeyVault(applicationContext)
+        val liveDatabase = getDatabasePath(AppDatabase.DATABASE_NAME)
+
+        // Recover an interrupted SQLite -> SQLCipher migration before any
+        // database helper or repository is allowed to open the live file.
+        SqlCipherLegacyMigrationCoordinator(applicationContext).recover(liveDatabase, vault)
+
+        if (hasSameDeviceRecovery) {
+            SqlCipherSameDeviceRestoreCoordinator(applicationContext).recover(vault)
+        }
+
+        // Retain the legacy SQLite restore recovery path until the production
+        // database and the UI backup/restore flow have both moved to SQLCipher.
         BackupRestoreManager(applicationContext).recoverInterruptedRestore()
     }
 
     private companion object {
+        const val LEGACY_MIGRATION_JOURNAL =
+            "the_daily_shop_sqlcipher_migration.journal"
         const val SAME_DEVICE_RESTORE_JOURNAL =
             "the_daily_shop_same_device_restore.journal"
     }
