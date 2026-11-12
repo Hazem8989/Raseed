@@ -13,10 +13,12 @@ import java.security.MessageDigest
 /**
  * Crash-recoverable, same-device plaintext SQLite -> SQLCipher migration.
  *
- * This coordinator is intentionally not wired into application startup yet.
- * Callers must prevent every database consumer from opening the legacy file
- * while migrate() runs. The original file is retained as rollback until the
- * encrypted replacement has passed integrity and foreign-key validation.
+ * Startup recovery is wired through TheDailyShopApplication and must run
+ * before any database consumer opens the live file. The interactive migration
+ * operation itself remains a separate, explicitly coordinated step: callers
+ * must close every legacy database consumer before migrate() runs. The original
+ * file is retained as rollback until the encrypted replacement has passed
+ * integrity and foreign-key validation.
  */
 internal class SqlCipherLegacyMigrationCoordinator(
     context: Context,
