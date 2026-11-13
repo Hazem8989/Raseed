@@ -1,7 +1,7 @@
 package com.hazem.dailystore.data
 
 import android.content.ContentValues
-import android.database.sqlite.SQLiteConstraintException
+import net.zetetic.database.sqlcipher.SQLiteConstraintException
 import java.math.BigDecimal
 import org.junit.After
 import org.junit.Assert.assertEquals
@@ -143,7 +143,7 @@ class AppDatabaseTest {
         database.writableDatabase
     }
 
-    private fun downgradeSchemaForMigrationTest(db: android.database.sqlite.SQLiteDatabase, targetVersion: Int) {
+    private fun downgradeSchemaForMigrationTest(db: net.zetetic.database.sqlcipher.SQLiteDatabase, targetVersion: Int) {
         fun dropIndex(name: String) { db.execSQL("DROP INDEX IF EXISTS $name") }
         fun dropTable(name: String) { db.execSQL("DROP TABLE IF EXISTS $name") }
         // Version 27 introduced category mappings and version 28 introduced
