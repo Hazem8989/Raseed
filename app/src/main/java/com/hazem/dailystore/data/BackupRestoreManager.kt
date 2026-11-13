@@ -417,6 +417,7 @@ class BackupRestoreManager(private val context: Context) {
     }
 
     private fun validateDatabase(file: File) {
+        SqlCipherDatabaseRuntime.loadNativeLibrary()
         val db = SQLiteDatabase.openDatabase(file.absolutePath, null, SQLiteDatabase.OPEN_READONLY)
         try {
             val version = db.version
