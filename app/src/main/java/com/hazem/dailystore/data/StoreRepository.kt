@@ -2,7 +2,7 @@ package com.hazem.dailystore.data
 
 import android.content.ContentValues
 import android.content.Context
-import net.zetetic.database.sqlcipher.SQLiteConstraintException
+import android.database.sqlite.SQLiteConstraintException
 import java.math.BigDecimal
 import java.math.RoundingMode
 import java.text.SimpleDateFormat
