@@ -1339,7 +1339,7 @@ class AppDatabase internal constructor(
 
         private fun isLegacyPlaintextDatabase(file: java.io.File): Boolean {
             if (!file.isFile || file.length() < 16L) return false
-            val expected = "SQLite format 3\\u0000".toByteArray(Charsets.US_ASCII)
+            val expected = "SQLite format 3\u0000".toByteArray(Charsets.US_ASCII)
             return file.inputStream().use { input ->
                 val header = ByteArray(expected.size)
                 input.read(header) == header.size && header.contentEquals(expected)
