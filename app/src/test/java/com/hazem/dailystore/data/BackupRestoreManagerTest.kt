@@ -1,6 +1,5 @@
 package com.hazem.dailystore.data
 
-import android.database.sqlite.SQLiteDatabase
 import java.io.ByteArrayInputStream
 import java.io.ByteArrayOutputStream
 import org.junit.After

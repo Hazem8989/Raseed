@@ -37,11 +37,11 @@ class SyncAckDeliveryMigrationTest {
         }
     }
 
-    private fun tableExists(db: android.database.sqlite.SQLiteDatabase, name: String): Boolean =
+    private fun tableExists(db: net.zetetic.database.sqlcipher.SQLiteDatabase, name: String): Boolean =
         db.rawQuery("SELECT 1 FROM sqlite_master WHERE type='table' AND name=?", arrayOf(name))
             .use { it.moveToFirst() }
 
-    private fun indexExists(db: android.database.sqlite.SQLiteDatabase, name: String): Boolean =
+    private fun indexExists(db: net.zetetic.database.sqlcipher.SQLiteDatabase, name: String): Boolean =
         db.rawQuery("SELECT 1 FROM sqlite_master WHERE type='index' AND name=?", arrayOf(name))
             .use { it.moveToFirst() }
 }
