@@ -1300,6 +1300,8 @@ class AppDatabase internal constructor(
             INSTANCE = null
         }
 
+        internal fun isPlaintextBackendForTests(): Boolean = plaintextBackendForTests
+
         /** Installs an explicitly named isolated database for multi-device integration tests. */
         @Synchronized
         internal fun installForTests(database: AppDatabase) {

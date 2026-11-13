@@ -100,6 +100,10 @@ class BackupRestoreManager(private val context: Context) {
     fun createBackup(actorUserId: String, password: CharArray, destination: OutputStream, onProgress: ((String) -> Unit)? = null) {
         requireBackupPermission(actorUserId)
         validatePassword(password)
+        if (AppDatabase.isPlaintextBackendForTests()) {
+            createPlaintextFixtureBackup(actorUserId, password, destination, onProgress)
+            return
+        }
         onProgress?.invoke("إغلاق قاعدة البيانات وتجهيز لقطة آمنة...")
         synchronized(LOCK) {
             val live = context.getDatabasePath(AppDatabase.DATABASE_NAME)
@@ -126,6 +130,10 @@ class BackupRestoreManager(private val context: Context) {
     fun restoreBackup(actorUserId: String, password: CharArray, source: InputStream, onProgress: ((String) -> Unit)? = null) {
         requireBackupPermission(actorUserId)
         validatePassword(password)
+        if (AppDatabase.isPlaintextBackendForTests()) {
+            restorePlaintextFixtureBackup(actorUserId, password, source, onProgress)
+            return
+        }
         onProgress?.invoke("فك تشفير النسخة والتحقق من سلامتها...")
         synchronized(LOCK) {
             val keyVault = DatabaseKeyVault(context)
@@ -154,6 +162,88 @@ class BackupRestoreManager(private val context: Context) {
             } finally {
                 staged.close()
             }
+        }
+    }
+
+    /** Legacy TDSBACK1 fixture path retained only for Robolectric tests. */
+    private fun createPlaintextFixtureBackup(
+        actorUserId: String,
+        password: CharArray,
+        destination: OutputStream,
+        onProgress: ((String) -> Unit)?
+    ) {
+        requireBackupPermission(actorUserId)
+        synchronized(LOCK) {
+            val snapshot = File(context.cacheDir, "tds-test-backup-snapshot-${System.nanoTime()}.db")
+            val encrypted = File(context.cacheDir, "tds-test-backup-encrypted-${System.nanoTime()}.bin")
+            try {
+                AppDatabase.getInstance(context).checkpointAndCloseForBackup()
+                val live = context.getDatabasePath(AppDatabase.DATABASE_NAME)
+                check(live.isFile && live.length() > 0L) { "قاعدة البيانات غير موجودة أو فارغة" }
+                check(live.length() <= MAX_DATABASE_BYTES) { "حجم قاعدة البيانات يتجاوز الحد المدعوم للنسخ الاحتياطي" }
+                onProgress?.invoke("نسخ قاعدة الاختبار إلى ملف مؤقت...")
+                copyFile(live, snapshot)
+                encryptSnapshot(snapshot, encrypted, password)
+                FileInputStream(encrypted).use { it.copyTo(destination) }
+                destination.flush()
+            } finally {
+                snapshot.delete()
+                encrypted.delete()
+            }
+        }
+    }
+
+    /** Legacy TDSBACK1 restore fixture; production restores use SQLCipher coordinator. */
+    private fun restorePlaintextFixtureBackup(
+        actorUserId: String,
+        password: CharArray,
+        source: InputStream,
+        onProgress: ((String) -> Unit)?
+    ) {
+        requireBackupPermission(actorUserId)
+        synchronized(LOCK) {
+            val staged = File(context.getDatabasePath(AppDatabase.DATABASE_NAME).parentFile,
+                "the_daily_shop.test-restore-${System.nanoTime()}.db")
+            val live = context.getDatabasePath(AppDatabase.DATABASE_NAME)
+            val rollback = File(live.parentFile, "${live.name}.restore-rollback")
+            var liveWasMoved = false
+            try {
+                decryptToFile(source, staged, password)
+                validateDatabase(staged)
+                AppDatabase.getInstance(context).checkpointAndCloseForBackup()
+                deleteSidecars(live)
+                if (rollback.exists() && !rollback.delete()) {
+                    throw IllegalStateException("تعذر إزالة ملف الاستعادة المؤقت السابق")
+                }
+                if (live.exists()) {
+                    check(live.renameTo(rollback)) { "تعذر حفظ قاعدة الاختبار الحالية للتراجع" }
+                    liveWasMoved = true
+                }
+                check(staged.renameTo(live)) { "تعذر وضع قاعدة الاختبار المستعادة" }
+                try {
+                    val restored = AppDatabase.getInstance(context).writableDatabase
+                    validateOpenDatabase(restored)
+                    rollback.delete()
+                } catch (failure: Exception) {
+                    AppDatabase.getInstance(context).close()
+                    live.delete()
+                    deleteSidecars(live)
+                    if (liveWasMoved && rollback.exists()) {
+                        check(rollback.renameTo(live)) { "تعذر استعادة قاعدة الاختبار السابقة" }
+                    }
+                    AppDatabase.getInstance(context).writableDatabase
+                    throw IllegalStateException("فشلت استعادة قاعدة الاختبار؛ أُعيدت القاعدة السابقة", failure)
+                }
+            } catch (error: Exception) {
+                if (liveWasMoved && rollback.exists() && !live.exists()) {
+                    check(rollback.renameTo(live)) { "تعذر التراجع عن استعادة قاعدة الاختبار" }
+                }
+                throw error
+            } finally {
+                staged.delete()
+                if (rollback.exists() && live.exists()) rollback.delete()
+            }
+            onProgress?.invoke("اكتملت استعادة قاعدة الاختبار.")
         }
     }
 

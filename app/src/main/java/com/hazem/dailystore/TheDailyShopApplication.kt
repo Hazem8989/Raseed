@@ -2,7 +2,6 @@ package com.hazem.dailystore
 
 import android.app.Application
 import com.hazem.dailystore.data.AppDatabase
-import com.hazem.dailystore.data.BackupRestoreManager
 import com.hazem.dailystore.data.DatabaseKeyVault
 import com.hazem.dailystore.data.SqlCipherLegacyMigrationCoordinator
 import com.hazem.dailystore.data.SqlCipherSameDeviceRestoreCoordinator
