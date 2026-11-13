@@ -288,7 +288,7 @@ class BackupRestoreManager(private val context: Context) {
 
     private fun validateDatabaseForRecovery(file: File, keyVault: DatabaseKeyVault) {
         require(file.isFile && file.length() > 0L) { "ملف قاعدة البيانات غير موجود أو فارغ" }
-        val sqliteHeader = "SQLite format 3\\u0000".toByteArray(Charsets.US_ASCII)
+        val sqliteHeader = "SQLite format 3\u0000".toByteArray(Charsets.US_ASCII)
         val isPlaintext = file.inputStream().use { input ->
             val header = ByteArray(sqliteHeader.size)
             input.read(header) == header.size && header.contentEquals(sqliteHeader)
