@@ -41,7 +41,7 @@ class CashAccountRepository(context: Context) {
         ).use { if(it.moveToFirst())it.getString(0)else null }
     }
 
-    private fun ensureSystemCashAccounts(db:android.database.sqlite.SQLiteDatabase) {
+    private fun ensureSystemCashAccounts(db:AppSqliteDatabase) {
         val date=operatingDate()
         val existingPrimary=db.rawQuery("SELECT primary_cash_account_id FROM daily_cash_sessions WHERE operating_date=?",arrayOf(date)).use {
             if(it.moveToFirst())it.getString(0)else null
@@ -100,13 +100,13 @@ class CashAccountRepository(context: Context) {
             val values=ContentValues().apply {
                 put("setting_key","service_recharge_cash_account_id");put("setting_value",rechargeId);put("updated_at",timestamp())
             }
-            db.insertWithOnConflict("app_settings",null,values,android.database.sqlite.SQLiteDatabase.CONFLICT_REPLACE)
+            db.insertWithOnConflict("app_settings",null,values,AppSqliteDatabase.CONFLICT_REPLACE)
         }
         setSystemRole(db,"SERVICE_RECHARGE",rechargeId)
     }
 
     private fun ensureRoleAccount(
-        db:android.database.sqlite.SQLiteDatabase,role:String,systemId:String,defaultName:String,aliases:List<String>
+        db:AppSqliteDatabase,role:String,systemId:String,defaultName:String,aliases:List<String>
     ):String {
         val linked=db.rawQuery("SELECT account_id FROM system_cash_account_roles WHERE role_key=?",arrayOf(role)).use {
             if(it.moveToFirst())it.getString(0)else null
@@ -137,13 +137,13 @@ class CashAccountRepository(context: Context) {
         return accountId
     }
 
-    private fun setSystemRole(db:android.database.sqlite.SQLiteDatabase,role:String,accountId:String) {
+    private fun setSystemRole(db:AppSqliteDatabase,role:String,accountId:String) {
         val current=db.rawQuery("SELECT account_id FROM system_cash_account_roles WHERE role_key=?",arrayOf(role)).use {
             if(it.moveToFirst())it.getString(0)else null
         }
         if(current==accountId)return
         val values=ContentValues().apply{put("role_key",role);put("account_id",accountId);put("linked_at",timestamp())}
-        db.insertWithOnConflict("system_cash_account_roles",null,values,android.database.sqlite.SQLiteDatabase.CONFLICT_REPLACE)
+        db.insertWithOnConflict("system_cash_account_roles",null,values,AppSqliteDatabase.CONFLICT_REPLACE)
     }
 
     fun currentDayPrimaryDrawer(): CashAccountSummary? {
@@ -391,7 +391,7 @@ class CashAccountRepository(context: Context) {
         runCatching { SyncRelaySession.flushPending() }
     }
 
-    private fun requireManager(db: android.database.sqlite.SQLiteDatabase, actorUserId: String) {
+    private fun requireManager(db: AppSqliteDatabase, actorUserId: String) {
         PermissionPolicy.require(db, actorUserId, PermissionPolicy.ACCOUNTS_MANAGE)
     }
 

@@ -138,7 +138,7 @@ class CustomerRepository(context: Context) {
     }
 
     private fun enqueueCustomerSync(
-        db: android.database.sqlite.SQLiteDatabase,
+        db: AppSqliteDatabase,
         actorUserId: String,
         customerId: String,
         changeKind: String
@@ -167,7 +167,7 @@ class CustomerRepository(context: Context) {
     }
 
     private fun insertAudit(
-        db: android.database.sqlite.SQLiteDatabase,
+        db: AppSqliteDatabase,
         actor: String,
         action: String,
         customerId: String,

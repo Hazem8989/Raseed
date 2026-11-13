@@ -515,7 +515,7 @@ class StoreRepository(context: Context) {
         return rows.size
     }
 
-    private fun resolveImportUnit(db: android.database.sqlite.SQLiteDatabase, rawName: String): Long {
+    private fun resolveImportUnit(db: AppSqliteDatabase, rawName: String): Long {
         val normalized = rawName.trim().lowercase(Locale.ROOT)
         val aliases = when (normalized) {
             "كغ", "kg", "كيلو", "كيلوغرام", "كيلوجرام" -> listOf("كيلوغرام", "كغ")
@@ -700,12 +700,12 @@ class StoreRepository(context: Context) {
         return result
     }
 
-    private fun requireManager(db: android.database.sqlite.SQLiteDatabase, actorUserId: String) {
+    private fun requireManager(db: AppSqliteDatabase, actorUserId: String) {
         PermissionPolicy.require(db, actorUserId, PermissionPolicy.CATALOG_MANAGE)
     }
 
     private fun insertAudit(
-        db: android.database.sqlite.SQLiteDatabase, actor: String, action: String,
+        db: AppSqliteDatabase, actor: String, action: String,
         entityType: String, entityId: String, before: String?, after: String, now: String
     ) {
         val values = ContentValues().apply {
@@ -725,7 +725,7 @@ class StoreRepository(context: Context) {
     }
 
     private fun enqueueProductSync(
-        db: android.database.sqlite.SQLiteDatabase,
+        db: AppSqliteDatabase,
         actorUserId: String,
         productId: String,
         changeKind: String,

@@ -1759,7 +1759,7 @@ class SyncDomainApplier(context: Context) {
                     put("service_key", serviceWalletKey)
                     put("name", expectedName)
                     put("created_at", createdAt)
-                }, android.database.sqlite.SQLiteDatabase.CONFLICT_IGNORE)
+                }, AppSqliteDatabase.CONFLICT_IGNORE)
                 val existingByKey = db.rawQuery(
                     "SELECT account_id FROM service_wallet_account_links WHERE service_key=?",
                     arrayOf(serviceWalletKey)
@@ -1786,7 +1786,7 @@ class SyncDomainApplier(context: Context) {
                 put("state_key", "cash_account_sales_allowed:$id")
                 put("state_value", if (payload.optBoolean("sales_receipt_allowed")) "1" else "0")
                 put("updated_at", timestamp())
-            }, android.database.sqlite.SQLiteDatabase.CONFLICT_REPLACE)
+            }, AppSqliteDatabase.CONFLICT_REPLACE)
             require(db.update("sync_inbox", ContentValues().apply {
                 put("status", "APPLIED")
                 put("applied_at", timestamp())
@@ -2528,7 +2528,7 @@ class SyncDomainApplier(context: Context) {
         } finally { db.endTransaction() }
     }
 
-    private fun resultReference(db: android.database.sqlite.SQLiteDatabase, operationId: String, type: String): String? =
+    private fun resultReference(db: AppSqliteDatabase, operationId: String, type: String): String? =
         db.rawQuery("SELECT result_reference FROM operation_registry WHERE operation_id=? AND operation_type=?",
             arrayOf(operationId,type)).use { c -> if(c.moveToFirst() && !c.isNull(0)) c.getString(0) else null }
 
