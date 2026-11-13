@@ -3,7 +3,7 @@ package com.hazem.dailystore.data
 import android.content.ContentValues
 import android.content.Context
 import android.database.Cursor
-import android.database.sqlite.SQLiteStatement
+import net.zetetic.database.sqlcipher.SQLiteStatement
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import net.zetetic.database.sqlcipher.SQLiteDatabase
