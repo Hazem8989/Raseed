@@ -14,7 +14,7 @@ import net.zetetic.database.sqlcipher.SQLiteOpenHelper
 internal abstract class SqlCipherOpenHelperBase(
     context: Context,
     databaseName: String,
-    databaseKey: ByteArray,
+    databaseKey: ByteArray?,
     databaseVersion: Int
 ) : SQLiteOpenHelper(
     context,
@@ -28,11 +28,12 @@ internal abstract class SqlCipherOpenHelperBase(
     false
 ) {
     companion object {
-        private fun prepareDatabaseKey(databaseKey: ByteArray): ByteArray {
+        private fun prepareDatabaseKey(databaseKey: ByteArray?): ByteArray? {
             // SQLCipher Android requires its JNI library to be loaded before
             // SQLiteOpenHelper opens a connection. Do this while evaluating
             // the superclass arguments, before the helper can be used.
             SqlCipherDatabaseRuntime.loadNativeLibrary()
+            if (databaseKey == null) return null // Explicit plaintext fixture/migration source only.
             require(databaseKey.size == 32) { "SQLCipher database key must be exactly 256 bits" }
             val hex = CharArray(databaseKey.size * 2)
             val digits = "0123456789abcdef"

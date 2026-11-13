@@ -3,11 +3,10 @@ package com.hazem.dailystore.data
 /**
  * Single entry point for initializing the modern SQLCipher Android runtime.
  *
- * The SQLCipher helper loads the native library before opening a connection.
- * This runtime does not itself open or migrate the production database. The
- * production helper conversion, repository compatibility work, and encrypted
- * backup/restore integration must all be completed and verified before the
- * application switches its live database backend.
+ * The production AppDatabase obtains its key through this runtime before its
+ * SQLCipher helper is constructed. Existing plaintext SQLite files are first
+ * migrated by SqlCipherLegacyMigrationCoordinator; a missing key for an
+ * existing non-plaintext database is always a hard failure.
  */
 internal object SqlCipherDatabaseRuntime {
     @Volatile

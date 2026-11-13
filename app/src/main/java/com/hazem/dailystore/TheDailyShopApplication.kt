@@ -50,9 +50,9 @@ class TheDailyShopApplication : Application() {
             SqlCipherSameDeviceRestoreCoordinator(applicationContext).recover(vault)
         }
 
-        // Retain the legacy SQLite restore recovery path until the production
-        // database and the UI backup/restore flow have both moved to SQLCipher.
-        BackupRestoreManager(applicationContext).recoverInterruptedRestore()
+        // SQLCipher same-device restore recovery is handled above, before any
+        // AppDatabase helper can open the live database. Do not run the legacy
+        // plaintext-file restore path against an encrypted production database.
     }
 
     private companion object {

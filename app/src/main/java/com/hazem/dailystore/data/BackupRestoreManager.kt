@@ -102,24 +102,23 @@ class BackupRestoreManager(private val context: Context) {
         validatePassword(password)
         onProgress?.invoke("إغلاق قاعدة البيانات وتجهيز لقطة آمنة...")
         synchronized(LOCK) {
-            val snapshot = File(context.cacheDir, "tds-backup-snapshot-${System.nanoTime()}.db")
-            val encrypted = File(context.cacheDir, "tds-backup-encrypted-${System.nanoTime()}.bin")
+            val live = context.getDatabasePath(AppDatabase.DATABASE_NAME)
+            val keyVault = DatabaseKeyVault(context)
+            var databaseKey: ByteArray? = null
             try {
+                databaseKey = SqlCipherDatabaseRuntime.getProductionDatabaseKey(keyVault, live)
                 AppDatabase.getInstance(context).checkpointAndCloseForBackup()
-                val live = context.getDatabasePath(AppDatabase.DATABASE_NAME)
-                check(live.isFile && live.length() > 0L) { "قاعدة البيانات غير موجودة أو فارغة" }
-                check(live.length() <= MAX_DATABASE_BYTES) { "حجم قاعدة البيانات يتجاوز الحد المدعوم للنسخ الاحتياطي" }
-                onProgress?.invoke("نسخ قاعدة البيانات إلى ملف مؤقت...")
-                copyFile(live, snapshot)
-                onProgress?.invoke("تشفير النسخة وحمايتها...")
-                encryptSnapshot(snapshot, encrypted, password)
-                onProgress?.invoke("حفظ ملف النسخة المشفّرة...")
-                FileInputStream(encrypted).use { input -> input.copyTo(destination) }
+                onProgress?.invoke("التحقق من قاعدة SQLCipher وتجهيز النسخة...")
+                SqlCipherBackupRestorePipeline().createBackup(
+                    live,
+                    databaseKey,
+                    password,
+                    destination
+                )
                 destination.flush()
-                onProgress?.invoke("اكتمل إنشاء النسخة الاحتياطية.")
+                onProgress?.invoke("اكتمل إنشاء النسخة الاحتياطية المشفّرة.")
             } finally {
-                snapshot.delete()
-                encrypted.delete()
+                databaseKey?.fill(0)
             }
         }
     }
@@ -127,60 +126,34 @@ class BackupRestoreManager(private val context: Context) {
     fun restoreBackup(actorUserId: String, password: CharArray, source: InputStream, onProgress: ((String) -> Unit)? = null) {
         requireBackupPermission(actorUserId)
         validatePassword(password)
-        onProgress?.invoke("فك تشفير النسخة والتحقق من كلمة المرور...")
+        onProgress?.invoke("فك تشفير النسخة والتحقق من سلامتها...")
         synchronized(LOCK) {
-            val staged = File(context.getDatabasePath(AppDatabase.DATABASE_NAME).parentFile,
-                "the_daily_shop.restore-${System.nanoTime()}.db")
-            val live = context.getDatabasePath(AppDatabase.DATABASE_NAME)
-            val rollback = File(live.parentFile, "${live.name}.restore-rollback")
-            var liveWasMoved = false
+            val keyVault = DatabaseKeyVault(context)
+            val staged = stageBackupForSqlCipherRestore(actorUserId, password, source, keyVault)
             try {
-                decryptToFile(source, staged, password)
-                onProgress?.invoke("التحقق من سلامة قاعدة البيانات والعلاقات...")
-                validateDatabase(staged)
-
-                onProgress?.invoke("إغلاق قاعدة البيانات الحالية وحفظ نقطة التراجع...")
-                AppDatabase.getInstance(context).checkpointAndCloseForBackup()
-                deleteSidecars(live)
-                if (rollback.exists() && !rollback.delete()) {
-                    throw IllegalStateException("تعذر إزالة ملف الاستعادة المؤقت السابق")
-                }
-                if (live.exists()) {
-                    check(live.renameTo(rollback)) { "تعذر حفظ قاعدة البيانات الحالية للتراجع" }
-                    liveWasMoved = true
-                }
-                onProgress?.invoke("استبدال قاعدة البيانات بالنسخة المتحقق منها...")
-                check(staged.renameTo(live)) { "تعذر وضع قاعدة البيانات المستعادة" }
-
-                try {
-                    val restored = AppDatabase.getInstance(context).writableDatabase
-                    validateOpenDatabase(restored)
-                    onProgress?.invoke("اعتماد قاعدة البيانات المستعادة...")
-                    rollback.delete()
-                } catch (restoreFailure: Exception) {
-                    AppDatabase.getInstance(context).close()
-                    live.delete()
-                    deleteSidecars(live)
-                    if (liveWasMoved && rollback.exists()) {
-                        check(rollback.renameTo(live)) { "فشل الاسترجاع وفشل أيضاً إعادة قاعدة البيانات السابقة" }
+                val live = context.getDatabasePath(AppDatabase.DATABASE_NAME)
+                onProgress?.invoke("حفظ القاعدة الحالية ونقطة التراجع...")
+                SqlCipherSameDeviceRestoreCoordinator(context).commit(
+                    stagingDatabase = staged.databaseFile,
+                    liveDatabase = live,
+                    replacementKey = staged.databaseKey,
+                    keyVault = keyVault,
+                    closeLiveDatabase = {
+                        AppDatabase.getInstance(context).checkpointAndCloseForBackup()
                     }
-                    // Re-open the prior database after rollback so the app is usable.
-                    AppDatabase.getInstance(context).writableDatabase
-                    throw IllegalStateException(
-                        "لم تُعتمد النسخة الاحتياطية؛ أُعيدت قاعدة البيانات السابقة",
-                        restoreFailure
-                    )
-                }
-            } catch (error: Exception) {
-                if (liveWasMoved && rollback.exists() && !live.exists()) {
-                    check(rollback.renameTo(live)) { "تعذر إعادة قاعدة البيانات السابقة بعد فشل الاستعادة" }
-                }
-                throw error
+                )
+
+                // The old helper retains the old passphrase even after close.
+                // Discard it so the next access constructs a helper with the
+                // newly committed key from Android Keystore.
+                AppDatabase.resetInstanceAfterEncryptedRestore()
+                onProgress?.invoke("التحقق من فتح قاعدة البيانات المستعادة...")
+                val restored = AppDatabase.getInstance(context).writableDatabase
+                validateOpenDatabase(restored)
+                onProgress?.invoke("اكتملت الاستعادة والتحقق من قاعدة البيانات.")
             } finally {
-                staged.delete()
-                if (rollback.exists() && live.exists()) rollback.delete()
+                staged.close()
             }
-            onProgress?.invoke("اكتملت الاستعادة والتحقق من قاعدة البيانات.")
         }
     }
 

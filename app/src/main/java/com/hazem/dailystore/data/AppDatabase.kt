@@ -12,8 +12,11 @@ import android.content.Context
  *
  * Exchange rates are stored as SYP per USD multiplied by 1,000.
  */
-class AppDatabase internal constructor(context: Context, databaseName: String = DATABASE_NAME) :
-    AppSqliteOpenHelper(context, databaseName, null, DATABASE_VERSION) {
+class AppDatabase internal constructor(
+    context: Context,
+    databaseName: String = DATABASE_NAME,
+    databaseKey: ByteArray? = null
+) : SqlCipherOpenHelperBase(context, databaseName, databaseKey, DATABASE_VERSION) {
 
     override fun onConfigure(db: AppSqliteDatabase) {
         super.onConfigure(db)
@@ -1275,6 +1278,9 @@ class AppDatabase internal constructor(context: Context, databaseName: String = 
         @Volatile
         private var INSTANCE: AppDatabase? = null
 
+        @Volatile
+        private var plaintextBackendForTests = false
+
         /**
          * Starts each Robolectric repository test with a clean, isolated database.
          * Production code must use getInstance(); this helper is only called by tests.
@@ -1283,7 +1289,15 @@ class AppDatabase internal constructor(context: Context, databaseName: String = 
         internal fun resetForTests(context: Context, deleteExisting: Boolean = true) {
             INSTANCE?.close()
             INSTANCE = null
+            plaintextBackendForTests = true
             if (deleteExisting) context.deleteDatabase(DATABASE_NAME)
+        }
+
+        /** Drop the closed helper after a coordinated restore has installed a new key. */
+        @Synchronized
+        internal fun resetInstanceAfterEncryptedRestore() {
+            INSTANCE?.close()
+            INSTANCE = null
         }
 
         /** Installs an explicitly named isolated database for multi-device integration tests. */
@@ -1295,9 +1309,40 @@ class AppDatabase internal constructor(context: Context, databaseName: String = 
 
         fun getInstance(context: Context): AppDatabase =
             INSTANCE ?: synchronized(this) {
-                INSTANCE ?: AppDatabase(context.applicationContext)
+                INSTANCE ?: createDatabaseInstance(context.applicationContext)
                     .also { INSTANCE = it }
             }
+
+        private fun createDatabaseInstance(context: Context): AppDatabase {
+            // Robolectric and isolated legacy-migration fixtures deliberately use
+            // a keyless SQLCipher connection to create/read plaintext SQLite files.
+            // Production never enters this branch: resetForTests is test-only.
+            if (plaintextBackendForTests) return AppDatabase(context)
+
+            val databaseFile = context.getDatabasePath(DATABASE_NAME)
+            val keyVault = DatabaseKeyVault(context)
+            if (isLegacyPlaintextDatabase(databaseFile)) {
+                // One-time, crash-recoverable conversion happens before a helper
+                // can open the live file. The coordinator retains its rollback
+                // copy until encrypted schema/content parity has been verified.
+                SqlCipherLegacyMigrationCoordinator(context).migrate(databaseFile, keyVault) {}
+            }
+            val key = SqlCipherDatabaseRuntime.getProductionDatabaseKey(keyVault, databaseFile)
+            return try {
+                AppDatabase(context, DATABASE_NAME, key)
+            } finally {
+                key.fill(0)
+            }
+        }
+
+        private fun isLegacyPlaintextDatabase(file: java.io.File): Boolean {
+            if (!file.isFile || file.length() < 16L) return false
+            val expected = "SQLite format 3\\u0000".toByteArray(Charsets.US_ASCII)
+            return file.inputStream().use { input ->
+                val header = ByteArray(expected.size)
+                input.read(header) == header.size && header.contentEquals(expected)
+            }
+        }
 
         private val SCHEMA = arrayOf(
             """
