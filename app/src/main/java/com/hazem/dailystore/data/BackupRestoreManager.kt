@@ -247,36 +247,62 @@ class BackupRestoreManager(private val context: Context) {
         }
     }
 
-    /** Recovers a restore interrupted after the previous live database was moved aside. */
+    /**
+     * Recovers the legacy TDSBACK1 file-swap transaction before AppDatabase opens.
+     * It understands both old plaintext files and an already-migrated SQLCipher
+     * live file, and never constructs a helper while deciding which file to keep.
+     */
     fun recoverInterruptedRestore() {
         synchronized(LOCK) {
+            AppDatabase.resetInstanceAfterEncryptedRestore()
             val live = context.getDatabasePath(AppDatabase.DATABASE_NAME)
             val rollback = File(live.parentFile, "${live.name}.restore-rollback")
+            val keyVault = DatabaseKeyVault(context)
             if (rollback.exists()) {
-                AppDatabase.getInstance(context).close()
                 val liveIsValid = live.isFile && runCatching {
-                    validateDatabase(live)
-                    val restored = AppDatabase.getInstance(context).writableDatabase
-                    validateOpenDatabase(restored)
-                }.isSuccess
+                    validateDatabaseForRecovery(live, keyVault)
+                }.getOrDefault(false)
                 if (liveIsValid) {
                     check(rollback.delete() || !rollback.exists()) {
                         "تعذر تنظيف نسخة التراجع بعد التحقق من قاعدة البيانات الحالية"
                     }
                 } else {
-                    AppDatabase.getInstance(context).close()
-                    val rollbackIsValid = runCatching { validateDatabase(rollback) }.isSuccess
+                    val rollbackIsValid = runCatching {
+                        validateDatabaseForRecovery(rollback, keyVault)
+                    }.getOrDefault(false)
                     check(rollbackIsValid) {
                         "تعذر التعافي: قاعدة البيانات الحالية ونسخة التراجع غير سليمتين؛ احتفظ بالملفات ولا تحذفها"
                     }
                     deleteSidecars(live)
                     if (live.exists()) check(live.delete()) { "تعذر إزالة قاعدة البيانات غير السليمة" }
-                    check(rollback.renameTo(live)) { "تعذر استعادة قاعدة البيانات السابقة بعد انقطاع التطبيق" }
+                    check(rollback.renameTo(live)) {
+                        "تعذر استعادة قاعدة البيانات السابقة بعد انقطاع التطبيق"
+                    }
                 }
             }
             val stagePrefix = live.name.removeSuffix(".db") + ".restore-"
             live.parentFile?.listFiles()?.filter { it.name.startsWith(stagePrefix) && it.extension == "db" }
                 ?.forEach { it.delete() }
+        }
+    }
+
+    private fun validateDatabaseForRecovery(file: File, keyVault: DatabaseKeyVault) {
+        require(file.isFile && file.length() > 0L) { "ملف قاعدة البيانات غير موجود أو فارغ" }
+        val sqliteHeader = "SQLite format 3\\u0000".toByteArray(Charsets.US_ASCII)
+        val isPlaintext = file.inputStream().use { input ->
+            val header = ByteArray(sqliteHeader.size)
+            input.read(header) == header.size && header.contentEquals(sqliteHeader)
+        }
+        if (isPlaintext) {
+            validateDatabase(file)
+            return
+        }
+        val key = keyVault.getImportedDatabaseKeyForRestoreRecovery()
+            ?: throw IllegalStateException("مفتاح قاعدة SQLCipher غير موجود")
+        try {
+            SqlCipherDatabaseMigrator.validateEncryptedDatabase(file, key)
+        } finally {
+            key.fill(0)
         }
     }
 

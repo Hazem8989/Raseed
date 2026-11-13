@@ -2,6 +2,7 @@ package com.hazem.dailystore
 
 import android.app.Application
 import com.hazem.dailystore.data.AppDatabase
+import com.hazem.dailystore.data.BackupRestoreManager
 import com.hazem.dailystore.data.DatabaseKeyVault
 import com.hazem.dailystore.data.SqlCipherLegacyMigrationCoordinator
 import com.hazem.dailystore.data.SqlCipherSameDeviceRestoreCoordinator
@@ -49,9 +50,11 @@ class TheDailyShopApplication : Application() {
             SqlCipherSameDeviceRestoreCoordinator(applicationContext).recover(vault)
         }
 
-        // SQLCipher same-device restore recovery is handled above, before any
-        // AppDatabase helper can open the live database. Do not run the legacy
-        // plaintext-file restore path against an encrypted production database.
+        // Recover interrupted legacy TDSBACK1 file swaps before the first
+        // AppDatabase helper is created. The recovery routine validates either
+        // a plaintext legacy file or an encrypted SQLCipher file without opening
+        // a helper with a potentially stale key.
+        BackupRestoreManager(applicationContext).recoverInterruptedRestore()
     }
 
     private companion object {
