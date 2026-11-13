@@ -2,8 +2,8 @@ package com.hazem.dailystore.data
 
 import android.content.ContentValues
 import android.content.Context
-import android.database.sqlite.SQLiteConstraintException
-import android.database.sqlite.SQLiteDatabase
+import net.zetetic.database.sqlcipher.SQLiteConstraintException
+import com.hazem.dailystore.data.AppSqliteDatabase as SQLiteDatabase
 import android.util.Base64
 import java.security.MessageDigest
 import java.security.SecureRandom

@@ -2,7 +2,7 @@ package com.hazem.dailystore.data
 
 import android.content.ContentValues
 import android.content.Context
-import android.database.sqlite.SQLiteDatabase
+import com.hazem.dailystore.data.AppSqliteDatabase as SQLiteDatabase
 import org.json.JSONObject
 import java.security.MessageDigest
 import java.security.SecureRandom

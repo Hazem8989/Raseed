@@ -1,7 +1,7 @@
 package com.hazem.dailystore.data
 
 import android.content.Context
-import android.database.sqlite.SQLiteDatabase
+import com.hazem.dailystore.data.AppSqliteDatabase as SQLiteDatabase
 import java.io.BufferedInputStream
 import java.io.BufferedOutputStream
 import java.io.ByteArrayOutputStream

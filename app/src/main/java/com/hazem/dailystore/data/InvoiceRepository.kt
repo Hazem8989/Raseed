@@ -3,7 +3,7 @@ package com.hazem.dailystore.data
 import android.content.ContentValues
 import android.content.Context
 import org.json.JSONObject
-import android.database.sqlite.SQLiteDatabase
+import com.hazem.dailystore.data.AppSqliteDatabase as SQLiteDatabase
 import java.math.BigDecimal
 import java.math.RoundingMode
 import java.security.MessageDigest

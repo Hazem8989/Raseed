@@ -2,7 +2,7 @@ package com.hazem.dailystore.data
 
 import android.content.ContentValues
 import android.content.Context
-import android.database.sqlite.SQLiteDatabase
+import com.hazem.dailystore.data.AppSqliteDatabase as SQLiteDatabase
 import java.security.MessageDigest
 import java.text.SimpleDateFormat
 import java.util.Date
