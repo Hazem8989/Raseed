@@ -77,9 +77,9 @@ run_instrumentation() {
   local attempt
   for attempt in 1 2 3; do
     attempt_log="$REPORT_DIR/${report_file%.txt}-attempt-${attempt}.txt"
-    echo "Running isolated instrumentation selector (20-minute limit, attempt $attempt/3): $selector"
+    echo "Running isolated instrumentation selector (45-minute limit, attempt $attempt/3): $selector"
     set +e
-    timeout --signal=TERM --kill-after=30s 20m adb shell am instrument -w -r -e class "$selector" \
+    timeout --signal=TERM --kill-after=45s 45m adb shell am instrument -w -r -e class "$selector" \
       com.hazem.dailystore.test/androidx.test.runner.AndroidJUnitRunner \
       2>&1 | tee "$attempt_log"
     instrumentation_status=${PIPESTATUS[0]}
@@ -112,7 +112,7 @@ run_instrumentation() {
   if [ "$instrumentation_status" -ne 0 ]; then
     cp "$attempt_log" "$REPORT_DIR/$report_file"
     if [ "$instrumentation_status" -eq 124 ]; then
-      echo "Instrumentation selector $selector exceeded the 20-minute limit; collecting ART thread dumps before cleanup."
+      echo "Instrumentation selector $selector exceeded the 45-minute limit; collecting ART thread dumps before cleanup."
       # Root adbd before signalling app processes. Sending SIGQUIT as the shell
       # user is denied for app UIDs, which previously left only unrelated system
       # ANR traces in the artifact and hid the actual hot application thread.

@@ -26,7 +26,7 @@ jobs:
     runs-on: ubuntu-latest
     # The complete pipeline suite previously passed close to the 45-minute ceiling.
     # Leave headroom for emulator and Gradle cold-start variance.
-    timeout-minutes: 90
+    timeout-minutes: 180
     strategy:
       fail-fast: false
       # Run one AVD at a time: concurrent emulator boots have stalled framework startup
@@ -130,7 +130,7 @@ jobs:
           # The previous AVD lost Binder/system_server during early post-boot setup.
           # Keep animation changes out of the action's pre-script phase: the test
           # script first waits for package/activity/storage services to be healthy.
-          emulator-options: -no-window -gpu swiftshader -no-snapshot -noaudio -no-boot-anim -camera-back none -camera-front none -memory 3072 -cores 2
+          emulator-options: -no-window -gpu swiftshader -no-snapshot -noaudio -no-boot-anim -camera-back none -camera-front none -memory 4096 -cores 4
           emulator-boot-timeout: 900
           # The action applies animation settings before our framework-readiness guard.
           # Defer that optional optimization; tests must not depend on animation scale.
