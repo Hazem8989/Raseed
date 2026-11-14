@@ -261,7 +261,7 @@ class BackupRestoreManager(private val context: Context) {
             if (rollback.exists()) {
                 val liveIsValid = live.isFile && runCatching {
                     validateDatabaseForRecovery(live, keyVault)
-                }.getOrDefault(false)
+                }.isSuccess
                 if (liveIsValid) {
                     check(rollback.delete() || !rollback.exists()) {
                         "تعذر تنظيف نسخة التراجع بعد التحقق من قاعدة البيانات الحالية"
@@ -269,7 +269,7 @@ class BackupRestoreManager(private val context: Context) {
                 } else {
                     val rollbackIsValid = runCatching {
                         validateDatabaseForRecovery(rollback, keyVault)
-                    }.getOrDefault(false)
+                    }.isSuccess
                     check(rollbackIsValid) {
                         "تعذر التعافي: قاعدة البيانات الحالية ونسخة التراجع غير سليمتين؛ احتفظ بالملفات ولا تحذفها"
                     }

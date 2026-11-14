@@ -12,7 +12,7 @@ import android.content.Context
  *
  * Exchange rates are stored as SYP per USD multiplied by 1,000.
  */
-class AppDatabase internal constructor(
+internal class AppDatabase internal constructor(
     context: Context,
     databaseName: String = DATABASE_NAME,
     databaseKey: ByteArray? = null
