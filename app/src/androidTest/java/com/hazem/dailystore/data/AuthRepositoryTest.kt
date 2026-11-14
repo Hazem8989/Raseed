@@ -71,6 +71,12 @@ class AuthRepositoryTest {
         val usernameHash = java.security.MessageDigest.getInstance("SHA-256")
             .digest("admin".toByteArray(Charsets.UTF_8))
             .joinToString("") { "%02x".format(it) }
+        val lockedUntil = database.readableDatabase.rawQuery(
+            "SELECT locked_until_ms FROM auth_login_attempts WHERE username_hash=?",
+            arrayOf(usernameHash)
+        ).use { c -> assertTrue("Login lock record must exist", c.moveToFirst()); c.getLong(0) }
+        assertTrue("The lock window must start after password verification completes",
+            lockedUntil > System.currentTimeMillis())
         database.writableDatabase.execSQL(
             "UPDATE auth_login_attempts SET locked_until_ms=0 WHERE username_hash=?",
             arrayOf(usernameHash)

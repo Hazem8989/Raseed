@@ -133,14 +133,17 @@ class AuthRepository(context: Context) {
                 .getOrDefault(false)
         } ?: false
         if (!valid || user == null) {
+            // Password derivation can be slow on low-powered devices and test emulators.
+            // Start the lock window after the KDF completes, not before it.
+            val failureTimeMillis = System.currentTimeMillis()
             val priorFailures = when {
                 attempt == null -> 0
                 attempt.second == 0L -> attempt.first
-                attempt.second <= nowMillis -> 0
+                attempt.second <= failureTimeMillis -> 0
                 else -> attempt.first
             }
             val failures = priorFailures + 1
-            val lockUntil = if (failures >= MAX_LOGIN_FAILURES) nowMillis + LOGIN_LOCK_MS else 0L
+            val lockUntil = if (failures >= MAX_LOGIN_FAILURES) failureTimeMillis + LOGIN_LOCK_MS else 0L
             db.insertWithOnConflict("auth_login_attempts", null, ContentValues().apply {
                 put("username_hash", usernameKey)
                 put("failed_attempts", if (lockUntil > 0L) 0 else failures)
