@@ -12,10 +12,10 @@ import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
 import org.junit.runner.RunWith
-import org.robolectric.RobolectricTestRunner
-import org.robolectric.RuntimeEnvironment
+import androidx.test.ext.junit.runners.AndroidJUnit4
+import androidx.test.platform.app.InstrumentationRegistry
 
-@RunWith(RobolectricTestRunner::class)
+@RunWith(AndroidJUnit4::class)
 class InvoiceRepositoryTest {
     private lateinit var database: AppDatabase
     private lateinit var store: StoreRepository
@@ -27,7 +27,7 @@ class InvoiceRepositoryTest {
     @Before
     fun setUp() {
         SyncDeviceTestKeyProvider.install()
-        val context = RuntimeEnvironment.getApplication()
+        val context = InstrumentationRegistry.getInstrumentation().targetContext.applicationContext
         AppDatabase.resetForTests(context)
         database = AppDatabase.getInstance(context)
         store = StoreRepository(context)
@@ -113,21 +113,21 @@ class InvoiceRepositoryTest {
 
     @Test
     fun primaryPurchaseInvoiceRemainsLocalToPrimaryDevice() {
-        SyncProtocolRepository(RuntimeEnvironment.getApplication())
+        SyncProtocolRepository(InstrumentationRegistry.getInstrumentation().targetContext.applicationContext)
             .configureAsPrimary(adminId, "الهاتف الرئيسي")
         val draft = invoices.savePurchaseDraft(
             adminId, "sync-purchase-draft", null, null, "2026-10-31", 0, null,
             listOf(InvoiceLineInput(productId, BigDecimal("2"), 125))
         )
         assertTrue(invoices.postPurchase(adminId, draft.invoiceId, "sync-purchase-post"))
-        val outbox = SyncProtocolRepository(RuntimeEnvironment.getApplication()).pendingOutbox()
+        val outbox = SyncProtocolRepository(InstrumentationRegistry.getInstrumentation().targetContext.applicationContext).pendingOutbox()
         assertTrue("Purchase invoices and their financial/stock postings remain on the primary device",
             outbox.isEmpty())
     }
 
     @Test
     fun secondaryDeviceCannotCreateOrPostPurchaseInvoices() {
-        val context = RuntimeEnvironment.getApplication()
+        val context = InstrumentationRegistry.getInstrumentation().targetContext.applicationContext
         val primaryId = UUID.randomUUID().toString()
         val secret = ByteArray(32) { (it + 17).toByte() }
         val credential = android.util.Base64.encodeToString(
@@ -155,7 +155,7 @@ class InvoiceRepositoryTest {
 
     @Test
     fun secondaryCashSaleQueuesSyntheticReceiptWithoutPostingCashOrStockLocally() {
-        val context = RuntimeEnvironment.getApplication()
+        val context = InstrumentationRegistry.getInstrumentation().targetContext.applicationContext
         val primaryId = UUID.randomUUID().toString()
         val secret = ByteArray(32) { (it + 29).toByte() }
         val credential = android.util.Base64.encodeToString(
@@ -226,7 +226,7 @@ class InvoiceRepositoryTest {
         assertFalse(invoices.postCashSale(adminId, draft.invoiceId, "sale-post-op-1", cashAccountId))
         assertEquals(6.0, stock(), 0.000001)
         assertEquals("PAID", invoices.listSalesInvoices().first { it.id == draft.invoiceId }.status)
-        assertEquals(1000L, CashAccountRepository(RuntimeEnvironment.getApplication()).balance(cashAccountId))
+        assertEquals(1000L, CashAccountRepository(InstrumentationRegistry.getInstrumentation().targetContext.applicationContext).balance(cashAccountId))
         database.readableDatabase.rawQuery(
             "SELECT COUNT(*) FROM invoice_payments WHERE invoice_type='SALE' AND invoice_id=?",
             arrayOf(draft.invoiceId)
@@ -295,8 +295,8 @@ class InvoiceRepositoryTest {
         database.writableDatabase.execSQL("ALTER TABLE sales_invoices DROP COLUMN posted_at")
         database.writableDatabase.version = 9
         database.close()
-        AppDatabase.resetForTests(RuntimeEnvironment.getApplication(), deleteExisting = false)
-        database = AppDatabase.getInstance(RuntimeEnvironment.getApplication())
+        AppDatabase.resetForTests(InstrumentationRegistry.getInstrumentation().targetContext.applicationContext, deleteExisting = false)
+        database = AppDatabase.getInstance(InstrumentationRegistry.getInstrumentation().targetContext.applicationContext)
         val upgraded = database.writableDatabase
         assertEquals(AppDatabase.DATABASE_VERSION, upgraded.version)
         val restored = upgraded.rawQuery(
@@ -305,7 +305,7 @@ class InvoiceRepositoryTest {
         ).use { c -> assertTrue(c.moveToFirst()); c.getString(0) to c.getString(1) }
         assertEquals(originalPostedAt, restored.first)
         assertEquals(10, restored.second.length)
-        val report = SalesProfitRepository(RuntimeEnvironment.getApplication())
+        val report = SalesProfitRepository(InstrumentationRegistry.getInstrumentation().targetContext.applicationContext)
             .summarize(restored.second, restored.second)
         assertEquals(1, report.invoiceCount)
         assertEquals(250L, report.revenueUsdCents)
@@ -354,8 +354,8 @@ class InvoiceRepositoryTest {
         database.writableDatabase.execSQL("ALTER TABLE sales_items DROP COLUMN cogs_usd_cents")
         database.writableDatabase.version = 8
         database.close()
-        AppDatabase.resetForTests(RuntimeEnvironment.getApplication(), deleteExisting = false)
-        database = AppDatabase.getInstance(RuntimeEnvironment.getApplication())
+        AppDatabase.resetForTests(InstrumentationRegistry.getInstrumentation().targetContext.applicationContext, deleteExisting = false)
+        database = AppDatabase.getInstance(InstrumentationRegistry.getInstrumentation().targetContext.applicationContext)
         val upgraded = database.writableDatabase
         assertEquals(AppDatabase.DATABASE_VERSION, upgraded.version)
         upgraded.rawQuery(
@@ -390,7 +390,7 @@ class InvoiceRepositoryTest {
             listOf(InvoiceLineInput(productId, BigDecimal("12"), 250))
         )
         assertTrue(invoices.postCashSale(adminId, sale.invoiceId, "profit-fifo-sale-post", cashAccountId))
-        val report = SalesProfitRepository(RuntimeEnvironment.getApplication()).allTime()
+        val report = SalesProfitRepository(InstrumentationRegistry.getInstrumentation().targetContext.applicationContext).allTime()
         assertTrue(report.isComplete)
         assertEquals(1, report.invoiceCount)
         assertEquals(3_000L, report.revenueUsdCents)
@@ -461,7 +461,7 @@ class InvoiceRepositoryTest {
 
     @Test
     fun cashierCanSaveSalesButCannotCreatePurchaseInvoices() {
-        val auth = AuthRepository(RuntimeEnvironment.getApplication())
+        val auth = AuthRepository(InstrumentationRegistry.getInstrumentation().targetContext.applicationContext)
         val cashierId = auth.createUser(
             "ADMIN", adminId, "cashierinvoice", "موظف بيع", "Cashier5678", "CASHIER"
         )

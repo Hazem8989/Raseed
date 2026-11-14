@@ -11,10 +11,10 @@ import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
 import org.junit.runner.RunWith
-import org.robolectric.RobolectricTestRunner
-import org.robolectric.RuntimeEnvironment
+import androidx.test.ext.junit.runners.AndroidJUnit4
+import androidx.test.platform.app.InstrumentationRegistry
 
-@RunWith(RobolectricTestRunner::class)
+@RunWith(AndroidJUnit4::class)
 class PurchasePaymentRepositoryTest {
     private lateinit var database: AppDatabase
     private lateinit var invoices: InvoiceRepository
@@ -28,7 +28,7 @@ class PurchasePaymentRepositoryTest {
     @Before
     fun setUp() {
         SyncDeviceTestKeyProvider.install()
-        val context = RuntimeEnvironment.getApplication()
+        val context = InstrumentationRegistry.getInstrumentation().targetContext.applicationContext
         AppDatabase.resetForTests(context)
         database = AppDatabase.getInstance(context)
         val store = StoreRepository(context)
@@ -148,7 +148,7 @@ class PurchasePaymentRepositoryTest {
             syp.id, 100000L)
         assertEquals(1000L, result.paidUsdCents)
         assertEquals(9000L, result.outstandingUsdCents)
-        val statement = PartyStatementRepository(RuntimeEnvironment.getApplication()).supplier(supplierId)
+        val statement = PartyStatementRepository(InstrumentationRegistry.getInstrumentation().targetContext.applicationContext).supplier(supplierId)
         assertEquals(9000L, statement.closingBalanceUsdCents)
         assertEquals(900000L, statement.closingBalanceSypMinor)
 
@@ -207,7 +207,7 @@ class PurchasePaymentRepositoryTest {
         val drawer = cashAccounts.create(adminId, "درج رئيسي يومي " + UUID.randomUUID(), "CASH_BOX", "SYP", 0L)
         cashAccounts.setCurrentDayPrimaryDrawer("ADMIN", adminId, drawer.id)
         val supplierCash = cashAccounts.create(adminId, "نقد موردين مدور " + UUID.randomUUID(), "CASH_BOX", "SYP", 500000L)
-        val daily = DailyBalanceRepository(RuntimeEnvironment.getApplication())
+        val daily = DailyBalanceRepository(InstrumentationRegistry.getInstrumentation().targetContext.applicationContext)
         // This test uses the current operating date; remove only the prior test allocation.
         database.writableDatabase.delete("daily_supplier_rollovers", null, null)
         daily.setSupplierRollover(adminId, supplierCash.id, 100000L, "اختبار تخصيص يومي")
@@ -273,7 +273,7 @@ class PurchasePaymentRepositoryTest {
 
     @Test
     fun primarySupplierPaymentRemainsLocalToPrimaryDevice() {
-        val context = RuntimeEnvironment.getApplication()
+        val context = InstrumentationRegistry.getInstrumentation().targetContext.applicationContext
         val sync = SyncProtocolRepository(context)
         sync.configureAsPrimary(adminId, "الهاتف الرئيسي")
         payments.addPayment(adminId, invoiceId, "sync-supplier-payment-" + UUID.randomUUID(),
@@ -284,7 +284,7 @@ class PurchasePaymentRepositoryTest {
 
     @Test
     fun secondarySupplierPaymentIsRejectedBySalesOnlyPolicy() {
-        val context = RuntimeEnvironment.getApplication()
+        val context = InstrumentationRegistry.getInstrumentation().targetContext.applicationContext
         val vault = SyncCredentialVault(context) { SecretKeySpec(ByteArray(32) { 19 }, "AES") }
         val sync = SyncProtocolRepository(context, vault)
         val primaryId = UUID.randomUUID().toString()
@@ -305,7 +305,7 @@ class PurchasePaymentRepositoryTest {
 
     @Test
     fun primaryRejectsSupplierPaymentCommandFromSecondaryBeforeInbox() {
-        val context = RuntimeEnvironment.getApplication()
+        val context = InstrumentationRegistry.getInstrumentation().targetContext.applicationContext
         val vault = SyncCredentialVault(context) { SecretKeySpec(ByteArray(32) { 23 }, "AES") }
         val sync = SyncProtocolRepository(context, vault)
         sync.configureAsPrimary(adminId, "الجهاز الرئيسي")

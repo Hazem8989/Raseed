@@ -10,10 +10,10 @@ import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
 import org.junit.runner.RunWith
-import org.robolectric.RobolectricTestRunner
-import org.robolectric.RuntimeEnvironment
+import androidx.test.ext.junit.runners.AndroidJUnit4
+import androidx.test.platform.app.InstrumentationRegistry
 
-@RunWith(RobolectricTestRunner::class)
+@RunWith(AndroidJUnit4::class)
 class CustomerRepositoryTest {
     private lateinit var database: AppDatabase
     private lateinit var customers: CustomerRepository
@@ -23,7 +23,7 @@ class CustomerRepositoryTest {
 
     @Before
     fun setUp() {
-        val context = RuntimeEnvironment.getApplication()
+        val context = InstrumentationRegistry.getInstrumentation().targetContext.applicationContext
         AppDatabase.resetForTests(context)
         database = AppDatabase.getInstance(context)
         val store = StoreRepository(context)
@@ -85,7 +85,7 @@ class CustomerRepositoryTest {
 
     @Test
     fun primaryCustomerCreateUpdateAndDeactivationAreQueuedForSecondary() {
-        val context = RuntimeEnvironment.getApplication()
+        val context = InstrumentationRegistry.getInstrumentation().targetContext.applicationContext
         SyncDeviceTestKeyProvider.install()
         SyncProtocolRepository(context).configureAsPrimary(adminId, "Customer sync primary")
         val customer = customers.create(adminId, "زبون مزامنة ${UUID.randomUUID()}", "0999000000")

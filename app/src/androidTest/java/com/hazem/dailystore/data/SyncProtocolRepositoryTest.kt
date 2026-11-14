@@ -12,8 +12,8 @@ import javax.crypto.spec.SecretKeySpec
 import org.junit.Before
 import org.junit.Test
 import org.junit.runner.RunWith
-import org.robolectric.RobolectricTestRunner
-import org.robolectric.RuntimeEnvironment
+import androidx.test.ext.junit.runners.AndroidJUnit4
+import androidx.test.platform.app.InstrumentationRegistry
 import okhttp3.OkHttpClient
 import okhttp3.mockwebserver.MockResponse
 import okhttp3.mockwebserver.MockWebServer
@@ -25,7 +25,7 @@ import java.security.cert.X509Certificate
 import javax.net.ssl.SSLContext
 import javax.net.ssl.X509TrustManager
 
-@RunWith(RobolectricTestRunner::class)
+@RunWith(AndroidJUnit4::class)
 class SyncProtocolRepositoryTest {
     private lateinit var database: AppDatabase
     private lateinit var repository: SyncProtocolRepository
@@ -34,7 +34,7 @@ class SyncProtocolRepositoryTest {
 
     @Before fun setUp() {
         SyncDeviceTestKeyProvider.install()
-        val context = RuntimeEnvironment.getApplication()
+        val context = InstrumentationRegistry.getInstrumentation().targetContext.applicationContext
         AppDatabase.resetForTests(context)
         database = AppDatabase.getInstance(context)
         val auth = AuthRepository(context)
@@ -52,7 +52,7 @@ class SyncProtocolRepositoryTest {
         invitation: SyncPairingInvitation, deviceId: String, displayName: String
     ): SyncEnrollment {
         val remote = SyncDeviceAuthenticator.getOrCreate(
-            RuntimeEnvironment.getApplication(), deviceId
+            InstrumentationRegistry.getInstrumentation().targetContext.applicationContext, deviceId
         )
         val publicKey = android.util.Base64.encodeToString(remote.public.encoded, android.util.Base64.NO_WRAP)
         return repository.enrollSecondaryDevice(adminId, invitation.token, deviceId, displayName, publicKey)
@@ -62,7 +62,7 @@ class SyncProtocolRepositoryTest {
         storeId: String, primaryId: String, credential: String, displayName: String,
         zoneId: String = StoreTime.DEFAULT_ZONE_ID
     ) {
-        val context = RuntimeEnvironment.getApplication()
+        val context = InstrumentationRegistry.getInstrumentation().targetContext.applicationContext
         val localId = SyncDeviceIdentity.getOrCreate(context)
         val local = SyncDeviceAuthenticator.getOrCreate(context, localId)
         val primary = SyncDeviceAuthenticator.getOrCreate(context, primaryId)
@@ -78,7 +78,7 @@ class SyncProtocolRepositoryTest {
 
 
     @Test fun secondaryEnrollmentRefusesToDeleteLocalServiceWalletWithBalance() {
-        val context = RuntimeEnvironment.getApplication()
+        val context = InstrumentationRegistry.getInstrumentation().targetContext.applicationContext
         val service = ServiceTransferRepository(context)
         service.ensureSystemAccounts()
         val localWalletId = service.serviceAccountId(ServiceTransferRepository.SYRIATEL_SHARED)
@@ -160,7 +160,7 @@ class SyncProtocolRepositoryTest {
             replacement.primaryDeviceId,
             android.util.Base64.encodeToString(
                 SyncDeviceAuthenticator.getOrCreate(
-                    RuntimeEnvironment.getApplication(), replacement.primaryDeviceId
+                    InstrumentationRegistry.getInstrumentation().targetContext.applicationContext, replacement.primaryDeviceId
                 ).public.encoded,
                 android.util.Base64.NO_WRAP
             )
@@ -247,7 +247,7 @@ class SyncProtocolRepositoryTest {
 
     @Test fun primaryCreatesEncryptedSignedApplicationAckOnlyAfterDurableApply() {
         repository.configureAsPrimary(adminId, "الرئيسي")
-        val context = RuntimeEnvironment.getApplication()
+        val context = InstrumentationRegistry.getInstrumentation().targetContext.applicationContext
         val remoteId = UUID.randomUUID().toString()
         val remoteIdentity = SyncDeviceAuthenticator.getOrCreate(context, remoteId)
         val remotePublicKey = android.util.Base64.encodeToString(
@@ -384,7 +384,7 @@ class SyncProtocolRepositoryTest {
         database.readableDatabase.rawQuery(
             "SELECT state_value FROM sync_protocol_state WHERE state_key='authority_device_id'", null
         ).use { c -> assertTrue(c.moveToFirst()); assertEquals(primaryId, c.getString(0)) }
-        val storedValues = RuntimeEnvironment.getApplication()
+        val storedValues = InstrumentationRegistry.getInstrumentation().targetContext.applicationContext
             .getSharedPreferences("the_daily_shop_sync_credentials", android.content.Context.MODE_PRIVATE)
             .all.values
         assertTrue(storedValues.isNotEmpty())
@@ -401,7 +401,7 @@ class SyncProtocolRepositoryTest {
             ),
             "الثانوي"
         )
-        val localId = SyncDeviceIdentity.getOrCreate(RuntimeEnvironment.getApplication())
+        val localId = SyncDeviceIdentity.getOrCreate(InstrumentationRegistry.getInstrumentation().targetContext.applicationContext)
         database.writableDatabase.delete(
             "sync_protocol_state", "state_key='authority_device_id'", null
         )
@@ -430,7 +430,7 @@ class SyncProtocolRepositoryTest {
             ),
             "الثانوي"
         )
-        val localId = SyncDeviceIdentity.getOrCreate(RuntimeEnvironment.getApplication())
+        val localId = SyncDeviceIdentity.getOrCreate(InstrumentationRegistry.getInstrumentation().targetContext.applicationContext)
         database.writableDatabase.delete(
             "sync_protocol_state",
             "state_key IN ('authority_device_id','local_device_role')",
@@ -453,7 +453,7 @@ class SyncProtocolRepositoryTest {
 
     @Test fun enrolledPrimaryCannotDowngradeToSecondaryWhenLocalRoleStateIsMissing() {
         repository.configureAsPrimary(adminId, "الجهاز الأساسي")
-        val context = RuntimeEnvironment.getApplication()
+        val context = InstrumentationRegistry.getInstrumentation().targetContext.applicationContext
         val localId = SyncDeviceIdentity.getOrCreate(context)
         val storeId = database.readableDatabase.rawQuery(
             "SELECT state_value FROM sync_protocol_state WHERE state_key='store_id'", null
@@ -497,7 +497,7 @@ class SyncProtocolRepositoryTest {
     }
 
     @Test fun cashierCannotConfigurePrimaryOrCreateInvitations() {
-        val auth = AuthRepository(RuntimeEnvironment.getApplication())
+        val auth = AuthRepository(InstrumentationRegistry.getInstrumentation().targetContext.applicationContext)
         val cashierId = auth.createUser("ADMIN", adminId, "sync-cashier", "Cashier", "Cashier12345", "CASHIER")
         auth.changePassword(cashierId, "Cashier12345", "CashierStrong123")
         var denied = false
@@ -573,7 +573,7 @@ class SyncProtocolRepositoryTest {
         enrollRemote(invitation, secondaryId, "الثانوي")
 
         assertEquals("America/New_York",
-            StoreRepository(RuntimeEnvironment.getApplication())
+            StoreRepository(InstrumentationRegistry.getInstrumentation().targetContext.applicationContext)
                 .saveStoreTimeZoneId("America/New_York", adminId))
         val pending = repository.pendingStoreSettingsForDevice(secondaryId)
         assertEquals(1, pending.size)
@@ -593,7 +593,7 @@ class SyncProtocolRepositoryTest {
 
     @Test fun newlyEnrolledSecondaryReceivesCurrentStoreTimeZoneInBootstrapData() {
         repository.configureAsPrimary(adminId, "الرئيسي")
-        StoreRepository(RuntimeEnvironment.getApplication())
+        StoreRepository(InstrumentationRegistry.getInstrumentation().targetContext.applicationContext)
             .saveStoreTimeZoneId("Asia/Dubai", adminId)
         val invitation = repository.createPairingInvitation(adminId)
         val enrollment = enrollRemote(invitation, UUID.randomUUID().toString(), "جهاز جديد")
@@ -610,7 +610,7 @@ class SyncProtocolRepositoryTest {
         configureSecondaryForTest("store-time-zone-02", primaryId, credential, "الثانوي")
         var rejected = false
         try {
-            StoreRepository(RuntimeEnvironment.getApplication())
+            StoreRepository(InstrumentationRegistry.getInstrumentation().targetContext.applicationContext)
                 .saveStoreTimeZoneId("America/Los_Angeles", adminId)
         } catch (_: IllegalArgumentException) {
             rejected = true
@@ -640,7 +640,7 @@ class SyncProtocolRepositoryTest {
         assertEquals(SyncInboxDisposition.DUPLICATE,
             repository.recordIncomingStoreSettingsFromPrimary(encoded))
 
-        val applier = SyncDomainApplier(RuntimeEnvironment.getApplication())
+        val applier = SyncDomainApplier(InstrumentationRegistry.getInstrumentation().targetContext.applicationContext)
         assertTrue(applier.applyReceivedStoreTimeZone(envelope.operationId).applied)
         assertEquals("America/New_York", StoreTime.zoneId(database.readableDatabase))
         assertTrue(applier.applyReceivedStoreTimeZone(envelope.operationId).applied)
@@ -673,7 +673,7 @@ class SyncProtocolRepositoryTest {
         assertEquals(1, repository.pendingOutbox().size)
         assertEquals(0, db.rawQuery("SELECT COUNT(*) FROM sales_invoices", null).use { it.moveToFirst(); it.getInt(0) })
         val envelope = repository.authenticatedOutbox(operationId, primaryId)
-        assertEquals(SyncDeviceIdentity.getOrCreate(RuntimeEnvironment.getApplication()), envelope.originDeviceId)
+        assertEquals(SyncDeviceIdentity.getOrCreate(InstrumentationRegistry.getInstrumentation().targetContext.applicationContext), envelope.originDeviceId)
         assertTrue(SyncEnvelopeSecurity.verify(envelope, secretBytes))
         assertEquals("POST_SALE_INVOICE", org.json.JSONObject(envelope.payloadJson).getString("business_operation"))
         secretBytes.fill(0)
@@ -739,7 +739,7 @@ class SyncProtocolRepositoryTest {
         // Create the second actor while this isolated test database is still in
         // its primary/unconfigured state. User administration is intentionally
         // unavailable after the device is configured as a sales-only secondary.
-        val auth = AuthRepository(RuntimeEnvironment.getApplication())
+        val auth = AuthRepository(InstrumentationRegistry.getInstrumentation().targetContext.applicationContext)
         val temporaryPassphrase = "UnitTestPassphrase1!"
         val cashierId = auth.createUser(
             "ADMIN", adminId, "cashier-command-actor", "Cashier command actor",
@@ -974,7 +974,7 @@ class SyncProtocolRepositoryTest {
     )
 
     private fun prepareAckAcceptanceScenario(): AckAcceptanceScenario {
-        val context = RuntimeEnvironment.getApplication()
+        val context = InstrumentationRegistry.getInstrumentation().targetContext.applicationContext
         repository.configureAsPrimary(adminId, "الجهاز الأساسي")
         val primaryId = SyncDeviceIdentity.getOrCreate(context)
         val secondaryId = UUID.randomUUID().toString()
@@ -1124,7 +1124,7 @@ class SyncProtocolRepositoryTest {
 
     @Test fun relayProcessorFlushesDurableSecondaryOutboxAndForwardNoticeDoesNotCompleteIt() {
         val scenario = prepareAckAcceptanceScenario()
-        val context = RuntimeEnvironment.getApplication()
+        val context = InstrumentationRegistry.getInstrumentation().targetContext.applicationContext
         val sent = mutableListOf<Triple<String, String, String>>()
         val processor = SyncRelayProcessor(
             repository, SyncDomainApplier(context),
@@ -1150,7 +1150,7 @@ class SyncProtocolRepositoryTest {
 
     @Test fun relayProcessorRoutesInboundApplicationAckToDurableAcceptance() {
         val scenario = prepareAckAcceptanceScenario()
-        val context = RuntimeEnvironment.getApplication()
+        val context = InstrumentationRegistry.getInstrumentation().targetContext.applicationContext
         val processor = SyncRelayProcessor(
             repository, SyncDomainApplier(context),
             sendFrame = { _, _, _ -> true }
@@ -1164,7 +1164,7 @@ class SyncProtocolRepositoryTest {
     }
 
     @Test fun primaryTracksApplicationAckPerSecondaryBeforeCompletingSharedOutbox() {
-        val context = RuntimeEnvironment.getApplication()
+        val context = InstrumentationRegistry.getInstrumentation().targetContext.applicationContext
         repository.configureAsPrimary(adminId, "الجهاز الأساسي")
         val primaryId = SyncDeviceIdentity.getOrCreate(context)
         val secondaryIds = (1..2).map { index ->

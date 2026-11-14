@@ -10,10 +10,10 @@ import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
 import org.junit.runner.RunWith
-import org.robolectric.RobolectricTestRunner
-import org.robolectric.RuntimeEnvironment
+import androidx.test.ext.junit.runners.AndroidJUnit4
+import androidx.test.platform.app.InstrumentationRegistry
 
-@RunWith(RobolectricTestRunner::class)
+@RunWith(AndroidJUnit4::class)
 class PurchaseReturnRepositoryTest {
     private lateinit var db: AppDatabase
     private lateinit var adminId: String
@@ -28,7 +28,7 @@ class PurchaseReturnRepositoryTest {
 
     @Before fun setUp() {
         SyncDeviceTestKeyProvider.install()
-        val context=RuntimeEnvironment.getApplication()
+        val context=InstrumentationRegistry.getInstrumentation().targetContext.applicationContext
         AppDatabase.resetForTests(context)
         db=AppDatabase.getInstance(context)
         val store=StoreRepository(context); store.ensureBaseSetup()
@@ -71,7 +71,7 @@ class PurchaseReturnRepositoryTest {
     @Test fun supplierStatementReconcilesPurchaseAndReturnCredit() {
         returns.postPurchaseReturn(adminId,invoiceId,"supplier-statement-return-"+UUID.randomUUID(),
             "2026-11-02","مرتجع لاختبار كشف الحساب",item("3"),emptyList())
-        val statement=PartyStatementRepository(RuntimeEnvironment.getApplication()).supplier(supplierId)
+        val statement=PartyStatementRepository(InstrumentationRegistry.getInstrumentation().targetContext.applicationContext).supplier(supplierId)
         assertEquals(2,statement.entries.size)
         assertEquals(10000L,statement.entries.first { it.type=="PURCHASE_INVOICE" }.debitUsdCents)
         assertEquals(300000L,statement.entries.first { it.type=="PURCHASE_RETURN" }.creditSypMinor)
@@ -91,7 +91,7 @@ class PurchaseReturnRepositoryTest {
         assertEquals(7.0,stock(),0.000001)
         val invoice=payments.listPurchaseInvoices().first { it.id==invoiceId }
         assertEquals(700000L,invoice.outstandingSypMinor)
-        val salesProfit=SalesProfitRepository(RuntimeEnvironment.getApplication()).allTime()
+        val salesProfit=SalesProfitRepository(InstrumentationRegistry.getInstrumentation().targetContext.applicationContext).allTime()
         assertEquals(0L,salesProfit.returnUsdCents)
         assertEquals(0,salesProfit.returnCount)
         val layerRemaining=db.readableDatabase.rawQuery(
@@ -120,7 +120,7 @@ class PurchaseReturnRepositoryTest {
         assertEquals(0L,result.supplierCreditReductionSypMinor)
         assertEquals(200000L,result.supplierCashRefundSypMinor)
         assertEquals(200000L,accounts.balance(syp.id))
-        val daily=DailyBalanceRepository(RuntimeEnvironment.getApplication()).dailyReport("2026-11-02")
+        val daily=DailyBalanceRepository(InstrumentationRegistry.getInstrumentation().targetContext.applicationContext).dailyReport("2026-11-02")
         val dailyRefund=daily.accounts.first { it.accountId==syp.id }
         assertEquals(200000L,dailyRefund.supplierReturnRefundsMinor)
         assertEquals(200000L,dailyRefund.closingMinor)
@@ -221,14 +221,14 @@ class PurchaseReturnRepositoryTest {
             "2026-11-02","إرجاع من طبقة الشراء الثانية",
             listOf(PurchaseReturnItemInput(secondItemId,BigDecimal("5"))),emptyList())
         assertEquals(10.0,stock(),0.000001)
-        val valuation=InventoryValuationRepository(RuntimeEnvironment.getApplication()).dailyCapital().current
+        val valuation=InventoryValuationRepository(InstrumentationRegistry.getInstrumentation().targetContext.applicationContext).dailyCapital().current
         assertTrue("Inventory valuation should remain fully costed",valuation.isComplete)
         assertEquals(10.0,valuation.valuedQuantity,0.000001)
         assertEquals(15000L,valuation.totalCostUsdCents)
     }
 
     @Test fun cashierCannotPostSupplierReturn() {
-        val auth=AuthRepository(RuntimeEnvironment.getApplication())
+        val auth=AuthRepository(InstrumentationRegistry.getInstrumentation().targetContext.applicationContext)
         val cashier=auth.createUser("ADMIN",adminId,"supplier-return-cashier","Cashier","Cashier12345","CASHIER")
         auth.changePassword(cashier,"Cashier12345","CashierStrong123")
         try {
@@ -241,7 +241,7 @@ class PurchaseReturnRepositoryTest {
 
 
     @Test fun secondaryPurchaseReturnIsRejectedBySalesOnlyPolicy() {
-        val context = RuntimeEnvironment.getApplication()
+        val context = InstrumentationRegistry.getInstrumentation().targetContext.applicationContext
         val stockBefore = stock()
         val vault = SyncCredentialVault(context) { javax.crypto.spec.SecretKeySpec(ByteArray(32) { 29 }, "AES") }
         val sync = SyncProtocolRepository(context, vault)
@@ -259,7 +259,7 @@ class PurchaseReturnRepositoryTest {
     }
 
     @Test fun primaryPurchaseReturnRemainsLocalToPrimaryDevice() {
-        val context=RuntimeEnvironment.getApplication()
+        val context=InstrumentationRegistry.getInstrumentation().targetContext.applicationContext
         val sync=SyncProtocolRepository(context)
         sync.configureAsPrimary(adminId,"الهاتف الرئيسي")
         returns.postPurchaseReturn(adminId,invoiceId,"sync-purchase-return-"+UUID.randomUUID(),

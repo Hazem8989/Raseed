@@ -9,10 +9,10 @@ import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
 import org.junit.runner.RunWith
-import org.robolectric.RobolectricTestRunner
-import org.robolectric.RuntimeEnvironment
+import androidx.test.ext.junit.runners.AndroidJUnit4
+import androidx.test.platform.app.InstrumentationRegistry
 
-@RunWith(RobolectricTestRunner::class)
+@RunWith(AndroidJUnit4::class)
 class DailyBalanceRepositoryTest {
     private lateinit var database: AppDatabase
     private lateinit var accounts: CashAccountRepository
@@ -21,7 +21,7 @@ class DailyBalanceRepositoryTest {
     private lateinit var date: String
 
     @Before fun setUp() {
-        val context = RuntimeEnvironment.getApplication()
+        val context = InstrumentationRegistry.getInstrumentation().targetContext.applicationContext
         AppDatabase.resetForTests(context)
         database = AppDatabase.getInstance(context)
         date = StoreTime.today(database.readableDatabase)

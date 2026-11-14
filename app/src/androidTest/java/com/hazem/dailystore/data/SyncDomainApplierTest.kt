@@ -12,10 +12,10 @@ import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
 import org.junit.runner.RunWith
-import org.robolectric.RobolectricTestRunner
-import org.robolectric.RuntimeEnvironment
+import androidx.test.ext.junit.runners.AndroidJUnit4
+import androidx.test.platform.app.InstrumentationRegistry
 
-@RunWith(RobolectricTestRunner::class)
+@RunWith(AndroidJUnit4::class)
 class SyncDomainApplierTest {
     private lateinit var context: Context
     private lateinit var database: AppDatabase
@@ -31,7 +31,7 @@ class SyncDomainApplierTest {
 
     @Before fun setUp() {
         SyncDeviceTestKeyProvider.install()
-        context = RuntimeEnvironment.getApplication()
+        context = InstrumentationRegistry.getInstrumentation().targetContext.applicationContext
         AppDatabase.resetForTests(context)
         primaryLocalDeviceId = SyncDeviceIdentity.getOrCreate(context)
         database = AppDatabase.getInstance(context)

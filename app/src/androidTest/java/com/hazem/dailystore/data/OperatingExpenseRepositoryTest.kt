@@ -9,10 +9,10 @@ import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
 import org.junit.runner.RunWith
-import org.robolectric.RobolectricTestRunner
-import org.robolectric.RuntimeEnvironment
+import androidx.test.ext.junit.runners.AndroidJUnit4
+import androidx.test.platform.app.InstrumentationRegistry
 
-@RunWith(RobolectricTestRunner::class)
+@RunWith(AndroidJUnit4::class)
 class OperatingExpenseRepositoryTest {
     private lateinit var db: AppDatabase
     private lateinit var adminId: String
@@ -24,7 +24,7 @@ class OperatingExpenseRepositoryTest {
 
     @Before fun setUp() {
         SyncDeviceTestKeyProvider.install()
-        val context=RuntimeEnvironment.getApplication()
+        val context=InstrumentationRegistry.getInstrumentation().targetContext.applicationContext
         AppDatabase.resetForTests(context)
         db=AppDatabase.getInstance(context)
         val store=StoreRepository(context); store.ensureBaseSetup()
@@ -66,11 +66,11 @@ class OperatingExpenseRepositoryTest {
         assertEquals("OPERATING_EXPENSE",cash[1])
         assertEquals("OPERATING_EXPENSE",cash[2])
         assertEquals(result.expenseId,cash[3])
-        val profit=SalesProfitRepository(RuntimeEnvironment.getApplication()).allTime()
+        val profit=SalesProfitRepository(InstrumentationRegistry.getInstrumentation().targetContext.applicationContext).allTime()
         assertEquals(1,profit.operatingExpenseCount)
         assertEquals(1000L,profit.operatingExpensesUsdCents)
         assertEquals(-1000L,profit.netOperatingProfitUsdCents)
-        val daily=DailyBalanceRepository(RuntimeEnvironment.getApplication()).dailyReport("2026-11-02")
+        val daily=DailyBalanceRepository(InstrumentationRegistry.getInstrumentation().targetContext.applicationContext).dailyReport("2026-11-02")
         val dailyAccount=daily.accounts.first { it.accountId==sypAccountId }
         assertEquals(100000L,dailyAccount.operatingExpensesMinor)
         assertEquals(900000L,dailyAccount.closingMinor)
@@ -124,7 +124,7 @@ class OperatingExpenseRepositoryTest {
     }
 
     @Test fun cashierCannotCreateCategoriesOrPostOperatingExpenses() {
-        val auth=AuthRepository(RuntimeEnvironment.getApplication())
+        val auth=AuthRepository(InstrumentationRegistry.getInstrumentation().targetContext.applicationContext)
         val cashier=auth.createUser("ADMIN",adminId,"expense-cashier","Cashier","Cashier12345","CASHIER")
         auth.changePassword(cashier,"Cashier12345","CashierStrong123")
         try {
@@ -140,7 +140,7 @@ class OperatingExpenseRepositoryTest {
     }
 
     @Test fun primaryOperatingExpenseRemainsLocalToPrimaryDevice() {
-        val context=RuntimeEnvironment.getApplication()
+        val context=InstrumentationRegistry.getInstrumentation().targetContext.applicationContext
         val sync=SyncProtocolRepository(context)
         sync.configureAsPrimary(adminId,"الهاتف الرئيسي")
         repository.postExpense(adminId,"sync-expense-"+UUID.randomUUID(),categoryId,sypAccountId,
@@ -152,7 +152,7 @@ class OperatingExpenseRepositoryTest {
     // Sync-domain coverage is added below.
 
     @Test fun secondaryExpenseIsRejectedBySalesOnlyPolicy() {
-        val context = RuntimeEnvironment.getApplication()
+        val context = InstrumentationRegistry.getInstrumentation().targetContext.applicationContext
         val vault = SyncCredentialVault(context) { javax.crypto.spec.SecretKeySpec(ByteArray(32) { 31 }, "AES") }
         repository = OperatingExpenseRepository(context, vault)
         val sync = SyncProtocolRepository(context, vault)
@@ -173,7 +173,7 @@ class OperatingExpenseRepositoryTest {
 
 
     @Test fun primaryRejectsNonSaleExpenseCommandFromSecondaryBeforeInbox() {
-        val context = RuntimeEnvironment.getApplication()
+        val context = InstrumentationRegistry.getInstrumentation().targetContext.applicationContext
         val vault = SyncCredentialVault(context) { javax.crypto.spec.SecretKeySpec(ByteArray(32) { 37 }, "AES") }
         val sync = SyncProtocolRepository(context, vault)
         sync.configureAsPrimary(adminId, "الجهاز الرئيسي")

@@ -8,10 +8,10 @@ import org.junit.Assert.fail
 import org.junit.Before
 import org.junit.Test
 import org.junit.runner.RunWith
-import org.robolectric.RobolectricTestRunner
-import org.robolectric.RuntimeEnvironment
+import androidx.test.ext.junit.runners.AndroidJUnit4
+import androidx.test.platform.app.InstrumentationRegistry
 
-@RunWith(RobolectricTestRunner::class)
+@RunWith(AndroidJUnit4::class)
 class PermissionPolicyTest {
     private lateinit var database: AppDatabase
     private lateinit var auth: AuthRepository
@@ -20,7 +20,7 @@ class PermissionPolicyTest {
 
     @Before
     fun setUp() {
-        val context = RuntimeEnvironment.getApplication()
+        val context = InstrumentationRegistry.getInstrumentation().targetContext.applicationContext
         AppDatabase.resetForTests(context)
         database = AppDatabase.getInstance(context)
         auth = AuthRepository(context)
@@ -220,7 +220,7 @@ class PermissionPolicyTest {
         database.writableDatabase.delete("permissions", "permission_key=?", arrayOf(PermissionPolicy.SERVICE_TRANSFERS_EXECUTE))
         database.writableDatabase.version = 13
         database.close()
-        val context = RuntimeEnvironment.getApplication()
+        val context = InstrumentationRegistry.getInstrumentation().targetContext.applicationContext
         AppDatabase.resetForTests(context, deleteExisting = false)
         database = AppDatabase.getInstance(context)
 
@@ -277,7 +277,7 @@ class PermissionPolicyTest {
 
     @Test
     fun everyFinancialRepositoryRejectsDirectSecondaryWritesBeforeMutation() {
-        val context = RuntimeEnvironment.getApplication()
+        val context = InstrumentationRegistry.getInstrumentation().targetContext.applicationContext
         database.writableDatabase.execSQL(
             "INSERT INTO sync_protocol_state(state_key,state_value,updated_at) VALUES('local_device_role','SECONDARY','2026-11-06T00:00:00Z')"
         )
@@ -397,7 +397,7 @@ class PermissionPolicyTest {
 
     @Test
     fun directFinancialRepositoriesRemainDeniedWhenRoleFlagIsLost() {
-        val context = RuntimeEnvironment.getApplication()
+        val context = InstrumentationRegistry.getInstrumentation().targetContext.applicationContext
         val localDeviceId = java.util.UUID.randomUUID().toString()
         database.writableDatabase.execSQL(
             """INSERT INTO sync_devices(

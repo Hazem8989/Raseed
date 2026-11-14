@@ -187,6 +187,35 @@ case "$SUITE" in
     run_instrumentation "com.hazem.dailystore.data.SqlCipherBackupRestoreInstrumentedTest#restoreJournalRejectsSkippedOrReversedPhasesAndDifferentPaths" "restore-journal-order.txt"
     run_instrumentation "com.hazem.dailystore.data.SqlCipherBackupRestoreInstrumentedTest#restoreJournalCorruptionFailsClosedAndPreservesDatabaseFiles" "restore-journal-corruption.txt"
     ;;
+  repositories_core)
+    run_instrumentation "com.hazem.dailystore.data.AppDatabaseTest" "repositories-app-database.txt"
+    run_instrumentation "com.hazem.dailystore.data.AuthRepositoryTest" "repositories-auth.txt"
+    run_instrumentation "com.hazem.dailystore.data.BackupRestoreManagerTest" "repositories-backup-restore.txt"
+    run_instrumentation "com.hazem.dailystore.data.CashAccountRepositoryTest" "repositories-cash-account.txt"
+    run_instrumentation "com.hazem.dailystore.data.CustomerPaymentRepositoryTest" "repositories-customer-payment.txt"
+    run_instrumentation "com.hazem.dailystore.data.CustomerRepositoryTest" "repositories-customer.txt"
+    run_instrumentation "com.hazem.dailystore.data.DailyBalanceRepositoryTest" "repositories-daily-balance.txt"
+    run_instrumentation "com.hazem.dailystore.data.StoreTimeTest" "repositories-store-time.txt"
+    run_instrumentation "com.hazem.dailystore.data.SyncAckDeliveryMigrationTest" "repositories-sync-ack-migration.txt"
+    ;;
+  repositories_inventory)
+    run_instrumentation "com.hazem.dailystore.data.InventoryAdjustmentRepositoryTest" "repositories-inventory-adjustment.txt"
+    run_instrumentation "com.hazem.dailystore.data.InventoryValuationRepositoryTest" "repositories-inventory-valuation.txt"
+    run_instrumentation "com.hazem.dailystore.data.InvoiceRepositoryTest" "repositories-invoice.txt"
+    run_instrumentation "com.hazem.dailystore.data.OperatingExpenseRepositoryTest" "repositories-operating-expense.txt"
+    run_instrumentation "com.hazem.dailystore.data.PermissionPolicyTest" "repositories-permission-policy.txt"
+    run_instrumentation "com.hazem.dailystore.data.PurchasePaymentRepositoryTest" "repositories-purchase-payment.txt"
+    run_instrumentation "com.hazem.dailystore.data.PurchaseReturnRepositoryTest" "repositories-purchase-return.txt"
+    run_instrumentation "com.hazem.dailystore.data.SalesReturnRepositoryTest" "repositories-sales-return.txt"
+    run_instrumentation "com.hazem.dailystore.data.ServiceTransferRepositoryTest" "repositories-service-transfer.txt"
+    run_instrumentation "com.hazem.dailystore.data.StoreRepositoryImportTest" "repositories-store-import.txt"
+    run_instrumentation "com.hazem.dailystore.data.SupplierRepositoryTest" "repositories-supplier.txt"
+    ;;
+  repositories_sync)
+    run_instrumentation "com.hazem.dailystore.data.SyncDomainApplierTest" "repositories-sync-domain.txt"
+    run_instrumentation "com.hazem.dailystore.data.SyncProtocolRepositoryTest" "repositories-sync-protocol.txt"
+    run_instrumentation "com.hazem.dailystore.data.TwoDeviceSyncIntegrationTest" "repositories-two-device-sync.txt"
+    ;;
   *)
     echo "Unknown SQLCipher test suite: $SUITE" >&2
     exit 2

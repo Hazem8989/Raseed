@@ -10,10 +10,10 @@ import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
 import org.junit.runner.RunWith
-import org.robolectric.RobolectricTestRunner
-import org.robolectric.RuntimeEnvironment
+import androidx.test.ext.junit.runners.AndroidJUnit4
+import androidx.test.platform.app.InstrumentationRegistry
 
-@RunWith(RobolectricTestRunner::class)
+@RunWith(AndroidJUnit4::class)
 class StoreRepositoryImportTest {
     private lateinit var database: AppDatabase
     private lateinit var repository: StoreRepository
@@ -23,7 +23,7 @@ class StoreRepositoryImportTest {
 
     @Before
     fun setUp() {
-        val context = RuntimeEnvironment.getApplication()
+        val context = InstrumentationRegistry.getInstrumentation().targetContext.applicationContext
         AppDatabase.resetForTests(context)
         database = AppDatabase.getInstance(context)
         repository = StoreRepository(context)
@@ -150,7 +150,7 @@ class StoreRepositoryImportTest {
 
     @Test
     fun importedNewCategoryIsQueuedForReplicationInTheSameCatalogTransaction() {
-        val context = RuntimeEnvironment.getApplication()
+        val context = InstrumentationRegistry.getInstrumentation().targetContext.applicationContext
         SyncDeviceTestKeyProvider.install()
         SyncProtocolRepository(context).configureAsPrimary(actorId, "Import test primary")
         val row = ProductImportRow(
@@ -199,7 +199,7 @@ class StoreRepositoryImportTest {
 
     @Test
     fun primaryProductCreateOpeningStockAndDeactivationAreAllQueuedAtomically() {
-        val context = RuntimeEnvironment.getApplication()
+        val context = InstrumentationRegistry.getInstrumentation().targetContext.applicationContext
         SyncDeviceTestKeyProvider.install()
         val sync = SyncProtocolRepository(context)
         sync.configureAsPrimary(actorId, "Catalog test primary")

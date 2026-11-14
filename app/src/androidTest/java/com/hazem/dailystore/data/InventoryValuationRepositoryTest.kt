@@ -12,10 +12,10 @@ import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
 import org.junit.runner.RunWith
-import org.robolectric.RobolectricTestRunner
-import org.robolectric.RuntimeEnvironment
+import androidx.test.ext.junit.runners.AndroidJUnit4
+import androidx.test.platform.app.InstrumentationRegistry
 
-@RunWith(RobolectricTestRunner::class)
+@RunWith(AndroidJUnit4::class)
 class InventoryValuationRepositoryTest {
     private lateinit var database: AppDatabase
     private lateinit var productId: String
@@ -24,7 +24,7 @@ class InventoryValuationRepositoryTest {
 
     @Before
     fun setUp() {
-        val context = RuntimeEnvironment.getApplication()
+        val context = InstrumentationRegistry.getInstrumentation().targetContext.applicationContext
         AppDatabase.resetForTests(context)
         database = AppDatabase.getInstance(context)
         StoreRepository(context).ensureBaseSetup()
@@ -61,14 +61,14 @@ class InventoryValuationRepositoryTest {
 
     @Test
     fun valuesRemainingInventoryUsingOldestPurchaseLayersFirst() {
-        val before = InventoryValuationRepository(RuntimeEnvironment.getApplication()).dailyCapital().current
+        val before = InventoryValuationRepository(InstrumentationRegistry.getInstrumentation().targetContext.applicationContext).dailyCapital().current
         val start = System.currentTimeMillis() - 30_000L
         addMovement("PURCHASE", 10.0, 100L, start + 1_000L)
         addMovement("SALE", -6.0, 100L, start + 2_000L)
         addMovement("PURCHASE", 5.0, 200L, start + 3_000L)
         setBalance(9.0)
 
-        val valuation = InventoryValuationRepository(RuntimeEnvironment.getApplication()).dailyCapital().current
+        val valuation = InventoryValuationRepository(InstrumentationRegistry.getInstrumentation().targetContext.applicationContext).dailyCapital().current
 
         // FIFO consumes six units from the first 100-cent layer:
         // four units remain at 100 cents and five at 200 cents.
@@ -79,11 +79,11 @@ class InventoryValuationRepositoryTest {
 
     @Test
     fun excludesAProductWhenTheMovementLedgerDoesNotMatchItsStockBalance() {
-        val before = InventoryValuationRepository(RuntimeEnvironment.getApplication()).dailyCapital().current
+        val before = InventoryValuationRepository(InstrumentationRegistry.getInstrumentation().targetContext.applicationContext).dailyCapital().current
         addMovement("PURCHASE", 10.0, 100L, System.currentTimeMillis() - 10_000L)
         setBalance(9.0)
 
-        val valuation = InventoryValuationRepository(RuntimeEnvironment.getApplication()).dailyCapital().current
+        val valuation = InventoryValuationRepository(InstrumentationRegistry.getInstrumentation().targetContext.applicationContext).dailyCapital().current
 
         assertEquals(before.totalCostUsdCents, valuation.totalCostUsdCents)
         assertTrue(valuation.unvaluedProductCount > before.unvaluedProductCount)
@@ -91,11 +91,11 @@ class InventoryValuationRepositoryTest {
 
     @Test
     fun excludesInventoryWithNoRecordedPurchaseCost() {
-        val before = InventoryValuationRepository(RuntimeEnvironment.getApplication()).dailyCapital().current
+        val before = InventoryValuationRepository(InstrumentationRegistry.getInstrumentation().targetContext.applicationContext).dailyCapital().current
         addMovement("PURCHASE", 5.0, 0L, System.currentTimeMillis() - 10_000L)
         setBalance(5.0)
 
-        val valuation = InventoryValuationRepository(RuntimeEnvironment.getApplication()).dailyCapital().current
+        val valuation = InventoryValuationRepository(InstrumentationRegistry.getInstrumentation().targetContext.applicationContext).dailyCapital().current
 
         assertEquals(before.totalCostUsdCents, valuation.totalCostUsdCents)
         assertTrue(valuation.unvaluedProductCount > before.unvaluedProductCount)

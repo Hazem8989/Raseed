@@ -7,17 +7,17 @@ import org.junit.Assert.*
 import org.junit.Before
 import org.junit.Test
 import org.junit.runner.RunWith
-import org.robolectric.RobolectricTestRunner
-import org.robolectric.RuntimeEnvironment
+import androidx.test.ext.junit.runners.AndroidJUnit4
+import androidx.test.platform.app.InstrumentationRegistry
 
-@RunWith(RobolectricTestRunner::class)
+@RunWith(AndroidJUnit4::class)
 class CashAccountRepositoryTest {
     private lateinit var database: AppDatabase
     private lateinit var accounts: CashAccountRepository
     private lateinit var adminId: String
 
     @Before fun setUp() {
-        val context = RuntimeEnvironment.getApplication()
+        val context = InstrumentationRegistry.getInstrumentation().targetContext.applicationContext
         AppDatabase.resetForTests(context)
         database = AppDatabase.getInstance(context)
         StoreRepository(context).ensureBaseSetup()
@@ -57,7 +57,7 @@ class CashAccountRepositoryTest {
 
     @Test fun supplierRolloverAccountCannotAlsoBeTheDailySalesDrawer() {
         val supplierCash = accounts.create(adminId, "صندوق موردين " + UUID.randomUUID(), "CASH_BOX", "SYP", 50000L)
-        DailyBalanceRepository(RuntimeEnvironment.getApplication())
+        DailyBalanceRepository(InstrumentationRegistry.getInstrumentation().targetContext.applicationContext)
             .setSupplierRollover(adminId, supplierCash.id, 30000L, "فصل الصناديق")
         try {
             accounts.setCurrentDayPrimaryDrawer("ADMIN", adminId, supplierCash.id)

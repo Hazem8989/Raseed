@@ -8,14 +8,14 @@ import org.junit.Assert.*
 import org.junit.Before
 import org.junit.Test
 import org.junit.runner.RunWith
-import org.robolectric.RobolectricTestRunner
-import org.robolectric.RuntimeEnvironment
+import androidx.test.ext.junit.runners.AndroidJUnit4
+import androidx.test.platform.app.InstrumentationRegistry
 import java.util.UUID
 import java.math.BigDecimal
 import javax.crypto.spec.SecretKeySpec
 
 /** Real two-database sync path: ECDSA/AES-GCM, domain posting, signed ACK and replay. */
-@RunWith(RobolectricTestRunner::class)
+@RunWith(AndroidJUnit4::class)
 class TwoDeviceSyncIntegrationTest {
     private lateinit var context: Context
     private lateinit var primaryDb: AppDatabase
@@ -33,7 +33,7 @@ class TwoDeviceSyncIntegrationTest {
     private val vaultKey = SecretKeySpec(ByteArray(32) { 7 }, "AES")
 
     @Before fun setUp() {
-        context = RuntimeEnvironment.getApplication()
+        context = InstrumentationRegistry.getInstrumentation().targetContext.applicationContext
         SyncDeviceTestKeyProvider.install()
         context.deleteDatabase(PRIMARY_DATABASE)
         context.deleteDatabase(SECONDARY_DATABASE)

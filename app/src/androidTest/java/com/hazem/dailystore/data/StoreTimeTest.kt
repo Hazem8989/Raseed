@@ -7,19 +7,19 @@ import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
 import org.junit.runner.RunWith
-import org.robolectric.RobolectricTestRunner
-import org.robolectric.RuntimeEnvironment
+import androidx.test.ext.junit.runners.AndroidJUnit4
+import androidx.test.platform.app.InstrumentationRegistry
 import android.database.sqlite.SQLiteDatabase
 import android.database.sqlite.SQLiteOpenHelper
 import java.util.Date
 
-@RunWith(RobolectricTestRunner::class)
+@RunWith(AndroidJUnit4::class)
 class StoreTimeTest {
     private lateinit var database: AppDatabase
 
     @Before fun setUp() {
         SyncDeviceTestKeyProvider.install()
-        val context = RuntimeEnvironment.getApplication()
+        val context = InstrumentationRegistry.getInstrumentation().targetContext.applicationContext
         AppDatabase.resetForTests(context)
         database = AppDatabase.getInstance(context)
     }
@@ -72,7 +72,7 @@ class StoreTimeTest {
         assertEquals("2026-11-04", StoreTime.today(database.readableDatabase, utc))
     }
     @Test fun v23MigrationBackfillsServiceOperatingDatesUsingStoreZone() {
-        val context = RuntimeEnvironment.getApplication()
+        val context = InstrumentationRegistry.getInstrumentation().targetContext.applicationContext
         AppDatabase.resetForTests(context)
         val legacy = object : SQLiteOpenHelper(context, AppDatabase.DATABASE_NAME, null, 22) {
             override fun onCreate(db: SQLiteDatabase) {

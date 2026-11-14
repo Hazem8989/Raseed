@@ -15,10 +15,10 @@ import org.junit.Before
 import org.junit.Test
 import javax.crypto.spec.SecretKeySpec
 import org.junit.runner.RunWith
-import org.robolectric.RobolectricTestRunner
-import org.robolectric.RuntimeEnvironment
+import androidx.test.ext.junit.runners.AndroidJUnit4
+import androidx.test.platform.app.InstrumentationRegistry
 
-@RunWith(RobolectricTestRunner::class)
+@RunWith(AndroidJUnit4::class)
 class CustomerPaymentRepositoryTest {
     private lateinit var database: AppDatabase
     private lateinit var customers: CustomerRepository
@@ -34,7 +34,7 @@ class CustomerPaymentRepositoryTest {
     @Before
     fun setUp() {
         SyncDeviceTestKeyProvider.install()
-        val context = RuntimeEnvironment.getApplication()
+        val context = InstrumentationRegistry.getInstrumentation().targetContext.applicationContext
         AppDatabase.resetForTests(context)
         database = AppDatabase.getInstance(context)
         val store = StoreRepository(context)
@@ -73,13 +73,13 @@ class CustomerPaymentRepositoryTest {
     @Test
     fun customerStatementReconcilesCreditInvoiceAndCollectionInUsdReference() {
         val invoiceId = createCreditInvoice()
-        val before = PartyStatementRepository(RuntimeEnvironment.getApplication()).customer(customerId)
+        val before = PartyStatementRepository(InstrumentationRegistry.getInstrumentation().targetContext.applicationContext).customer(customerId)
         assertEquals(1, before.entries.size)
         assertEquals(500L, before.closingBalanceUsdCents)
         assertEquals(75000L, before.closingBalanceSypMinor)
 
         payments.addPayment(adminId, invoiceId, "customer-statement-collection", cashDrawerId, 15_000L)
-        val statement = PartyStatementRepository(RuntimeEnvironment.getApplication()).customer(customerId)
+        val statement = PartyStatementRepository(InstrumentationRegistry.getInstrumentation().targetContext.applicationContext).customer(customerId)
         assertEquals(2, statement.entries.size)
         assertEquals(400L, statement.closingBalanceUsdCents)
         assertEquals(60_000L, statement.closingBalanceSypMinor)
@@ -107,7 +107,7 @@ class CustomerPaymentRepositoryTest {
             put("exchange_rate_syp_per_usd_milli", 15_000_000L)
             put("created_at", "2026-11-02T10:00:00.000Z")
         })
-        val statement = PartyStatementRepository(RuntimeEnvironment.getApplication()).customer(customerId)
+        val statement = PartyStatementRepository(InstrumentationRegistry.getInstrumentation().targetContext.applicationContext).customer(customerId)
         assertEquals(400L, statement.closingBalanceUsdCents)
         assertEquals(60_000L, statement.closingBalanceSypMinor)
         assertEquals(0, statement.unpricedEntryCount)
@@ -130,7 +130,7 @@ class CustomerPaymentRepositoryTest {
         assertEquals(1, payments.listPayments(invoiceId).size)
         assertEquals(stockBefore, stockQuantity(), 0.000001)
         assertEquals(movementCountBefore, inventoryMovementCount(invoiceId))
-        assertEquals(15_000L, CashAccountRepository(RuntimeEnvironment.getApplication()).balance(cashDrawerId))
+        assertEquals(15_000L, CashAccountRepository(InstrumentationRegistry.getInstrumentation().targetContext.applicationContext).balance(cashDrawerId))
         database.readableDatabase.rawQuery(
             "SELECT COUNT(*) FROM cash_transactions WHERE source_id=? AND transaction_type='CUSTOMER_CREDIT_COLLECTION'",
             arrayOf(invoiceId)
@@ -139,7 +139,7 @@ class CustomerPaymentRepositoryTest {
         // Debt collection belongs to the collection day, is reported separately from sales,
         // increases only the selected cash account, and never posts a second stock movement.
         val collectionDate = SimpleDateFormat("yyyy-MM-dd", Locale.US).apply { timeZone = TimeZone.getTimeZone("Asia/Damascus") }.format(Date())
-        val dailyReport = DailyBalanceRepository(RuntimeEnvironment.getApplication()).dailyReport(collectionDate)
+        val dailyReport = DailyBalanceRepository(InstrumentationRegistry.getInstrumentation().targetContext.applicationContext).dailyReport(collectionDate)
         val drawerSummary = dailyReport.accounts.single { it.accountId == cashDrawerId }
         assertEquals(0L, drawerSummary.salesReceiptsMinor)
         assertEquals(15_000L, drawerSummary.debtCollectionsMinor)
@@ -163,9 +163,9 @@ class CustomerPaymentRepositoryTest {
             "UPDATE sales_invoices SET updated_at='2026-11-02T10:00:00.000Z' WHERE id=?",
             arrayOf(invoiceId)
         )
-        val saleDay = SalesProfitRepository(RuntimeEnvironment.getApplication())
+        val saleDay = SalesProfitRepository(InstrumentationRegistry.getInstrumentation().targetContext.applicationContext)
             .summarize("2026-10-31", "2026-10-31")
-        val collectionDay = SalesProfitRepository(RuntimeEnvironment.getApplication())
+        val collectionDay = SalesProfitRepository(InstrumentationRegistry.getInstrumentation().targetContext.applicationContext)
             .summarize("2026-11-02", "2026-11-02")
         assertEquals(1, saleDay.invoiceCount)
         assertEquals(500L, saleDay.revenueUsdCents)
@@ -201,10 +201,10 @@ class CustomerPaymentRepositoryTest {
     @Test
     fun electronicCollectionIncreasesOnlySelectedWallet() {
         val invoiceId = createCreditInvoice()
-        val cashBefore = CashAccountRepository(RuntimeEnvironment.getApplication()).balance(cashDrawerId)
+        val cashBefore = CashAccountRepository(InstrumentationRegistry.getInstrumentation().targetContext.applicationContext).balance(cashDrawerId)
         val result = payments.addPayment(adminId, invoiceId, "customer-wallet", walletId, 30_000L)
         assertEquals(200L, result.paidUsdCents)
-        val accounts = CashAccountRepository(RuntimeEnvironment.getApplication())
+        val accounts = CashAccountRepository(InstrumentationRegistry.getInstrumentation().targetContext.applicationContext)
         assertEquals(30_000L, accounts.balance(walletId))
         assertEquals(cashBefore, accounts.balance(cashDrawerId))
         database.readableDatabase.rawQuery(
@@ -241,7 +241,7 @@ class CustomerPaymentRepositoryTest {
         } catch (_: IllegalArgumentException) { }
         assertTrue(payments.listPayments(invoiceId).isEmpty())
         assertEquals("POSTED", invoices.listSalesInvoices().first { it.id == invoiceId }.status)
-        assertEquals(0L, CashAccountRepository(RuntimeEnvironment.getApplication()).balance(cashDrawerId))
+        assertEquals(0L, CashAccountRepository(InstrumentationRegistry.getInstrumentation().targetContext.applicationContext).balance(cashDrawerId))
     }
 
     @Test
@@ -318,7 +318,7 @@ class CustomerPaymentRepositoryTest {
 
     @Test
     fun secondaryCustomerCollectionQueuesForPrimaryWithoutLocalFinancialPosting() {
-        val context = RuntimeEnvironment.getApplication()
+        val context = InstrumentationRegistry.getInstrumentation().targetContext.applicationContext
         val invoiceId = createCreditInvoice()
         val sync = SyncProtocolRepository(context, SyncCredentialVault(context) { SecretKeySpec(ByteArray(32) { 13 }, "AES") })
         val storeId = UUID.randomUUID().toString()
@@ -354,7 +354,7 @@ class CustomerPaymentRepositoryTest {
 
     @Test
     fun primaryCustomerCollectionRemainsLocalToPrimaryDevice() {
-        val context = RuntimeEnvironment.getApplication()
+        val context = InstrumentationRegistry.getInstrumentation().targetContext.applicationContext
         val sync = SyncProtocolRepository(context)
         sync.configureAsPrimary(adminId, "الهاتف الرئيسي")
         val invoiceId = createCreditInvoice()

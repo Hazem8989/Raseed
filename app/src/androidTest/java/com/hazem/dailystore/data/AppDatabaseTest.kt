@@ -9,16 +9,16 @@ import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
 import org.junit.runner.RunWith
-import org.robolectric.RobolectricTestRunner
-import org.robolectric.RuntimeEnvironment
+import androidx.test.ext.junit.runners.AndroidJUnit4
+import androidx.test.platform.app.InstrumentationRegistry
 
-@RunWith(RobolectricTestRunner::class)
+@RunWith(AndroidJUnit4::class)
 class AppDatabaseTest {
     private lateinit var database: AppDatabase
 
     @Before
     fun setUp() {
-        val context = RuntimeEnvironment.getApplication()
+        val context = InstrumentationRegistry.getInstrumentation().targetContext.applicationContext
         AppDatabase.resetForTests(context)
         database = AppDatabase.getInstance(context)
     }
@@ -29,7 +29,7 @@ class AppDatabaseTest {
     }
 
     private fun managerId(): String {
-        val auth = AuthRepository(RuntimeEnvironment.getApplication())
+        val auth = AuthRepository(InstrumentationRegistry.getInstrumentation().targetContext.applicationContext)
         auth.ensureInitialAdmin()
         val user = auth.authenticate("admin", "1234")!!
         auth.changePassword(user.id, "1234", "TestAdmin123")
@@ -81,7 +81,7 @@ class AppDatabaseTest {
 
     @Test
     fun upgradesEverySupportedHistoricalDatabaseVersionToCurrentSchema() {
-        val context = RuntimeEnvironment.getApplication()
+        val context = InstrumentationRegistry.getInstrumentation().targetContext.applicationContext
         for (targetVersion in 1 until AppDatabase.DATABASE_VERSION) {
             AppDatabase.resetForTests(context)
             database = AppDatabase.getInstance(context)
@@ -263,7 +263,7 @@ class AppDatabaseTest {
 
     @Test
     fun upgradesVersionSevenDatabaseWithoutLosingExistingUserOrSettings() {
-        val context = RuntimeEnvironment.getApplication()
+        val context = InstrumentationRegistry.getInstrumentation().targetContext.applicationContext
         val db = database.writableDatabase
         val originalUser = ContentValues().apply {
             put("id", "legacy-admin")
@@ -432,7 +432,7 @@ class AppDatabaseTest {
 
     @Test
     fun baseSetupIsIdempotentAndCreatesDefaultWarehouseWithoutInventedRate() {
-        val repository = StoreRepository(RuntimeEnvironment.getApplication())
+        val repository = StoreRepository(InstrumentationRegistry.getInstrumentation().targetContext.applicationContext)
         repository.ensureBaseSetup()
         repository.ensureBaseSetup()
         val db = database.writableDatabase
@@ -456,7 +456,7 @@ class AppDatabaseTest {
 
     @Test
     fun savesExchangeRateAndConvertsBothCurrencies() {
-        val repository = StoreRepository(RuntimeEnvironment.getApplication())
+        val repository = StoreRepository(InstrumentationRegistry.getInstrumentation().targetContext.applicationContext)
         repository.ensureBaseSetup()
         val actor = managerId()
         val db = database.writableDatabase
@@ -472,7 +472,7 @@ class AppDatabaseTest {
 
     @Test
     fun savesProductAndOpeningStockAtomically() {
-        val repository = StoreRepository(RuntimeEnvironment.getApplication())
+        val repository = StoreRepository(InstrumentationRegistry.getInstrumentation().targetContext.applicationContext)
         repository.ensureBaseSetup()
         val unit = repository.getUnits().first()
         val category = repository.getCategories().first()

@@ -11,10 +11,10 @@ import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
 import org.junit.runner.RunWith
-import org.robolectric.RobolectricTestRunner
-import org.robolectric.RuntimeEnvironment
+import androidx.test.ext.junit.runners.AndroidJUnit4
+import androidx.test.platform.app.InstrumentationRegistry
 
-@RunWith(RobolectricTestRunner::class)
+@RunWith(AndroidJUnit4::class)
 class InventoryAdjustmentRepositoryTest {
     private lateinit var database: AppDatabase
     private lateinit var store: StoreRepository
@@ -25,7 +25,7 @@ class InventoryAdjustmentRepositoryTest {
     @Before
     fun setUp() {
         SyncDeviceTestKeyProvider.install()
-        val context = RuntimeEnvironment.getApplication()
+        val context = InstrumentationRegistry.getInstrumentation().targetContext.applicationContext
         AppDatabase.resetForTests(context)
         database = AppDatabase.getInstance(context)
         store = StoreRepository(context)
@@ -90,7 +90,7 @@ class InventoryAdjustmentRepositoryTest {
         ).use { c -> c.moveToFirst(); c.getInt(0) }
         assertEquals(2, movementTypes)
 
-        val capital = InventoryValuationRepository(RuntimeEnvironment.getApplication()).dailyCapital().current
+        val capital = InventoryValuationRepository(InstrumentationRegistry.getInstrumentation().targetContext.applicationContext).dailyCapital().current
         assertTrue(capital.isComplete)
         assertEquals(400L, capital.totalCostUsdCents)
         assertEquals(2, repository.listRecent().size)
@@ -139,7 +139,7 @@ class InventoryAdjustmentRepositoryTest {
             throw AssertionError("Expected missing cost rejection")
         } catch (_: IllegalArgumentException) { }
 
-        val auth = AuthRepository(RuntimeEnvironment.getApplication())
+        val auth = AuthRepository(InstrumentationRegistry.getInstrumentation().targetContext.applicationContext)
         val cashierId = auth.createUser(
             "ADMIN", adminId, "adjustment-cashier", "Adjustment cashier",
             "Cashier12345", "CASHIER"
@@ -175,7 +175,7 @@ class InventoryAdjustmentRepositoryTest {
 
     @Test
     fun secondaryInventoryAdjustmentIsRejectedBySalesOnlyPolicy() {
-        val context = RuntimeEnvironment.getApplication()
+        val context = InstrumentationRegistry.getInstrumentation().targetContext.applicationContext
         val before = stock()
         val vault = SyncCredentialVault(context) { javax.crypto.spec.SecretKeySpec(ByteArray(32) { 41 }, "AES") }
         val sync = SyncProtocolRepository(context, vault)
@@ -194,7 +194,7 @@ class InventoryAdjustmentRepositoryTest {
 
     @Test
     fun primaryInventoryAdjustmentRemainsLocalToPrimaryDevice() {
-        val context = RuntimeEnvironment.getApplication()
+        val context = InstrumentationRegistry.getInstrumentation().targetContext.applicationContext
         val sync = SyncProtocolRepository(context)
         sync.configureAsPrimary(adminId, "الهاتف الرئيسي")
         repository.postAdjustment(adminId, productId, BigDecimal("1"),

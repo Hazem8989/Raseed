@@ -10,10 +10,10 @@ import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
 import org.junit.runner.RunWith
-import org.robolectric.RobolectricTestRunner
-import org.robolectric.RuntimeEnvironment
+import androidx.test.ext.junit.runners.AndroidJUnit4
+import androidx.test.platform.app.InstrumentationRegistry
 
-@RunWith(RobolectricTestRunner::class)
+@RunWith(AndroidJUnit4::class)
 class SalesReturnRepositoryTest {
     private lateinit var database: AppDatabase
     private lateinit var adminId: String
@@ -25,7 +25,7 @@ class SalesReturnRepositoryTest {
     @Before
     fun setUp() {
         SyncDeviceTestKeyProvider.install()
-        val context = RuntimeEnvironment.getApplication()
+        val context = InstrumentationRegistry.getInstrumentation().targetContext.applicationContext
         AppDatabase.resetForTests(context)
         database = AppDatabase.getInstance(context)
         val store = StoreRepository(context)
@@ -65,7 +65,7 @@ class SalesReturnRepositoryTest {
         ).use { c -> assertTrue(c.moveToFirst()); c.getString(0) }
 
     private fun stock(): Double =
-        StoreRepository(RuntimeEnvironment.getApplication()).listProducts()
+        StoreRepository(InstrumentationRegistry.getInstrumentation().targetContext.applicationContext).listProducts()
             .first { it.id == productId }.stock
 
     @Test
@@ -93,8 +93,8 @@ class SalesReturnRepositoryTest {
         assertEquals(250L, first.cashRefundUsdCents)
         assertEquals(100L, first.returnedCogsUsdCents)
         assertEquals(8.0, stock(), 0.000001)
-        assertEquals(500L, CashAccountRepository(RuntimeEnvironment.getApplication()).balance(cashAccountId))
-        val dailyCash=DailyBalanceRepository(RuntimeEnvironment.getApplication()).dailyReport(operatingDate)
+        assertEquals(500L, CashAccountRepository(InstrumentationRegistry.getInstrumentation().targetContext.applicationContext).balance(cashAccountId))
+        val dailyCash=DailyBalanceRepository(InstrumentationRegistry.getInstrumentation().targetContext.applicationContext).dailyReport(operatingDate)
         val dailyAccount=dailyCash.accounts.first { it.accountId==cashAccountId }
         assertEquals(250L,dailyAccount.salesReturnRefundsMinor)
         assertEquals(500L,dailyAccount.closingMinor)
@@ -109,7 +109,7 @@ class SalesReturnRepositoryTest {
             "SELECT COUNT(*) FROM returns WHERE original_invoice_id=? AND status='POSTED'",
             arrayOf(draft.invoiceId)
         ).use { c -> c.moveToFirst(); c.getInt(0) })
-        val profit = SalesProfitRepository(RuntimeEnvironment.getApplication()).allTime()
+        val profit = SalesProfitRepository(InstrumentationRegistry.getInstrumentation().targetContext.applicationContext).allTime()
         assertEquals(500L, profit.revenueUsdCents - profit.returnUsdCents)
         assertEquals(200L, profit.cogsUsdCents - profit.returnedCogsUsdCents)
         assertEquals(300L, profit.grossProfitUsdCents)
@@ -118,7 +118,7 @@ class SalesReturnRepositoryTest {
 
     @Test
     fun creditReturnReducesCustomerDebtWithoutCashRefundAndUpdatesProfit() {
-        val customerId = CustomerRepository(RuntimeEnvironment.getApplication())
+        val customerId = CustomerRepository(InstrumentationRegistry.getInstrumentation().targetContext.applicationContext)
             .create(adminId, "زبون مرتجع ${UUID.randomUUID()}").id
         val draft = invoices.saveSalesDraft(
             adminId, "return-credit-draft", null, customerId, "2026-11-02", 0L, null,
@@ -133,23 +133,23 @@ class SalesReturnRepositoryTest {
         )
         assertEquals(250L, first.creditReductionUsdCents)
         assertEquals(0L, first.cashRefundUsdCents)
-        assertEquals(250L, CustomerPaymentRepository(RuntimeEnvironment.getApplication())
+        assertEquals(250L, CustomerPaymentRepository(InstrumentationRegistry.getInstrumentation().targetContext.applicationContext)
             .listInvoices(customerId).single().outstandingUsdCents)
         val second = returns.postSalesReturn(
             adminId, draft.invoiceId, "credit-return-op-2", "2026-11-02",
             "إرجاع بقية الكمية", input, emptyList()
         )
         assertEquals(250L, second.creditReductionUsdCents)
-        assertEquals(0L, CustomerPaymentRepository(RuntimeEnvironment.getApplication())
+        assertEquals(0L, CustomerPaymentRepository(InstrumentationRegistry.getInstrumentation().targetContext.applicationContext)
             .listInvoices(customerId).single().outstandingUsdCents)
-        val accounts = CashAccountRepository(RuntimeEnvironment.getApplication())
+        val accounts = CashAccountRepository(InstrumentationRegistry.getInstrumentation().targetContext.applicationContext)
         accounts.listActive() // Ensure the current operating day's primary drawer exists.
         val drawer = accounts.currentDayPrimaryDrawer()!!
         val paymentsBefore = database.readableDatabase.rawQuery(
             "SELECT COUNT(*) FROM invoice_payments WHERE invoice_id=?", arrayOf(draft.invoiceId)
         ).use { c -> c.moveToFirst(); c.getInt(0) }
         try {
-            CustomerPaymentRepository(RuntimeEnvironment.getApplication()).addPayment(
+            CustomerPaymentRepository(InstrumentationRegistry.getInstrumentation().targetContext.applicationContext).addPayment(
                 adminId, draft.invoiceId, "collection-after-full-return", drawer.id, 1L
             )
             throw AssertionError("A fully returned credit balance must not be collected")
@@ -158,7 +158,7 @@ class SalesReturnRepositoryTest {
             "SELECT COUNT(*) FROM invoice_payments WHERE invoice_id=?", arrayOf(draft.invoiceId)
         ).use { c -> c.moveToFirst(); c.getInt(0) }
         assertEquals(paymentsBefore, paymentsAfter)
-        val profit = SalesProfitRepository(RuntimeEnvironment.getApplication()).allTime()
+        val profit = SalesProfitRepository(InstrumentationRegistry.getInstrumentation().targetContext.applicationContext).allTime()
         assertEquals(0L, profit.revenueUsdCents - profit.returnUsdCents)
         assertEquals(0L, profit.cogsUsdCents - profit.returnedCogsUsdCents)
         assertEquals(0L, profit.grossProfitUsdCents)
@@ -184,7 +184,7 @@ class SalesReturnRepositoryTest {
             listOf(SalesRefundAllocationInput(cashAccountId, 250L))
         )
         assertEquals(250L, result.totalUsdCents)
-        val report = SalesProfitRepository(RuntimeEnvironment.getApplication())
+        val report = SalesProfitRepository(InstrumentationRegistry.getInstrumentation().targetContext.applicationContext)
             .summarize("2026-11-02", "2026-11-02")
         assertEquals(0L, report.revenueUsdCents)
         assertEquals(250L, report.returnUsdCents)
@@ -198,7 +198,7 @@ class SalesReturnRepositoryTest {
 
     @Test
     fun cashierCannotPostSalesReturn() {
-        val auth = AuthRepository(RuntimeEnvironment.getApplication())
+        val auth = AuthRepository(InstrumentationRegistry.getInstrumentation().targetContext.applicationContext)
         val cashierId = auth.createUser(
             "ADMIN", adminId, "return-cashier", "Return cashier", "Cashier12345", "CASHIER"
         )
@@ -215,7 +215,7 @@ class SalesReturnRepositoryTest {
 
     @Test
     fun cashRefundCanBeSplitAcrossUsdAndSypAccountsWithoutRoundingDrift() {
-        val context = RuntimeEnvironment.getApplication()
+        val context = InstrumentationRegistry.getInstrumentation().targetContext.applicationContext
         val accounts = CashAccountRepository(context)
         val sypAccountId = accounts.create(
             adminId, "صندوق ليرة للمرتجعات ${UUID.randomUUID()}",
@@ -245,7 +245,7 @@ class SalesReturnRepositoryTest {
 
     @Test
     fun secondarySalesReturnIsRejectedBySalesOnlyPolicy() {
-        val context = RuntimeEnvironment.getApplication()
+        val context = InstrumentationRegistry.getInstrumentation().targetContext.applicationContext
         val draft = invoices.saveSalesDraft(adminId, "secondary-return-sale-draft", null, null, "2026-11-03", 0L, null,
             listOf(InvoiceLineInput(productId, BigDecimal("2"), 250L)))
         assertTrue(invoices.postCashSale(adminId, draft.invoiceId, "secondary-return-sale-post", cashAccountId))
@@ -271,7 +271,7 @@ class SalesReturnRepositoryTest {
 
     @Test
     fun primarySalesReturnRemainsLocalToPrimaryDevice() {
-        val context = RuntimeEnvironment.getApplication()
+        val context = InstrumentationRegistry.getInstrumentation().targetContext.applicationContext
         val sync = SyncProtocolRepository(context)
         sync.configureAsPrimary(adminId, "الهاتف الرئيسي")
         val draft = invoices.saveSalesDraft(

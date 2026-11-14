@@ -8,12 +8,12 @@ import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
 import org.junit.runner.RunWith
-import org.robolectric.RobolectricTestRunner
-import org.robolectric.RuntimeEnvironment
+import androidx.test.ext.junit.runners.AndroidJUnit4
+import androidx.test.platform.app.InstrumentationRegistry
 
-@RunWith(RobolectricTestRunner::class)
+@RunWith(AndroidJUnit4::class)
 class BackupRestoreManagerTest {
-    private val context = RuntimeEnvironment.getApplication()
+    private val context = InstrumentationRegistry.getInstrumentation().targetContext.applicationContext
     private lateinit var manager: BackupRestoreManager
     private lateinit var adminId: String
     private val password = "ShopBackup#2026".toCharArray()

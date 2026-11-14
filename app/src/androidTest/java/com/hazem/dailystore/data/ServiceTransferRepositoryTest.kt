@@ -8,10 +8,10 @@ import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
 import org.junit.runner.RunWith
-import org.robolectric.RobolectricTestRunner
-import org.robolectric.RuntimeEnvironment
+import androidx.test.ext.junit.runners.AndroidJUnit4
+import androidx.test.platform.app.InstrumentationRegistry
 
-@RunWith(RobolectricTestRunner::class)
+@RunWith(AndroidJUnit4::class)
 class ServiceTransferRepositoryTest {
     private lateinit var database: AppDatabase
     private lateinit var accounts: CashAccountRepository
@@ -19,7 +19,7 @@ class ServiceTransferRepositoryTest {
     private lateinit var actor: String
 
     @Before fun setUp() {
-        val context = RuntimeEnvironment.getApplication()
+        val context = InstrumentationRegistry.getInstrumentation().targetContext.applicationContext
         AppDatabase.resetForTests(context)
         database = AppDatabase.getInstance(context)
         database.writableDatabase.execSQL("DELETE FROM service_transfers")
@@ -146,7 +146,7 @@ class ServiceTransferRepositoryTest {
         assertEquals(41_000L, repo.listWallets().single { it.serviceKey == ServiceTransferRepository.SYRIATEL_SHARED }.balanceMinor)
         assertEquals("ELECTRONIC", repo.listTransfers().first().receiptChannel)
         assertEquals(6_000L, result.customerChargeMinor)
-        val daily = DailyBalanceRepository(RuntimeEnvironment.getApplication()).dailyReport()
+        val daily = DailyBalanceRepository(InstrumentationRegistry.getInstrumentation().targetContext.applicationContext).dailyReport()
         val row = daily.accounts.single { it.accountId == collection }
         assertEquals(6_000L, row.serviceTransferReceiptsMinor)
         assertEquals(6_000L, row.electronicReceiptsMinor)
@@ -196,13 +196,13 @@ class ServiceTransferRepositoryTest {
         dailyTransferToCash(walletId, drawer.id, 6_000L)
         assertEquals(35_000L, accounts.balance(walletId))
         assertEquals(6_000L, accounts.balance(drawer.id))
-        val report = DailyBalanceRepository(RuntimeEnvironment.getApplication()).dailyReport()
+        val report = DailyBalanceRepository(InstrumentationRegistry.getInstrumentation().targetContext.applicationContext).dailyReport()
         assertEquals(35_000L, report.accounts.single { it.accountId == walletId }.closingMinor)
         assertEquals(6_000L, report.accounts.single { it.accountId == drawer.id }.closingMinor)
     }
 
     @Test fun deferredTransferCreatesReceivableWithoutImmediateReceiptAndSupportsPartialSettlement() {
-        val context=RuntimeEnvironment.getApplication()
+        val context=InstrumentationRegistry.getInstrumentation().targetContext.applicationContext
         val customerId="service-credit-customer-"+UUID.randomUUID()
         val now="2026-11-06T10:00:00.000Z"
         database.writableDatabase.execSQL(
@@ -285,7 +285,7 @@ class ServiceTransferRepositoryTest {
     }
 
     private fun dailyTransferToCash(walletId:String,drawerId:String,amount:Long) {
-        DailyBalanceRepository(RuntimeEnvironment.getApplication()).transferWalletToDrawer(
+        DailyBalanceRepository(InstrumentationRegistry.getInstrumentation().targetContext.applicationContext).transferWalletToDrawer(
             actor,walletId,drawerId,amount,"service-wallet-cash-" + UUID.randomUUID(),"تصريف قبض خدمة","تحويل داخلي"
         )
     }
