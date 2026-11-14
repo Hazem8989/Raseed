@@ -1,7 +1,7 @@
 package com.hazem.dailystore.data
 
 import android.content.ContentValues
-import net.zetetic.database.sqlcipher.SQLiteConstraintException
+import android.database.sqlite.SQLiteConstraintException
 import java.math.BigDecimal
 import org.junit.After
 import org.junit.Assert.assertEquals
