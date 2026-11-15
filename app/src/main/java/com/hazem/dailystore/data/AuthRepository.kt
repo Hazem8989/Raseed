@@ -23,7 +23,15 @@ data class ManagedUserSummary(
 )
 
 /** Database-backed authentication and role checks. Passwords are never stored in plain text. */
-class AuthRepository(context: Context, private val pbkdf2Iterations: Int = PBKDF2_ITERATIONS) {
+class AuthRepository private constructor(
+    context: Context,
+    private val pbkdf2Iterations: Int,
+    @Suppress("UNUSED_PARAMETER") testOnly: Unit
+) {
+    constructor(context: Context) : this(context, PBKDF2_ITERATIONS, Unit)
+
+    /** Test-only KDF cost override; production callers use the fixed secure default. */
+    internal constructor(context: Context, pbkdf2Iterations: Int) : this(context, pbkdf2Iterations, Unit)
     private val database = AppDatabase.getInstance(context)
 
     /**
