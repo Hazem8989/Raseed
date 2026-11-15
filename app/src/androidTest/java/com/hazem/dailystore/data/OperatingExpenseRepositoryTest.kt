@@ -28,9 +28,8 @@ class OperatingExpenseRepositoryTest {
         AppDatabase.resetForTests(context)
         db=AppDatabase.getInstance(context)
         val store=StoreRepository(context); store.ensureBaseSetup()
-        val auth=AuthRepository(context); auth.ensureInitialAdmin()
-        adminId=auth.authenticate("admin","1234")!!.id
-        auth.changePassword(adminId,"1234","TestAdmin123")
+        // This repository suite tests expense permissions and accounting, not login.
+        adminId = createTestAdminWithoutLogin(context)
         db.writableDatabase.delete("exchange_rates",null,null)
         db.writableDatabase.insertOrThrow("exchange_rates",null,ContentValues().apply {
             put("id",UUID.randomUUID().toString()); put("currency_code","USD")
