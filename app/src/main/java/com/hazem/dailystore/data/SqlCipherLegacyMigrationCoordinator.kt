@@ -44,6 +44,13 @@ internal class SqlCipherLegacyMigrationCoordinator(
 
     init {
         require(journalFileName.isNotBlank() && File(journalFileName).name == journalFileName)
+        // Android normally creates noBackupFilesDir, but early process startup and
+        // freshly provisioned test/emulator profiles can expose the path before the
+        // directory exists. Create it before AtomicFile or the migration lock opens.
+        val noBackupDirectory = appContext.noBackupFilesDir
+        check(noBackupDirectory.isDirectory || noBackupDirectory.mkdirs()) {
+            "تعذر إنشاء مجلد ملفات التطبيق غير القابلة للنسخ الاحتياطي"
+        }
     }
 
     @Synchronized
