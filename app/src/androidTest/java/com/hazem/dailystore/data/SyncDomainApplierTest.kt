@@ -19,7 +19,6 @@ import androidx.test.platform.app.InstrumentationRegistry
 class SyncDomainApplierTest {
     private lateinit var context: Context
     private lateinit var database: AppDatabase
-    private lateinit var auth: AuthRepository
     private lateinit var protocol: SyncProtocolRepository
     private lateinit var vault: SyncCredentialVault
     private lateinit var adminId: String
@@ -36,11 +35,9 @@ class SyncDomainApplierTest {
         primaryLocalDeviceId = SyncDeviceIdentity.getOrCreate(context)
         database = AppDatabase.getInstance(context)
         StoreRepository(context).ensureBaseSetup()
-        auth = AuthRepository(context)
-        auth.ensureInitialAdmin()
-        val admin = auth.authenticate("admin", "1234")!!
-        auth.changePassword(admin.id, "1234", "TestAdmin123")
-        adminId = admin.id
+        // This suite validates sync-domain authorization, not password login.
+        // A ready test-only admin avoids expensive PBKDF2 work before every case.
+        adminId = createSyncTestAdmin(context)
 
         val store = StoreRepository(context)
         val unit = store.getUnits().first()
