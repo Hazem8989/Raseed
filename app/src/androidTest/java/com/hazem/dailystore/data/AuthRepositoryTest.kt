@@ -17,7 +17,7 @@ class AuthRepositoryTest {
         val context = InstrumentationRegistry.getInstrumentation().targetContext.applicationContext
         AppDatabase.resetForTests(context)
         database = AppDatabase.getInstance(context)
-        // Keep authentication behavior coverage fast on the emulated device; production defaults remain 120,000 rounds.
+        // These tests verify authentication state transitions, not KDF cost. The production constructor keeps 120,000 rounds.
         auth = AuthRepository(context, pbkdf2Iterations = 1_000)
     }
 
