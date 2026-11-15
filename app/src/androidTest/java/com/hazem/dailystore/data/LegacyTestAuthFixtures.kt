@@ -40,12 +40,11 @@ internal fun AuthRepository.ensureInitialAdmin(): String {
 }
 
 /**
- * Creates a ready administrator for sync-domain tests without running password
- * derivation. These tests exercise sync authorization and posting, not login.
+ * Creates an active administrator for repository tests that do not exercise login.
  * The placeholder credential is intentionally unusable and must never be used
  * by authentication tests.
  */
-internal fun createSyncTestAdmin(context: android.content.Context): String {
+internal fun createTestAdminWithoutLogin(context: android.content.Context): String {
     val database = AppDatabase.getInstance(context)
     val id = java.util.UUID.randomUUID().toString()
     val now = java.time.Instant.now().toString()
@@ -80,3 +79,7 @@ internal fun createSyncTestAdmin(context: android.content.Context): String {
     return id
 }
 
+
+/** Backwards-compatible name for sync-domain test fixtures. */
+internal fun createSyncTestAdmin(context: android.content.Context): String =
+    createTestAdminWithoutLogin(context)
