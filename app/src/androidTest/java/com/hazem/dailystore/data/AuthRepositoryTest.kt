@@ -17,7 +17,8 @@ class AuthRepositoryTest {
         val context = InstrumentationRegistry.getInstrumentation().targetContext.applicationContext
         AppDatabase.resetForTests(context)
         database = AppDatabase.getInstance(context)
-        auth = AuthRepository(context)
+        // Keep authentication behavior coverage fast on the emulated device; production defaults remain 120,000 rounds.
+        auth = AuthRepository(context, pbkdf2Iterations = 1_000)
     }
 
     @After fun tearDown() { database.close() }
