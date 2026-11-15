@@ -33,11 +33,7 @@ class InvoiceRepositoryTest {
         store = StoreRepository(context)
         invoices = InvoiceRepository(context)
         store.ensureBaseSetup()
-        val auth = AuthRepository(context)
-        auth.ensureInitialAdmin()
-        val admin = auth.authenticate("admin", "1234")!!
-        auth.changePassword(admin.id, "1234", "TestAdmin123")
-        adminId = admin.id
+        adminId = createTestAdminWithoutLogin(context)
         val fx = ContentValues().apply {
             put("id", UUID.randomUUID().toString())
             put("currency_code", "USD")
