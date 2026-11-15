@@ -23,7 +23,7 @@ data class ManagedUserSummary(
 )
 
 /** Database-backed authentication and role checks. Passwords are never stored in plain text. */
-class AuthRepository(context: Context) {
+class AuthRepository(context: Context, private val pbkdf2Iterations: Int = PBKDF2_ITERATIONS) {
     private val database = AppDatabase.getInstance(context)
 
     /**
@@ -372,7 +372,7 @@ class AuthRepository(context: Context) {
     )
 
     private fun derive(password: String, salt: String): ByteArray {
-        val spec = PBEKeySpec(password.toCharArray(), Base64.decode(salt, Base64.NO_WRAP), 120_000, 256)
+        val spec = PBEKeySpec(password.toCharArray(), Base64.decode(salt, Base64.NO_WRAP), pbkdf2Iterations, 256)
         return try { SecretKeyFactory.getInstance("PBKDF2WithHmacSHA256").generateSecret(spec).encoded }
         finally { spec.clearPassword() }
     }
@@ -382,6 +382,7 @@ class AuthRepository(context: Context) {
 
     companion object {
         private val LOGIN_LOCK = Any()
+        internal const val PBKDF2_ITERATIONS = 120_000
         private const val MAX_LOGIN_FAILURES = 5
         private const val LOGIN_LOCK_MS = 60_000L
         private const val DUMMY_LOGIN_SALT = "AAECAwQFBgcICQoLDA0ODw=="
