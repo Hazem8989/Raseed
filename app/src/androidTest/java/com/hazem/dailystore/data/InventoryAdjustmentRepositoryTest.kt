@@ -30,11 +30,9 @@ class InventoryAdjustmentRepositoryTest {
         database = AppDatabase.getInstance(context)
         store = StoreRepository(context)
         store.ensureBaseSetup()
-        val auth = AuthRepository(context)
-        auth.ensureInitialAdmin()
-        val admin = auth.authenticate("admin", "1234")!!
-        auth.changePassword(admin.id, "1234", "TestAdmin123")
-        adminId = admin.id
+        // These tests exercise inventory accounting, not password derivation.
+        // Use the no-login admin fixture so each test does not spend minutes in PBKDF2.
+        adminId = createTestAdminWithoutLogin(context)
         val rate = ContentValues().apply {
             put("id", UUID.randomUUID().toString())
             put("currency_code", "USD")
