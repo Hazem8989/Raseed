@@ -37,11 +37,9 @@ class SyncProtocolRepositoryTest {
         val context = InstrumentationRegistry.getInstrumentation().targetContext.applicationContext
         AppDatabase.resetForTests(context)
         database = AppDatabase.getInstance(context)
-        val auth = AuthRepository(context)
-        auth.ensureInitialAdmin()
-        val admin = auth.authenticate("admin", "1234")!!
-        auth.changePassword(admin.id, "1234", "TestAdmin123")
-        adminId = admin.id
+        // Sync protocol tests need an authorized actor, not a logged-in session.
+        // Keep PBKDF2 cost out of every test's setup path.
+        adminId = createSyncTestAdmin(context)
         vault = SyncCredentialVault(context) { SecretKeySpec(ByteArray(32) { 7 }, "AES") }
         repository = SyncProtocolRepository(context, vault)
     }
