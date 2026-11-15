@@ -1450,13 +1450,7 @@ class TwoDeviceSyncIntegrationTest {
         assertEquals(1, scalar(primaryDb, "SELECT COUNT(*) FROM sync_inbox WHERE operation_id=?", operationId))
     }
 
-    private fun createReadyAdmin(): String {
-        val auth = AuthRepository(context)
-        auth.ensureInitialAdmin()
-        val admin = auth.authenticate("admin", "1234")!!
-        auth.changePassword(admin.id, "1234", "TestAdmin123")
-        return admin.id
-    }
+    private fun createReadyAdmin(): String = createSyncTestAdmin(context)
 
     private fun setLocalDeviceId(deviceId: String) {
         check(context.getSharedPreferences("the_daily_shop_sync_identity", Context.MODE_PRIVATE)
