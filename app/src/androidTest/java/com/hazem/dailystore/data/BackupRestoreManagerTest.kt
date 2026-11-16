@@ -22,11 +22,9 @@ class BackupRestoreManagerTest {
     fun setUp() {
         AppDatabase.resetForTests(context)
         AppDatabase.getInstance(context).writableDatabase
-        val auth = AuthRepository(context)
-        auth.ensureInitialAdmin()
-        val admin = auth.authenticate("admin", "1234")!!
-        auth.changePassword(admin.id, "1234", "ManagerPass2026")
-        adminId = admin.id
+        // Backup permission tests need an administrator identity, not a login.
+        // Keep expensive authentication KDF checks in AuthRepositoryTest.
+        adminId = createTestAdminWithoutLogin(context)
         manager = BackupRestoreManager(context)
     }
 
@@ -116,10 +114,7 @@ class BackupRestoreManagerTest {
 
     @Test
     fun cashierCannotCreateOrRestoreBackupsEvenIfItCallsTheRepositoryDirectly() {
-        val auth = AuthRepository(context)
-        val cashierId = auth.createUser("ADMIN", adminId,
-            "cashierbackup", "موظف نسخ", "Cashier5678", "CASHIER")
-        auth.changePassword(cashierId, "Cashier5678", "CashierPass2026")
+        val cashierId = createTestCashierWithoutLogin(context)
         val bytes = ByteArrayOutputStream()
         try {
             manager.createBackup(cashierId, password, bytes)
