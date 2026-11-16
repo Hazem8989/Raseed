@@ -80,6 +80,34 @@ internal fun createTestAdminWithoutLogin(context: android.content.Context): Stri
 }
 
 
+/**
+ * Creates an active cashier for repository tests that do not exercise login.
+ * The placeholder credential is intentionally unusable and test-only.
+ */
+internal fun createTestCashierWithoutLogin(context: android.content.Context): String {
+    val database = AppDatabase.getInstance(context)
+    val id = java.util.UUID.randomUUID().toString()
+    val now = java.time.Instant.now().toString()
+    database.writableDatabase.insertOrThrow(
+        "users",
+        null,
+        ContentValues().apply {
+            put("id", id)
+            put("username", "test-cashier-$id")
+            put("display_name", "موظف اختبار")
+            put("password_hash", "TEST_ONLY_NO_LOGIN_HASH")
+            put("password_salt", "TEST_ONLY_NO_LOGIN_SALT")
+            put("role_key", "CASHIER")
+            put("is_active", 1)
+            put("must_change_password", 0)
+            put("created_at", now)
+            put("updated_at", now)
+        }
+    )
+    return id
+}
+
+
 /** Backwards-compatible name for sync-domain test fixtures. */
 internal fun createSyncTestAdmin(context: android.content.Context): String =
     createTestAdminWithoutLogin(context)
