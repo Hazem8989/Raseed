@@ -71,6 +71,20 @@ class StoreTimeTest {
         val utc = Date.from(java.time.Instant.parse("2026-11-03T22:30:00Z"))
         assertEquals("2026-11-04", StoreTime.today(database.readableDatabase, utc))
     }
+    @Test fun profitAndInventoryDailyReportsUseStoreCalendar() {
+        val context = InstrumentationRegistry.getInstrumentation().targetContext.applicationContext
+        StoreTime.setZoneId(database.writableDatabase, "Asia/Damascus", "2026-11-03T00:00:00.000Z")
+        val utc = Date.from(java.time.Instant.parse("2026-11-03T22:30:00Z"))
+
+        val profit = SalesProfitRepository(context).today(utc)
+        assertEquals("2026-11-04", profit.fromDate)
+        assertEquals("2026-11-04", profit.throughDate)
+
+        val capital = InventoryValuationRepository(context).dailyCapital(utc)
+        assertEquals("2026-11-04 01:30", capital.current.asOfLabel)
+        assertEquals("2026-11-03 23:59", capital.previousClose.asOfLabel)
+    }
+
     @Test fun v23MigrationBackfillsServiceOperatingDatesUsingStoreZone() {
         val context = InstrumentationRegistry.getInstrumentation().targetContext.applicationContext
         AppDatabase.resetForTests(context)
