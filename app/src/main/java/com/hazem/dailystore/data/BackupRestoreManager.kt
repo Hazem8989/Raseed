@@ -183,7 +183,7 @@ class BackupRestoreManager(private val context: Context) {
                 check(live.length() <= MAX_DATABASE_BYTES) { "حجم قاعدة البيانات يتجاوز الحد المدعوم للنسخ الاحتياطي" }
                 onProgress?.invoke("نسخ قاعدة الاختبار إلى ملف مؤقت...")
                 copyFile(live, snapshot)
-                encryptSnapshot(snapshot, encrypted, password)
+                encryptSnapshot(snapshot, encrypted, password, TEST_FIXTURE_PBKDF2_ITERATIONS)
                 FileInputStream(encrypted).use { it.copyTo(destination) }
                 destination.flush()
             } finally {
@@ -208,7 +208,7 @@ class BackupRestoreManager(private val context: Context) {
             val rollback = File(live.parentFile, "${live.name}.restore-rollback")
             var liveWasMoved = false
             try {
-                decryptToFile(source, staged, password)
+                decryptToFile(source, staged, password, allowTestFixtureIterations = true)
                 validateDatabase(staged)
                 AppDatabase.getInstance(context).checkpointAndCloseForBackup()
                 deleteSidecars(live)
@@ -314,11 +314,14 @@ class BackupRestoreManager(private val context: Context) {
         )
     }
 
-    private fun encryptSnapshot(snapshot: File, target: File, password: CharArray) {
+    private fun encryptSnapshot(
+        snapshot: File, target: File, password: CharArray,
+        iterations: Int = PBKDF2_ITERATIONS
+    ) {
         val salt = ByteArray(SALT_BYTES).also(SECURE_RANDOM::nextBytes)
         val iv = ByteArray(IV_BYTES).also(SECURE_RANDOM::nextBytes)
-        val headerBytes = buildHeader(salt, iv)
-        val cipher = cipher(Cipher.ENCRYPT_MODE, password, salt, iv)
+        val headerBytes = buildHeader(salt, iv, iterations)
+        val cipher = cipher(Cipher.ENCRYPT_MODE, password, salt, iv, iterations)
         cipher.updateAAD(headerBytes)
         FileOutputStream(target).use { fileOut ->
             val buffered = BufferedOutputStream(fileOut)
@@ -336,11 +339,14 @@ class BackupRestoreManager(private val context: Context) {
         }
     }
 
-    private fun decryptToFile(source: InputStream, target: File, password: CharArray) {
+    private fun decryptToFile(
+        source: InputStream, target: File, password: CharArray,
+        allowTestFixtureIterations: Boolean = false
+    ) {
         val data = DataInputStream(BufferedInputStream(source))
         val header = ByteArray(HEADER_BYTES)
         data.readFully(header)
-        val parsed = parseHeader(header)
+        val parsed = parseHeader(header, allowTestFixtureIterations)
         val cipher = cipher(Cipher.DECRYPT_MODE, password, parsed.salt, parsed.iv, parsed.iterations)
         cipher.updateAAD(header)
         try {
@@ -370,12 +376,14 @@ class BackupRestoreManager(private val context: Context) {
         require(target.isFile && target.length() > 0L) { "ملف النسخة الاحتياطية فارغ" }
     }
 
-    private fun buildHeader(salt: ByteArray, iv: ByteArray): ByteArray =
+    private fun buildHeader(
+        salt: ByteArray, iv: ByteArray, iterations: Int = PBKDF2_ITERATIONS
+    ): ByteArray =
         ByteArrayOutputStream().also { bytes ->
             DataOutputStream(bytes).use { out ->
                 out.write(MAGIC)
                 out.writeInt(FORMAT_VERSION)
-                out.writeInt(PBKDF2_ITERATIONS)
+                out.writeInt(iterations)
                 out.write(salt)
                 out.write(iv)
             }
@@ -383,13 +391,14 @@ class BackupRestoreManager(private val context: Context) {
 
     private data class ParsedHeader(val salt: ByteArray, val iv: ByteArray, val iterations: Int)
 
-    private fun parseHeader(header: ByteArray): ParsedHeader {
+    private fun parseHeader(header: ByteArray, allowTestFixtureIterations: Boolean = false): ParsedHeader {
         val input = DataInputStream(header.inputStream())
         val magic = ByteArray(MAGIC.size).also(input::readFully)
         require(magic.contentEquals(MAGIC)) { "الملف ليس نسخة احتياطية معروفة من The Daily Shop" }
         require(input.readInt() == FORMAT_VERSION) { "إصدار ملف النسخة الاحتياطية غير مدعوم" }
         val iterations = input.readInt()
-        require(iterations in MIN_PBKDF2_ITERATIONS..MAX_PBKDF2_ITERATIONS) {
+        val minimumIterations = if (allowTestFixtureIterations) 1 else MIN_PBKDF2_ITERATIONS
+        require(iterations in minimumIterations..MAX_PBKDF2_ITERATIONS) {
             "إعدادات حماية النسخة غير صالحة"
         }
         val salt = ByteArray(SALT_BYTES).also(input::readFully)
@@ -475,6 +484,9 @@ class BackupRestoreManager(private val context: Context) {
         private val MAGIC = byteArrayOf(0x54, 0x44, 0x53, 0x42, 0x41, 0x43, 0x4B, 0x31) // TDSBACK1
         private const val FORMAT_VERSION = 1
         private const val PBKDF2_ITERATIONS = 310_000
+        // The plaintext backend is test-only; keep its compatibility fixture fast on emulators.
+        // Production backup creation and legacy restore always retain the 310k / 200k policy.
+        private const val TEST_FIXTURE_PBKDF2_ITERATIONS = 10_000
         private const val MIN_PBKDF2_ITERATIONS = 200_000
         private const val MAX_PBKDF2_ITERATIONS = 500_000
         private const val SALT_BYTES = 16
