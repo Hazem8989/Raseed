@@ -34,9 +34,9 @@ class InventoryValuationRepository(context: Context) {
     private val db = AppDatabase.getInstance(context).readableDatabase
     private data class Lot(val layerId: String, var quantity: Double, val unitCostUsdCents: Long?)
 
-    fun dailyCapital(): DailyInventoryCapital {
-        val now = Date()
-        val todayStart = Calendar.getInstance().apply {
+    fun dailyCapital(now: Date = Date()): DailyInventoryCapital {
+        val storeTimeZone = TimeZone.getTimeZone(StoreTime.zoneId(db))
+        val todayStart = Calendar.getInstance(storeTimeZone).apply {
             time = now
             set(Calendar.HOUR_OF_DAY, 0)
             set(Calendar.MINUTE, 0)
@@ -185,7 +185,8 @@ class InventoryValuationRepository(context: Context) {
         }
 
         return InventoryValuation(
-            asOfLabel = SimpleDateFormat("yyyy-MM-dd HH:mm", Locale.US).format(cutoff),
+            asOfLabel = SimpleDateFormat("yyyy-MM-dd HH:mm", Locale.US)
+                .apply { timeZone = TimeZone.getTimeZone(StoreTime.zoneId(db)) }.format(cutoff),
             totalCostUsdCents = total.setScale(0, RoundingMode.HALF_UP).longValueExact(),
             valuedQuantity = valuedQuantity,
             unvaluedQuantity = unvaluedAmount,
