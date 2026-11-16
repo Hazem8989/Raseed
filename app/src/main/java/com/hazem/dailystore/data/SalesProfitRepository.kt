@@ -36,7 +36,11 @@ data class SalesProfitSummary(
 class SalesProfitRepository(context: Context) {
     private val db = AppDatabase.getInstance(context).readableDatabase
 
-    fun today(): SalesProfitSummary = summarize(todayStamp(), todayStamp())
+    fun today(now: Date = Date()): SalesProfitSummary {
+        // Reporting day belongs to the store's configured IANA zone, not the handset.
+        val operatingDate = StoreTime.today(db, now)
+        return summarize(operatingDate, operatingDate)
+    }
 
     fun allTime(): SalesProfitSummary = summarize(null, null)
 
@@ -119,5 +123,4 @@ class SalesProfitRepository(context: Context) {
         )
     }
 
-    private fun todayStamp(): String = SimpleDateFormat("yyyy-MM-dd", Locale.US).format(Date())
 }
