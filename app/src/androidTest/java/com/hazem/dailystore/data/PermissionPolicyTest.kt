@@ -24,16 +24,39 @@ class PermissionPolicyTest {
         AppDatabase.resetForTests(context)
         database = AppDatabase.getInstance(context)
         auth = AuthRepository(context)
-        adminId = auth.createInitialAdmin("admin", "مدير المتجر", "TestAdmin123")
-        cashierId = auth.createUser(
-            "ADMIN", adminId, "cashier-permissions", "Cashier permissions",
-            "Cashier12345", "CASHIER"
-        )
-        auth.changePassword(cashierId, "Cashier12345", "CashierStrong123")
+        // Permission tests do not exercise login or password hashing.
+        // Use test-only credentials so production PBKDF2 remains unchanged.
+        adminId = createTestAdminWithoutLogin(context)
+        cashierId = createCashierFixture(context)
     }
 
     @After
     fun tearDown() { database.close() }
+
+    private fun createCashierFixture(
+        context: android.content.Context,
+        usernamePrefix: String = "permission-cashier"
+    ): String {
+        val id = java.util.UUID.randomUUID().toString()
+        val now = java.time.Instant.now().toString()
+        database.writableDatabase.insertOrThrow(
+            "users",
+            null,
+            android.content.ContentValues().apply {
+                put("id", id)
+                put("username", "$usernamePrefix-$id")
+                put("display_name", "موظف اختبار الصلاحيات")
+                put("password_hash", "TEST_ONLY_NO_LOGIN_HASH")
+                put("password_salt", "TEST_ONLY_NO_LOGIN_SALT")
+                put("role_key", "CASHIER")
+                put("is_active", 1)
+                put("must_change_password", 0)
+                put("created_at", now)
+                put("updated_at", now)
+            }
+        )
+        return id
+    }
 
     private fun allowed(userId: String, permission: String): Boolean = try {
         PermissionPolicy.require(database.readableDatabase, userId, permission)
@@ -211,11 +234,10 @@ class PermissionPolicyTest {
 
     @Test
     fun versionThirteenUpgradeSeedsServiceTransferPermissionAsDeniedForCashiers() {
-        val cashier = auth.createUser(
-            "ADMIN", adminId, "migration-cashier", "Migration cashier",
-            "Cashier12345", "CASHIER"
+        val cashier = createCashierFixture(
+            InstrumentationRegistry.getInstrumentation().targetContext.applicationContext,
+            "migration-cashier"
         )
-        auth.changePassword(cashier, "Cashier12345", "CashierStrong123")
         database.writableDatabase.delete("role_permissions", "permission_key=?", arrayOf(PermissionPolicy.SERVICE_TRANSFERS_EXECUTE))
         database.writableDatabase.delete("permissions", "permission_key=?", arrayOf(PermissionPolicy.SERVICE_TRANSFERS_EXECUTE))
         database.writableDatabase.version = 13
