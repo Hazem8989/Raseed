@@ -33,11 +33,17 @@ class SplashActivity : Activity() {
 
         setContentView(splashImage)
 
-        handler.postDelayed(openLogin, 1800)
+        // Keep a brief visual handoff without imposing the former 1.8-second
+        // artificial wait before MainActivity can begin its required setup.
+        handler.postDelayed(openLogin, MIN_SPLASH_DURATION_MS)
     }
 
     override fun onDestroy() {
         handler.removeCallbacks(openLogin)
         super.onDestroy()
+    }
+
+    private companion object {
+        const val MIN_SPLASH_DURATION_MS = 450L
     }
 }
