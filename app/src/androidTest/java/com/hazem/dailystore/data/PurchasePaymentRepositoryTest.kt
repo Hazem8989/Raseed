@@ -36,10 +36,9 @@ class PurchasePaymentRepositoryTest {
         invoices = InvoiceRepository(context)
         payments = PurchasePaymentRepository(context)
         cashAccounts = CashAccountRepository(context)
-        val auth = AuthRepository(context)
-        auth.ensureInitialAdmin()
-        adminId = auth.authenticate("admin", "1234")!!.id
-        auth.changePassword(adminId, "1234", "TestAdmin123")
+        // Supplier-payment repository tests do not exercise authentication.
+        // Avoid repeating production PBKDF2 work in every test setup.
+        adminId = createTestAdminWithoutLogin(context)
         // Keep this test fixture independent from exchange-rate rows left by other tests.
         database.writableDatabase.delete("exchange_rates", null, null)
         val invoiceFx = ContentValues().apply {
