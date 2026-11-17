@@ -113,6 +113,7 @@ class MainActivity : Activity() {
     private val backupCreateRequestCode = 7110
     private val backupRestoreRequestCode = 7111
     private val statementExportRequestCode = 7120
+    private val deviceSetupRequestCode = 7130
     private var pendingStatementExportBytes: ByteArray? = null
     private var pendingStatementExportName: String? = null
     private var pendingBackupPassword: CharArray? = null
@@ -143,6 +144,15 @@ class MainActivity : Activity() {
     @Deprecated("Using the document picker keeps compatibility with the app's current Activity-based navigation.")
     override fun onActivityResult(requestCode: Int, resultCode: Int, data: android.content.Intent?) {
         super.onActivityResult(requestCode, resultCode, data)
+        if (requestCode == deviceSetupRequestCode) {
+            if (runCatching { SyncProtocolRepository(this).localDeviceRole() }.getOrNull() != null) {
+                showPointOfSale()
+            } else {
+                clearSessionState()
+                showLoginScreen()
+            }
+            return
+        }
         if (requestCode == statementExportRequestCode) {
             val bytes = pendingStatementExportBytes
             val name = pendingStatementExportName
@@ -296,7 +306,10 @@ class MainActivity : Activity() {
             if (restoreSession(savedInstanceState)) {
                 if (runCatching { SyncProtocolRepository(this).localDeviceRole() }.getOrNull() == null) {
                     currentUserId?.let {
-                        startActivity(SyncDeviceManagementActivity.intent(this, it))
+                        startActivityForResult(
+                            SyncDeviceManagementActivity.intent(this, it),
+                            deviceSetupRequestCode
+                        )
                     } ?: showLoginScreen()
                 } else restoreActiveScreen()
             } else {
@@ -702,7 +715,10 @@ class MainActivity : Activity() {
                         sessionPrefs.edit().putString(SESSION_SCREEN, "POS")
                             .putString(SESSION_CART, "[]").apply()
                         if (runCatching { SyncProtocolRepository(this@MainActivity).localDeviceRole() }.getOrNull() == null) {
-                            startActivity(SyncDeviceManagementActivity.intent(this@MainActivity, authenticated.id))
+                            startActivityForResult(
+                                SyncDeviceManagementActivity.intent(this@MainActivity, authenticated.id),
+                                deviceSetupRequestCode
+                            )
                         } else showPointOfSale()
                     }
                 } else Toast.makeText(
