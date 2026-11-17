@@ -76,12 +76,25 @@ class SyncDeviceManagementActivity : Activity() {
 
         val roleNow = repository.localDeviceRole()
         if (roleNow == null) {
-            addButton(root, "تهيئة هذا الهاتف كجهاز أساسي") {
-                runTask("تهيئة الجهاز الأساسي") {
-                    repository.configureAsPrimary(actorUserId, "الجهاز الأساسي")
-                }
+            root.addView(TextView(this).apply {
+                text = "تم تسجيل الدخول بنجاح. اختر دور هذا الهاتف الآن. ابدأ بتهيئة الهاتف الرئيسي أولاً، ثم انتقل إلى الهاتف الثانوي واستخدم دعوة الاقتران الصادرة من الرئيسي."
+                textSize = 14f
+                gravity = Gravity.RIGHT
+                setPadding(0, 0, 0, 18)
+                setTextColor(0xFF526057.toInt())
+            }, match())
+            addButton(root, "1) اعتماد هذا الهاتف جهازاً رئيسياً") {
+                AlertDialog.Builder(this)
+                    .setTitle("تأكيد الجهاز الرئيسي")
+                    .setMessage("سيصبح هذا الهاتف المرجع الأساسي لبيانات المتجر، وسيصدر دعوات اقتران للأجهزة الثانوية. لا تختَر هذا الخيار على الهاتف الثانوي.")
+                    .setNegativeButton("رجوع", null)
+                    .setPositiveButton("اعتماد الجهاز الرئيسي") { _, _ ->
+                        runTask("تهيئة الجهاز الرئيسي") {
+                            repository.configureAsPrimary(actorUserId, "الجهاز الرئيسي")
+                        }
+                    }.show()
             }
-            addButton(root, "إنشاء طلب اقتران لهذا الهاتف كثانوي") { createSecondaryRequest() }
+            addButton(root, "2) إعداد هذا الهاتف كجهاز ثانوي") { createSecondaryRequest() }
         } else if (roleNow == "PRIMARY") {
             addButton(root, "نسخ جذر الثقة لتثبيته في Cloudflare") { copyTrustRoot() }
             addButton(root, "إنشاء دعوة اقتران لجهاز ثانوي") { createInvitation() }
