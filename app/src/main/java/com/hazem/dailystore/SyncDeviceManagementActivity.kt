@@ -95,9 +95,7 @@ class SyncDeviceManagementActivity : Activity() {
                     }.show()
             }
             addButton(root, "2) إعداد هذا الهاتف كجهاز ثانوي") { createSecondaryRequest() }
-            if (preferences.getBoolean(KEY_PENDING_ENROLLMENT_RESPONSE, false)) {
-                addButton(root, "3) إكمال الاقتران ببيانات الجهاز الأساسي") { acceptEnrollmentResponse() }
-            }
+            addButton(root, "3) إكمال الاقتران ببيانات الجهاز الأساسي") { acceptEnrollmentResponse() }
         } else if (roleNow == "PRIMARY") {
             addButton(root, "نسخ جذر الثقة لتثبيته في Cloudflare") { copyTrustRoot() }
             addButton(root, "إنشاء دعوة اقتران لجهاز ثانوي") { createInvitation() }
@@ -266,7 +264,6 @@ class SyncDeviceManagementActivity : Activity() {
                     val request = JSONObject(payload.toString())
                         .put("request_signature", Base64.encodeToString(signature, Base64.NO_WRAP))
                         .toString()
-                    preferences.edit().putBoolean(KEY_PENDING_ENROLLMENT_RESPONSE, true).apply()
                     main.post { copyText("طلب اقتران الجهاز الثانوي", request) }
                 }
             }.setNegativeButton("إلغاء", null).show()
@@ -338,7 +335,6 @@ class SyncDeviceManagementActivity : Activity() {
                         bundle.getString("device_certificate_json"),
                         bundle.optString("store_time_zone_id", StoreTime.DEFAULT_ZONE_ID)
                     )
-                    preferences.edit().remove(KEY_PENDING_ENROLLMENT_RESPONSE).apply()
                     val wss = https.replaceFirst(Regex("^https://", RegexOption.IGNORE_CASE), "wss://")
                     require(wss.startsWith("wss://"))
                     preferences.edit().putString(KEY_RELAY_WSS, wss).apply()
@@ -399,7 +395,6 @@ class SyncDeviceManagementActivity : Activity() {
         const val EXTRA_ACTOR_USER_ID = "actor_user_id"
         private const val KEY_RELAY_WSS = "relay_wss_url"
         private const val KEY_LAST_PROBE_ID = "last_transport_probe_id"
-        private const val KEY_PENDING_ENROLLMENT_RESPONSE = "pending_enrollment_response"
         fun intent(context: Context, actorUserId: String) =
             Intent(context, SyncDeviceManagementActivity::class.java)
                 .putExtra(EXTRA_ACTOR_USER_ID, actorUserId)
