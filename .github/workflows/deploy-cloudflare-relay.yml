@@ -1,6 +1,12 @@
 name: Deploy The Daily Shop Cloudflare Relay
 
 on:
+  push:
+    branches:
+      - the-daily-shop-development
+    paths:
+      - 'cloudflare-relay/**'
+      - '.github/workflows/deploy-cloudflare-relay.yml'
   workflow_dispatch:
 
 permissions:
