@@ -133,7 +133,7 @@ class SyncDeviceManagementActivity : Activity() {
             SyncForegroundService.stop(this)
             status.text = "تم قطع الاتصال وإيقاف إعادة الاتصال التلقائية."
         }
-        addButton(root, "عودة") { finish() }
+        if (roleNow != null) addButton(root, "عودة") { finish() }
 
         val scroll = ScrollView(this).apply { addView(root) }
         setContentView(scroll)
@@ -219,12 +219,28 @@ class SyncDeviceManagementActivity : Activity() {
         }
     }
 
+    @Deprecated("The role must be selected before leaving device setup.")
+    override fun onBackPressed() {
+        if (repository.localDeviceRole() == null) {
+            Toast.makeText(
+                this,
+                "حدّد دور هذا الهاتف أولاً: الجهاز الرئيسي أو الجهاز الثانوي.",
+                Toast.LENGTH_LONG
+            ).show()
+            return
+        }
+        super.onBackPressed()
+    }
+
     private fun createSecondaryRequest() {
         val panel = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(18, 8, 18, 0) }
         val invite = EditText(this).apply { hint = "الصق حزمة دعوة الجهاز الأساسي"; minLines = 3; gravity = Gravity.TOP or Gravity.RIGHT }
         val name = EditText(this).apply { hint = "اسم هذا الجهاز"; setSingleLine(true) }
         panel.addView(invite, match()); panel.addView(name, match())
-        AlertDialog.Builder(this).setTitle("إنشاء طلب اقتران ثانوي").setView(panel)
+        AlertDialog.Builder(this)
+            .setTitle("إعداد هذا الهاتف كجهاز ثانوي")
+            .setMessage("يجب أولاً تهيئة الهاتف الرئيسي وإنشاء دعوة اقتران منه. الصق الدعوة هنا ثم أنشئ الطلب.")
+            .setView(panel)
             .setPositiveButton("إنشاء الطلب") { _, _ ->
                 val invitationText = invite.text.toString().trim()
                 val displayName = name.text.toString().trim()
