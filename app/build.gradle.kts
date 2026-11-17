@@ -13,7 +13,12 @@ android {
         targetSdk = 35
         // GitHub Actions run numbers make each published build upgradeable.
         versionCode = (System.getenv("GITHUB_RUN_NUMBER")?.toIntOrNull()?.plus(1) ?: 2)
-        versionName = System.getenv("APP_VERSION_NAME") ?: "1.0.1"
+        // Ignore unset, blank, or literal "null" GitHub variables so Android never
+        // receives a null versionName in the installed package metadata.
+        val configuredVersionName = System.getenv("APP_VERSION_NAME")
+            ?.trim()
+            ?.takeIf { it.isNotEmpty() && !it.equals("null", ignoreCase = true) }
+        versionName = configuredVersionName ?: "1.0.1"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 
