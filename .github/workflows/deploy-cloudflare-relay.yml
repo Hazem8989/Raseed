@@ -58,3 +58,21 @@ jobs:
             exit 1
           fi
           npx wrangler deploy --var "STORE_ROOT_PUBLIC_KEYS:$STORE_ROOT_PUBLIC_KEYS"
+
+      - name: Verify deployed Worker health endpoint
+        env:
+          RELAY_URL: https://the-daily-shop-relay.hazem-syrian.workers.dev
+        run: |
+          set -euo pipefail
+          response_file="$(mktemp)"
+          trap 'rm -f "$response_file"' EXIT
+          curl --fail --silent --show-error --retry 8 --retry-all-errors --retry-delay 5 \
+            "$RELAY_URL/healthz" --output "$response_file"
+          node --input-type=module -e '
+            import fs from "node:fs";
+            const body = JSON.parse(fs.readFileSync(process.argv[1], "utf8"));
+            if (body.service !== "the-daily-shop-relay" || body.status !== "ok" || body.protocol !== 2) {
+              throw new Error("Unexpected relay health response");
+            }
+            console.log("Relay health verified: service=the-daily-shop-relay status=ok protocol=2");
+          ' "$response_file"
