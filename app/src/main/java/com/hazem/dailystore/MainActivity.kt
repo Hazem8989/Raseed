@@ -1386,7 +1386,7 @@ class MainActivity : Activity() {
         val menuScroll = ScrollView(this).apply {
             isFillViewport = true
             isVerticalScrollBarEnabled = true
-            addView(menu, ScrollView.LayoutParams(
+            addView(menu, ViewGroup.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT,
                 ViewGroup.LayoutParams.WRAP_CONTENT
             ))
