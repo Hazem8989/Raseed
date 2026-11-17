@@ -293,7 +293,13 @@ class MainActivity : Activity() {
             showInitialAdminSetupScreen()
         } else {
             ServiceTransferRepository(this).ensureSystemAccounts()
-            if (restoreSession(savedInstanceState)) restoreActiveScreen() else {
+            if (restoreSession(savedInstanceState)) {
+                if (runCatching { SyncProtocolRepository(this).localDeviceRole() }.getOrNull() == null) {
+                    currentUserId?.let {
+                        startActivity(SyncDeviceManagementActivity.intent(this, it))
+                    } ?: showLoginScreen()
+                } else restoreActiveScreen()
+            } else {
                 clearSessionState()
                 showLoginScreen()
             }
@@ -612,13 +618,16 @@ class MainActivity : Activity() {
                     val userId = AuthRepository(this@MainActivity).createInitialAdmin(
                         username.text.toString(), displayName.text.toString(), chosenPassword
                     )
-                    currentUserId = userId
-                    currentUserRole = "ADMIN"
-                    SecureSessionStore.save(this@MainActivity, userId)
-                    sessionPrefs.edit().putString(SESSION_SCREEN, "POS")
-                        .putString(SESSION_CART, "[]").apply()
+                    // Account creation is setup only; require a real credential check before
+                    // opening the store or allowing device-role configuration.
+                    clearSessionState()
                     ServiceTransferRepository(this@MainActivity).ensureSystemAccounts()
-                    showPointOfSale()
+                    Toast.makeText(
+                        this@MainActivity,
+                        "تم إنشاء حساب المدير. سجّل الدخول الآن للمتابعة.",
+                        Toast.LENGTH_LONG
+                    ).show()
+                    showLoginScreen()
                 } catch (e: IllegalArgumentException) {
                     password.error = e.message ?: "تعذر إنشاء حساب المدير"
                 } catch (e: Exception) {
@@ -692,7 +701,9 @@ class MainActivity : Activity() {
                         SecureSessionStore.save(this@MainActivity, authenticated.id)
                         sessionPrefs.edit().putString(SESSION_SCREEN, "POS")
                             .putString(SESSION_CART, "[]").apply()
-                        showPointOfSale()
+                        if (runCatching { SyncProtocolRepository(this@MainActivity).localDeviceRole() }.getOrNull() == null) {
+                            startActivity(SyncDeviceManagementActivity.intent(this@MainActivity, authenticated.id))
+                        } else showPointOfSale()
                     }
                 } else Toast.makeText(
                     this@MainActivity, "اسم المستخدم أو كلمة المرور غير صحيحة", Toast.LENGTH_SHORT
@@ -1350,7 +1361,16 @@ class MainActivity : Activity() {
             }
         }
         menu.addView(logout, fieldParams(dp(50), 0))
-        popup = PopupWindow(menu, dp(285), -1, true).apply {
+        // Keep the complete menu, including logout, reachable on short screens.
+        val menuScroll = ScrollView(this).apply {
+            isFillViewport = true
+            isVerticalScrollBarEnabled = true
+            addView(menu, ScrollView.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT
+            ))
+        }
+        popup = PopupWindow(menuScroll, dp(285), -1, true).apply {
             elevation = dp(12).toFloat()
             setBackgroundDrawable(cardBackground())
         }
