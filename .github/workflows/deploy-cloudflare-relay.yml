@@ -76,3 +76,33 @@ jobs:
             }
             console.log("Relay health verified: service=the-daily-shop-relay status=ok protocol=2");
           ' "$response_file"
+
+      - name: Verify deployed public trust roots
+        env:
+          RELAY_URL: https://the-daily-shop-relay.hazem-syrian.workers.dev
+          STORE_ROOT_PUBLIC_KEYS: ${{ secrets.STORE_ROOT_PUBLIC_KEYS }}
+        run: |
+          node --input-type=module <<'NODE'
+          const roots = JSON.parse(process.env.STORE_ROOT_PUBLIC_KEYS);
+          if (!roots || typeof roots !== "object" || Array.isArray(roots) || Object.keys(roots).length === 0) {
+            throw new Error("STORE_ROOT_PUBLIC_KEYS must be a non-empty JSON object.");
+          }
+          for (const [storeId, expected] of Object.entries(roots)) {
+            if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(storeId)) {
+              throw new Error("A configured store key has an invalid store UUID.");
+            }
+            if (!expected || typeof expected.device_id !== "string" || typeof expected.public_key !== "string") {
+              throw new Error("A configured trust root is missing required public fields.");
+            }
+            const response = await fetch(`${process.env.RELAY_URL}/v1/trust/${storeId}`);
+            if (!response.ok) {
+              throw new Error(`Trust endpoint returned HTTP ${response.status} for a configured store.`);
+            }
+            const actual = await response.json();
+            if (actual.store_id !== storeId || actual.device_id !== expected.device_id || actual.public_key !== expected.public_key || actual.algorithm !== "EC_P256_SHA256") {
+              throw new Error("The deployed trust root does not match the configured public trust root.");
+            }
+            console.log(`Trust root verified for configured store ${storeId}.`);
+          }
+          console.log(`Verified ${Object.keys(roots).length} deployed public trust root(s).`);
+          NODE
