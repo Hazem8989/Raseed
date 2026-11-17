@@ -1,0 +1,54 @@
+name: Deploy The Daily Shop Cloudflare Relay
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: daily-shop-relay-deploy
+  cancel-in-progress: false
+
+jobs:
+  validate-and-deploy:
+    if: github.ref == 'refs/heads/the-daily-shop-development'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: cloudflare-relay
+    steps:
+      - name: Checkout development branch only
+        uses: actions/checkout@v4
+        with:
+          ref: the-daily-shop-development
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: cloudflare-relay/package.json
+
+      - name: Install dependencies
+        run: npm install --no-audit --no-fund
+
+      - name: Type-check relay
+        run: npm run check
+
+      - name: Integration tests
+        timeout-minutes: 4
+        run: timeout --signal=TERM --kill-after=10s 210s npm run test:integration
+
+      - name: Deploy Worker with the provisioned public trust root
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          STORE_ROOT_PUBLIC_KEYS: ${{ secrets.STORE_ROOT_PUBLIC_KEYS }}
+        run: |
+          if [ -z "$CLOUDFLARE_API_TOKEN" ] || [ -z "$CLOUDFLARE_ACCOUNT_ID" ] || [ -z "$STORE_ROOT_PUBLIC_KEYS" ]; then
+            echo "Required deployment secret is missing."
+            exit 1
+          fi
+          npx wrangler deploy --var "STORE_ROOT_PUBLIC_KEYS:$STORE_ROOT_PUBLIC_KEYS"
