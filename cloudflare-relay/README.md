@@ -44,3 +44,6 @@ For local tests, the integration suite creates a temporary `.dev.vars` file with
 5. Keep unacknowledged commands in the local SQLite outbox through outages or quota exhaustion.
 
 The relay uses a SQLite-backed Durable Object for device certificates, revocation tombstones and abuse counters. It does not persist business payloads. Cloudflare quotas still apply.
+
+
+<!-- Provisioning refresh: redeploy Worker with the current STORE_ROOT_PUBLIC_KEYS repository secret. -->
