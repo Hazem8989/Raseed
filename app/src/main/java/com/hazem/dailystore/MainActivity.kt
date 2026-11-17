@@ -1305,9 +1305,14 @@ class MainActivity : Activity() {
             "المستخدمون والصلاحيات" to "إضافة الموظفين والتحكم بصلاحياتهم"
         )
         lateinit var popup: PopupWindow
-        val secondaryDevice = SyncProtocolRepository(this).isConfiguredSecondary()
+        val syncRepository = SyncProtocolRepository(this)
+        val localDeviceRole = runCatching { syncRepository.localDeviceRole() }.getOrNull()
+        val secondaryDevice = localDeviceRole == "SECONDARY"
         val visibleEntries = entries.filter { entry ->
-            if (secondaryDevice) {
+            if (localDeviceRole == null) {
+                // Until a device role is selected, expose only the setup screen.
+                entry.first == "مزامنة الأجهزة"
+            } else if (secondaryDevice) {
                 entry.first == "نقطة البيع" || entry.first == "تحويل رصيد" || entry.first == "مزامنة الأجهزة"
             } else when (entry.first) {
                 "تسويات المخزون" -> hasPermission(PermissionPolicy.INVENTORY_ADJUST)
