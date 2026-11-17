@@ -114,6 +114,18 @@ jobs:
           echo "APK_PATH=$APK" >> "$GITHUB_ENV"
           echo "APK_KIND=debug-development-only" >> "$GITHUB_ENV"
 
+      - name: Verify APK version metadata
+        run: |
+          set -euo pipefail
+          BADGING="$("$ANDROID_HOME/build-tools/35.0.0/aapt" dump badging "$APK_PATH")"
+          VERSION_NAME="$(printf '%s\\n' "$BADGING" | sed -n "s/^package:.*versionName='\\([^']*\\)'.*/\\1/p")"
+          VERSION_CODE="$(printf '%s\\n' "$BADGING" | sed -n "s/^package:.*versionCode='\\([^']*\\)'.*/\\1/p")"
+          if [[ -z "$VERSION_NAME" || "$VERSION_NAME" == "null" || -z "$VERSION_CODE" ]]; then
+            echo "APK is missing valid Android version metadata."
+            exit 1
+          fi
+          echo "Verified APK metadata: versionName=$VERSION_NAME versionCode=$VERSION_CODE"
+
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
