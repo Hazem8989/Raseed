@@ -38,9 +38,9 @@ class PurchaseReturnRepositoryTest {
         AppDatabase.resetForTests(context)
         db=AppDatabase.getInstance(context)
         val store=StoreRepository(context); store.ensureBaseSetup()
-        val auth=AuthRepository(context, TEST_AUTH_PBKDF2_ITERATIONS); auth.ensureInitialAdmin()
-        adminId=auth.authenticate("admin","1234")!!.id
-        auth.changePassword(adminId,"1234","TestAdmin123")
+        val auth=AuthRepository(context, TEST_AUTH_PBKDF2_ITERATIONS)
+        // Create the test administrator directly; this suite does not test login.
+        adminId=auth.createInitialAdmin("admin","مدير اختبار","TestAdmin123")
         db.writableDatabase.delete("exchange_rates",null,null)
         db.writableDatabase.insertOrThrow("exchange_rates",null,ContentValues().apply {
             put("id",UUID.randomUUID().toString()); put("currency_code","USD")
