@@ -15,6 +15,12 @@ import androidx.test.platform.app.InstrumentationRegistry
 
 @RunWith(AndroidJUnit4::class)
 class SalesReturnRepositoryTest {
+    companion object {
+        // This suite tests sales-return accounting, not password hashing.
+        // Keep fixture KDF work fast on the software-only emulator; production remains unchanged.
+        private const val TEST_AUTH_PBKDF2_ITERATIONS = 1_000
+    }
+
     private lateinit var database: AppDatabase
     private lateinit var adminId: String
     private lateinit var productId: String
@@ -30,11 +36,9 @@ class SalesReturnRepositoryTest {
         database = AppDatabase.getInstance(context)
         val store = StoreRepository(context)
         store.ensureBaseSetup()
-        val auth = AuthRepository(context)
-        auth.ensureInitialAdmin()
-        val admin = auth.authenticate("admin", "1234")!!
-        auth.changePassword(admin.id, "1234", "TestAdmin123")
-        adminId = admin.id
+        val auth = AuthRepository(context, TEST_AUTH_PBKDF2_ITERATIONS)
+        // This suite does not test login; create the fixture administrator directly.
+        adminId = auth.createInitialAdmin("admin", "مدير اختبار", "TestAdmin123")
         val fx = ContentValues().apply {
             put("id", UUID.randomUUID().toString())
             put("currency_code", "USD")
@@ -198,7 +202,10 @@ class SalesReturnRepositoryTest {
 
     @Test
     fun cashierCannotPostSalesReturn() {
-        val auth = AuthRepository(InstrumentationRegistry.getInstrumentation().targetContext.applicationContext)
+        val auth = AuthRepository(
+            InstrumentationRegistry.getInstrumentation().targetContext.applicationContext,
+            TEST_AUTH_PBKDF2_ITERATIONS
+        )
         val cashierId = auth.createUser(
             "ADMIN", adminId, "return-cashier", "Return cashier", "Cashier12345", "CASHIER"
         )

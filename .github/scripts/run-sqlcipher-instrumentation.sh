@@ -198,6 +198,9 @@ case "$SUITE" in
     run_instrumentation "com.hazem.dailystore.data.StoreTimeTest" "repositories-store-time.txt"
     run_instrumentation "com.hazem.dailystore.data.SyncAckDeliveryMigrationTest" "repositories-sync-ack-migration.txt"
     ;;
+  sales_returns)
+    run_instrumentation "com.hazem.dailystore.data.SalesReturnRepositoryTest" "repositories-sales-return.txt"
+    ;;
   repositories_inventory)
     run_instrumentation "com.hazem.dailystore.data.InventoryAdjustmentRepositoryTest" "repositories-inventory-adjustment.txt"
     run_instrumentation "com.hazem.dailystore.data.InventoryValuationRepositoryTest" "repositories-inventory-valuation.txt"
