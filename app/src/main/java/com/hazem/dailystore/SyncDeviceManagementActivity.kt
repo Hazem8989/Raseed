@@ -7,6 +7,7 @@ import android.content.ClipboardManager
 import android.content.Context
 import android.content.Intent
 import android.os.Bundle
+import android.text.InputType
 import android.os.Handler
 import android.os.Looper
 import android.util.Base64
@@ -337,8 +338,9 @@ class SyncDeviceManagementActivity : Activity() {
             hint = "الصق بيانات الاقتران السرية كاملة هنا"
             minLines = 5
             setSingleLine(false)
+            inputType = InputType.TYPE_CLASS_TEXT or
+                InputType.TYPE_TEXT_FLAG_MULTI_LINE or InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS
             gravity = Gravity.TOP or Gravity.RIGHT
-            setTextIsSelectable(true)
         }
         val defaultHttps = preferences.getString(KEY_RELAY_WSS, null)
             ?.replaceFirst(Regex("^wss://", RegexOption.IGNORE_CASE), "https://")
