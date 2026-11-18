@@ -15,6 +15,12 @@ import androidx.test.platform.app.InstrumentationRegistry
 
 @RunWith(AndroidJUnit4::class)
 class PurchaseReturnRepositoryTest {
+    companion object {
+        // Keep instrumentation fixtures fast on the software-only Android emulator.
+        // Production authentication continues to use AuthRepository.PBKDF2_ITERATIONS.
+        private const val TEST_AUTH_PBKDF2_ITERATIONS = 1_000
+    }
+
     private lateinit var db: AppDatabase
     private lateinit var adminId: String
     private lateinit var supplierId: String
@@ -32,7 +38,7 @@ class PurchaseReturnRepositoryTest {
         AppDatabase.resetForTests(context)
         db=AppDatabase.getInstance(context)
         val store=StoreRepository(context); store.ensureBaseSetup()
-        val auth=AuthRepository(context); auth.ensureInitialAdmin()
+        val auth=AuthRepository(context, TEST_AUTH_PBKDF2_ITERATIONS); auth.ensureInitialAdmin()
         adminId=auth.authenticate("admin","1234")!!.id
         auth.changePassword(adminId,"1234","TestAdmin123")
         db.writableDatabase.delete("exchange_rates",null,null)
@@ -228,7 +234,7 @@ class PurchaseReturnRepositoryTest {
     }
 
     @Test fun cashierCannotPostSupplierReturn() {
-        val auth=AuthRepository(InstrumentationRegistry.getInstrumentation().targetContext.applicationContext)
+        val auth=AuthRepository(InstrumentationRegistry.getInstrumentation().targetContext.applicationContext, TEST_AUTH_PBKDF2_ITERATIONS)
         val cashier=auth.createUser("ADMIN",adminId,"supplier-return-cashier","Cashier","Cashier12345","CASHIER")
         auth.changePassword(cashier,"Cashier12345","CashierStrong123")
         try {

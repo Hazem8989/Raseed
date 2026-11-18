@@ -33,15 +33,9 @@ jobs:
       # on hosted runners, leaving instrumentation jobs waiting before tests begin.
       max-parallel: 1
       matrix:
-        suite:
-          - core
-          - coordinator
-          - startup_barrier
-          - end_to_end
-          - pipeline
-          - repositories_core
-          - repositories_inventory
-          - repositories_sync
+        # A focused inventory-only commit reruns only the previously failed suite.
+        # Normal pushes and manual runs retain the complete SQLCipher matrix.
+        suite: ${{ github.event_name == 'push' && contains(github.event.head_commit.message, '[inventory-only]') && fromJSON('["repositories_inventory"]') || fromJSON('["core","coordinator","startup_barrier","end_to_end","pipeline","repositories_core","repositories_inventory","repositories_sync"]') }}
     steps:
       - name: Check out source
         uses: actions/checkout@v4
