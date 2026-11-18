@@ -77,13 +77,13 @@ class SyncDeviceManagementActivity : Activity() {
         val roleNow = repository.localDeviceRole()
         if (roleNow == null) {
             root.addView(TextView(this).apply {
-                text = "تم تسجيل الدخول بنجاح. اختر دور هذا الهاتف الآن. ابدأ بتهيئة الهاتف الرئيسي أولاً، ثم انتقل إلى الهاتف الثانوي واستخدم دعوة الاقتران الصادرة من الرئيسي."
+                text = "تم تسجيل الدخول. هذا الهاتف غير معيّن بعد. إذا كان هو الهاتف الرئيسي فاعتمده مرة واحدة. أما الهاتف الثانوي فاترك خيار الرئيسي دون لمس، وأنشئ طلب الاقتران من الدعوة ثم الصق رد الهاتف الرئيسي في الحقل الظاهر أسفل هذه الصفحة."
                 textSize = 14f
                 gravity = Gravity.RIGHT
                 setPadding(0, 0, 0, 18)
                 setTextColor(0xFF526057.toInt())
             }, match())
-            addButton(root, "1) اعتماد هذا الهاتف جهازاً رئيسياً") {
+            addButton(root, "اعتماد هذا الهاتف جهازاً رئيسياً") {
                 AlertDialog.Builder(this)
                     .setTitle("تأكيد الجهاز الرئيسي")
                     .setMessage("سيصبح هذا الهاتف المرجع الأساسي لبيانات المتجر، وسيصدر دعوات اقتران للأجهزة الثانوية. لا تختَر هذا الخيار على الهاتف الثانوي.")
@@ -94,8 +94,8 @@ class SyncDeviceManagementActivity : Activity() {
                         }
                     }.show()
             }
-            addButton(root, "2) إعداد هذا الهاتف كجهاز ثانوي") { createSecondaryRequest() }
-            addButton(root, "3) إكمال الاقتران ببيانات الجهاز الأساسي") { acceptEnrollmentResponse() }
+            addButton(root, "إعداد هذا الهاتف كجهاز ثانوي — الخطوة 1") { createSecondaryRequest() }
+            addEnrollmentResponseForm(root)
         } else if (roleNow == "PRIMARY") {
             addButton(root, "نسخ جذر الثقة لتثبيته في Cloudflare") { copyTrustRoot() }
             addButton(root, "إنشاء دعوة اقتران لجهاز ثانوي") { createInvitation() }
@@ -104,7 +104,7 @@ class SyncDeviceManagementActivity : Activity() {
             addButton(root, "إعداد عنوان وسيط المزامنة والاتصال") { configureRelay() }
         } else if (roleNow == "SECONDARY") {
             addButton(root, "إنشاء طلب إعادة اقتران لهذا الجهاز") { createSecondaryRequest() }
-            addButton(root, "قبول شهادة اقتران جديدة") { acceptEnrollmentResponse() }
+            addEnrollmentResponseForm(root)
             addButton(root, "إعداد عنوان وسيط المزامنة والاتصال") { configureRelay() }
             addButton(root, "إرسال اختبار نقل مشفر إلى الجهاز الأساسي") {
                 runTask("إرسال اختبار النقل") {
@@ -123,7 +123,7 @@ class SyncDeviceManagementActivity : Activity() {
             }
         } else {
             addButton(root, "إنشاء طلب اقتران لهذا الهاتف") { createSecondaryRequest() }
-            addButton(root, "إكمال الاقتران ببيانات الجهاز الأساسي") { acceptEnrollmentResponse() }
+            addEnrollmentResponseForm(root)
             addButton(root, "إعداد عنوان وسيط المزامنة والاتصال") { configureRelay() }
         }
         addButton(root, "تحديث حالة الاتصال") {
@@ -246,8 +246,12 @@ class SyncDeviceManagementActivity : Activity() {
                 val invitationText = invite.text.toString().trim()
                 val displayName = name.text.toString().trim()
                 runTask("إنشاء طلب الاقتران") {
+                    require(invitationText.isNotBlank()) { "الصق دعوة صادرة من الهاتف الرئيسي أولاً" }
+                    require(displayName.isNotBlank()) { "اكتب اسماً يميز هذا الهاتف" }
                     val bundle = JSONObject(invitationText)
                     require(bundle.getInt("version") == 1)
+                    require(bundle.getString("store_id").isNotBlank()) { "دعوة الاقتران لا تحتوي معرّف المتجر" }
+                    require(bundle.getString("primary_device_id").isNotBlank()) { "دعوة الاقتران لا تحتوي معرّف الجهاز الرئيسي" }
                     val deviceId = repository.localDeviceId()
                     val keyPair = SyncDeviceAuthenticator.getOrCreate(this, deviceId)
                     val payload = JSONObject()
@@ -313,34 +317,78 @@ class SyncDeviceManagementActivity : Activity() {
         }
     }
 
-    private fun acceptEnrollmentResponse() {
-        val panel = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(18, 8, 18, 0) }
-        val response = EditText(this).apply { hint = "الصق بيانات الاقتران التي أرسلها الجهاز الأساسي"; minLines = 4; gravity = Gravity.TOP or Gravity.RIGHT }
-        val relay = EditText(this).apply { hint = "عنوان HTTPS للوسيط، مثال https://your-worker.workers.dev"; setSingleLine(true) }
-        panel.addView(response, match()); panel.addView(relay, match())
-        AlertDialog.Builder(this).setTitle("إكمال اقتران هذا الجهاز").setView(panel)
-            .setPositiveButton("تحقق واحفظ") { _, _ ->
-                val responseText = response.text.toString().trim()
-                val https = relay.text.toString().trim()
-                runTask("التحقق من الشهادة وحفظ الاقتران") {
-                    val bundle = JSONObject(responseText)
-                    require(bundle.getInt("version") == 1)
-                    repository.configureAsSecondaryFromRelay(
-                        https,
-                        actorUserId,
-                        bundle.getString("store_id"),
-                        bundle.getString("primary_device_id"),
-                        bundle.getString("credential"),
-                        bundle.getString("display_name"),
-                        bundle.getString("device_certificate_json"),
-                        bundle.optString("store_time_zone_id", StoreTime.DEFAULT_ZONE_ID)
-                    )
-                    val wss = https.replaceFirst(Regex("^https://", RegexOption.IGNORE_CASE), "wss://")
-                    require(wss.startsWith("wss://"))
-                    preferences.edit().putString(KEY_RELAY_WSS, wss).apply()
-                    SyncForegroundService.start(this)
-                }
-            }.setNegativeButton("إلغاء", null).show()
+    /**
+     * Keep the final enrollment input visible on the setup screen so the
+     * secondary never returns to role selection without a clear paste target.
+     */
+    private fun addEnrollmentResponseForm(parent: LinearLayout) {
+        val section = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(0, 18, 0, 18)
+        }
+        section.addView(TextView(this).apply {
+            text = "الخطوة الأخيرة — الصق هنا بيانات الاقتران التي نسختها من الهاتف الرئيسي"
+            textSize = 16f
+            gravity = Gravity.RIGHT
+            setPadding(0, 0, 0, 10)
+            setTextColor(0xFF184B37.toInt())
+        }, match())
+        val response = EditText(this).apply {
+            hint = "الصق بيانات الاقتران السرية كاملة هنا"
+            minLines = 5
+            setSingleLine(false)
+            gravity = Gravity.TOP or Gravity.RIGHT
+            setTextIsSelectable(true)
+        }
+        val defaultHttps = preferences.getString(KEY_RELAY_WSS, null)
+            ?.replaceFirst(Regex("^wss://", RegexOption.IGNORE_CASE), "https://")
+            ?: DEFAULT_RELAY_HTTPS
+        val relay = EditText(this).apply {
+            hint = "عنوان HTTPS للوسيط"
+            setSingleLine(true)
+            setText(defaultHttps)
+        }
+        section.addView(response, match())
+        section.addView(relay, match())
+        addButton(section, "تحقق واحفظ الاقتران على هذا الهاتف") {
+            val responseText = response.text.toString().trim()
+            val https = relay.text.toString().trim()
+            if (responseText.isBlank()) {
+                response.error = "الصق بيانات الاقتران التي صدرت من الهاتف الرئيسي"
+            } else if (https.isBlank()) {
+                relay.error = "عنوان الوسيط مطلوب"
+            } else {
+                completeEnrollmentResponse(responseText, https)
+            }
+        }
+        parent.addView(section, match())
+    }
+
+    private fun completeEnrollmentResponse(responseText: String, https: String) {
+        runTask("التحقق من الشهادة وحفظ الاقتران") {
+            require(https.startsWith("https://", ignoreCase = true)) {
+                "أدخل عنوان الوسيط بصيغة HTTPS"
+            }
+            val bundle = JSONObject(responseText)
+            require(bundle.getInt("version") == 1)
+            require(bundle.getString("device_id") == repository.localDeviceId()) {
+                "بيانات الاقتران تخص جهازاً آخر؛ استخدم الرد الذي صدر لهذا الهاتف تحديداً"
+            }
+            repository.configureAsSecondaryFromRelay(
+                https,
+                actorUserId,
+                bundle.getString("store_id"),
+                bundle.getString("primary_device_id"),
+                bundle.getString("credential"),
+                bundle.getString("display_name"),
+                bundle.getString("device_certificate_json"),
+                bundle.optString("store_time_zone_id", StoreTime.DEFAULT_ZONE_ID)
+            )
+            val wss = https.replaceFirst(Regex("^https://", RegexOption.IGNORE_CASE), "wss://")
+            require(wss.startsWith("wss://"))
+            preferences.edit().putString(KEY_RELAY_WSS, wss).apply()
+            SyncForegroundService.start(this)
+        }
     }
 
     private fun revokeSecondary() {
@@ -395,6 +443,7 @@ class SyncDeviceManagementActivity : Activity() {
         const val EXTRA_ACTOR_USER_ID = "actor_user_id"
         private const val KEY_RELAY_WSS = "relay_wss_url"
         private const val KEY_LAST_PROBE_ID = "last_transport_probe_id"
+        private const val DEFAULT_RELAY_HTTPS = "https://the-daily-shop-relay.hazem-syrian.workers.dev"
         fun intent(context: Context, actorUserId: String) =
             Intent(context, SyncDeviceManagementActivity::class.java)
                 .putExtra(EXTRA_ACTOR_USER_ID, actorUserId)
